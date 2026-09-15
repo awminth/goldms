@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+/* Enable class-based dark mode (html.dark) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Soft light palette — muted ivory, not pure white */
+@theme {
+  --color-white: #F0EDE6;
+  --color-gray-50: #E9E5DC;
+  --color-gray-100: #E0DBD1;
+  --color-gray-200: #D2CBC0;
+  --color-page: #E2DED5;
+  --color-panel: #EBE7DF;
+  --color-card: #F0EDE6;
+  --color-raised: #F5F2EB;
+  --color-line: #CDC6B9;
+}
+
+@layer base {
+  html {
+    font-size: 17px; /* slightly larger system UI type */
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: 'Outfit', 'Noto Sans Myanmar', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--color-page);
+    overflow-x: hidden;
+  }
+
+  html.dark body {
+    background-color: #121212;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: 'Cinzel', 'Noto Sans Myanmar', serif;
+  }
+
+  /* System-wide: interactive controls use pointer only (no grab/move/etc.) */
+  button,
+  a,
+  summary,
+  label,
+  select,
+  [role='button'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'],
+  [role='checkbox'],
+  [role='radio'],
+  [role='switch'],
+  [role='link'],
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset'],
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='file'],
+  input[type='image'],
+  input[type='color'],
+  input[type='range'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'],
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    cursor: pointer;
+    opacity: 0.55;
+  }
+}
+
+/* Shared surface helpers for clearer block separation */
+@layer components {
+  .ui-page {
+    background-color: var(--color-page);
+  }
+  .dark .ui-page {
+    background-color: #121212;
+  }
+
+  .ui-card {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    box-shadow: 0 1px 2px rgb(40 35 25 / 0.04);
+  }
+  .dark .ui-card {
+    background-color: #1a1a1a;
+    border-color: #2a2a2a;
+    box-shadow: none;
+  }
+
+  .ui-section {
+    background-color: var(--color-panel);
+    border: 1px solid var(--color-line);
+    border-radius: 1.25rem;
+    box-shadow: 0 1px 3px rgb(40 35 25 / 0.05);
+  }
+  .dark .ui-section {
+    background-color: #1a1a1a;
+    border-color: #2a2a2a;
+    box-shadow: none;
+  }
+
+  .ui-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .dark .ui-section-title {
+    border-bottom-color: #2a2a2a;
+  }
+
+  /* Form fields always stretch to fill their grid/flex cell */
+  main form input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  main form select,
+  main form textarea {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  main form .grid {
+    width: 100%;
+  }
+
+  main form .grid > * {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /*
+   * Master Category reference table:
+   * flat rows, generous padding, hairline horizontal dividers only
+   */
+  .data-table-shell .data-table,
+  main table:not(.ui-table-spaced):not(.data-table) {
+    width: 100%;
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
+  }
+
+  .data-table-shell .data-table thead th,
+  main table:not(.ui-table-spaced):not(.data-table) thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0.55rem 0.75rem !important;
+    background-color: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid #e5e0d6 !important;
+    border-radius: 0 !important;
+    white-space: nowrap;
+    vertical-align: middle;
+    color: #6b7280 !important;
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.01em;
+  }
+
+  .dark .data-table-shell .data-table thead th,
+  .dark main table:not(.ui-table-spaced):not(.data-table) thead th {
+    background-color: #1a1a1a !important;
+    color: #9ca3af !important;
+    border-bottom-color: #2a2a2a !important;
+  }
+
+  .data-table-shell .data-table tbody td,
+  main table:not(.ui-table-spaced):not(.data-table) tbody td {
+    padding: 0.95rem 0.75rem !important;
+    vertical-align: middle;
+    background-color: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid #ebe6dc !important;
+    border-radius: 0 !important;
+    box-shadow: none;
+  }
+
+  .dark .data-table-shell .data-table tbody td,
+  .dark main table:not(.ui-table-spaced):not(.data-table) tbody td {
+    background-color: transparent !important;
+    border-bottom-color: #2a2a2a !important;
+  }
+
+  .data-table-shell .data-table tbody tr:last-child td,
+  main table:not(.ui-table-spaced):not(.data-table) tbody tr:last-child td {
+    border-bottom: none !important;
+  }
+
+  .data-table-shell .data-table tbody tr,
+  main table:not(.ui-table-spaced):not(.data-table) tbody tr {
+    transition: background-color 120ms ease;
+  }
+
+  .data-table-shell .data-table tbody tr:hover td,
+  main table:not(.ui-table-spaced):not(.data-table) tbody tr:hover td {
+    background-color: rgb(212 175 55 / 0.06) !important;
+  }
+
+  .dark .data-table-shell .data-table tbody tr:hover td,
+  .dark main table:not(.ui-table-spaced):not(.data-table) tbody tr:hover td {
+    background-color: color-mix(in srgb, #d4af37 10%, transparent) !important;
+  }
+
+  .data-table-shell .data-table tbody tr.is-selected td {
+    background-color: rgb(212 175 55 / 0.12) !important;
+  }
+
+  .dark .data-table-shell .data-table tbody tr.is-selected td {
+    background-color: color-mix(in srgb, #d4af37 16%, transparent) !important;
+  }
+}
+
+/* Print Optimization for Gold Shop Vouchers & Pawn Tickets */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  nav, header, button, .print\:hidden {
+    display: none !important;
+  }
+
+  #printable-voucher {
+    border: 1px solid #999 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 10px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  #printable-voucher table th,
+  #printable-voucher table td {
+    padding: 4px 6px !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  #printable-voucher table {
+    border-spacing: 0 !important;
+  }
+}

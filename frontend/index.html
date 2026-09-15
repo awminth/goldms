@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marctober Tech</title>
+    <link rel="icon" type="image/webp" href="/favicon.webp" />
+    <link rel="apple-touch-icon" href="/favicon.webp" />
+    <meta name="description" content="Marctober Tech — Shwe Pyae Hlaing Gold Shop Management System (ရွှေပြည့်လှိုင် ရွှေဆိုင် စီမံခန့်ခွဲမှုစနစ်)" />
+    <meta property="og:title" content="Marctober Tech" />
+    <meta property="og:description" content="Marctober Tech — Shwe Pyae Hlaing Gold Shop Management System" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Noto+Sans+Myanmar:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Default = light; only apply dark when user previously chose it
+      try {
+        if (localStorage.getItem('shwe_gold_theme_v2') === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } catch (_) {}
+    </script>
+  </head>
+  <body class="bg-page text-[#2C2923] antialiased dark:bg-[#121212] dark:text-gray-100">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
