@@ -346,27 +346,6 @@ function mapLedger(row: RowDataPacket) {
   };
 }
 
-function mapTracking(row: RowDataPacket) {
-  return {
-    id: strId(row.id),
-    customer_id: strId(row.customer_id ?? ''),
-    customer_name: row.customer_name,
-    customer_phone: row.customer_phone,
-    reference_type: row.reference_type,
-    reference_id: strId(row.reference_id),
-    reference_no: row.reference_no,
-    tracking_type: row.tracking_type,
-    amount_due: num(row.amount_due),
-    due_date: String(row.due_date).slice(0, 10),
-    days_overdue: num(row.days_overdue),
-    interest_rate: num(row.interest_rate),
-    monthly_interest: num(row.monthly_interest),
-    status: row.status,
-    notes: row.notes ?? '',
-    created_at: toIso(row.created_at),
-  };
-}
-
 async function insertLedger(
   conn: Awaited<ReturnType<ReturnType<typeof getPool>['getConnection']>>,
   entry: {
@@ -537,7 +516,7 @@ export const shopService = {
   },
 
   async getBootstrap() {
-    const [prices, inventory, customers, transactions, orders, pawns, interestPayments, ledger, tracking, staff, categories, modules, rolePermissions, settings] =
+    const [prices, inventory, customers, transactions, orders, pawns, interestPayments, ledger, staff, categories, modules, rolePermissions, settings] =
       await Promise.all([
         this.listPrices(),
         this.listInventory(),
@@ -547,7 +526,6 @@ export const shopService = {
         this.listPawns(),
         this.listPawnInterestPayments(),
         this.listLedger(),
-        this.listTracking(),
         this.listStaff(true),
         this.listMasterCategories(false),
         this.listPermissionModules(),
@@ -564,7 +542,6 @@ export const shopService = {
       pawns,
       interestPayments,
       ledger,
-      tracking,
       staff,
       categories,
       modules,
@@ -1512,33 +1489,6 @@ export const shopService = {
         }
 
         if (remainingAmount > 0 && customerId) {
-          const monthlyInterest = Math.round((remainingAmount * interestRate) / 100);
-          const trackingType =
-            isInstallment || interestRate > 0 ? 'DELAYED_PAYMENT' : 'OUTSTANDING_CREDIT';
-          await conn.query(
-            `INSERT INTO customer_tracking (
-              customer_id, customer_name, customer_phone, reference_type, reference_id, reference_no,
-              tracking_type, amount_due, due_date, interest_rate, monthly_interest, status, notes
-            ) VALUES (
-              :customer_id, :customer_name, :customer_phone, 'TRANSACTION', :reference_id, :reference_no,
-              :tracking_type, :amount_due, :due_date, :interest_rate, :monthly_interest, 'UNPAID', :notes
-            )`,
-            {
-              customer_id: customerId,
-              customer_name: data.customer_name,
-              customer_phone: data.customer_phone,
-              reference_id: String(txnId),
-              reference_no: invoiceNo,
-              tracking_type: trackingType,
-              amount_due: remainingAmount,
-              due_date: creditDueDate,
-              interest_rate: interestRate,
-              monthly_interest: monthlyInterest,
-              notes: isInstallment
-                ? `အရစ်ကျ / အကြွေး — အတိုး ${interestRate}% (လစဉ် ≈ ${monthlyInterest.toLocaleString()} MMK)`
-                : `လက်ကျန်ငွေ ပေးသွင်းရန်`,
-            }
-          );
           await conn.query(
             `UPDATE customers SET outstanding_balance = outstanding_balance + :amt WHERE id = :id`,
             { amt: remainingAmount, id: customerId }
@@ -1604,11 +1554,6 @@ export const shopService = {
           ref: invoiceNo,
         });
       }
-
-      await conn.query(
-        `DELETE FROM customer_tracking WHERE reference_type = 'TRANSACTION' AND reference_id = :ref`,
-        { ref: String(txnId) }
-      );
 
       if (customerId && remaining > 0) {
         await conn.query(
@@ -1749,25 +1694,10 @@ export const shopService = {
         });
       }
 
-      if (num(data.remaining_balance) > 0) {
+      if (num(data.remaining_balance) > 0 && customerId) {
         await conn.query(
-          `INSERT INTO customer_tracking (
-            customer_id, customer_name, customer_phone, reference_type, reference_id, reference_no,
-            tracking_type, amount_due, due_date, status, notes
-          ) VALUES (
-            :customer_id, :customer_name, :customer_phone, 'CUSTOM_ORDER', :reference_id, :reference_no,
-            'OUTSTANDING_CREDIT', :amount_due, :due_date, 'UNPAID', :notes
-          )`,
-          {
-            customer_id: customerId,
-            customer_name: data.customer_name,
-            customer_phone: data.customer_phone,
-            reference_id: String(orderId),
-            reference_no: data.order_no,
-            amount_due: num(data.remaining_balance),
-            due_date: data.due_date,
-            notes: `အော်ဒါလက်ကျန်ငွေ (${data.description})`,
-          }
+          `UPDATE customers SET outstanding_balance = outstanding_balance + :amt WHERE id = :id`,
+          { amt: num(data.remaining_balance), id: customerId }
         );
       }
 
@@ -1812,14 +1742,6 @@ export const shopService = {
           date: new Date().toISOString().slice(0, 10),
         });
 
-        await conn.query(
-          `UPDATE customer_tracking
-           SET amount_due = :due,
-               status = CASE WHEN :due = 0 THEN 'SETTLED' ELSE 'PARTIAL' END
-           WHERE reference_type = 'CUSTOM_ORDER' AND reference_id = :ref AND status <> 'SETTLED'`,
-          { due: newBalance, ref: String(orderId) }
-        );
-
         if (rows[0].customer_id) {
           await conn.query(
             `UPDATE customers
@@ -1828,15 +1750,6 @@ export const shopService = {
             { amt: paid, id: rows[0].customer_id }
           );
         }
-      }
-
-      if (status === 'COMPLETED' || status === 'CANCELLED') {
-        await conn.query(
-          `UPDATE customer_tracking
-           SET status = 'SETTLED', amount_due = 0
-           WHERE reference_type = 'CUSTOM_ORDER' AND reference_id = :ref AND status <> 'SETTLED'`,
-          { ref: String(orderId) }
-        );
       }
 
       await conn.commit();
@@ -1924,9 +1837,6 @@ export const shopService = {
       { id: pawnId }
     );
     if (!rows[0]) throw new HttpError(404, 'Pawn record not found');
-    await getPool().query(`DELETE FROM customer_tracking WHERE reference_type = 'PAWN' AND reference_id = :ref`, {
-      ref: String(pawnId),
-    });
     await getPool().query(`DELETE FROM pawn_records WHERE id = :id`, { id: pawnId });
     return { id: String(pawnId) };
   },
@@ -2005,27 +1915,6 @@ export const shopService = {
         reference_no: String(data.pawn_ticket_no),
         date: startDate,
       });
-
-      const dueAmount = num(data.loan_amount) + num(data.accrued_interest);
-      await conn.query(
-        `INSERT INTO customer_tracking (
-          customer_id, customer_name, customer_phone, reference_type, reference_id, reference_no,
-          tracking_type, amount_due, due_date, days_overdue, status, notes
-        ) VALUES (
-          :customer_id, :customer_name, :customer_phone, 'PAWN', :reference_id, :reference_no,
-          'DELAYED_PAYMENT', :amount_due, :due_date, GREATEST(0, DATEDIFF(CURDATE(), :due_date)), 'UNPAID', :notes
-        )`,
-        {
-          customer_id: customerId,
-          customer_name: data.customer_name,
-          customer_phone: data.customer_phone,
-          reference_id: String(result.insertId),
-          reference_no: data.pawn_ticket_no,
-          amount_due: dueAmount,
-          due_date: dueDate,
-          notes: `ပေါင်နှံစာချုပ် သက်တမ်းစောင့်ကြည့် (${data.item_name})`,
-        }
-      );
 
       await conn.commit();
       const [rows] = await pool.query<RowDataPacket[]>(`SELECT * FROM pawn_records WHERE id = :id`, {
@@ -2190,11 +2079,6 @@ export const shopService = {
         reference_no: rows[0].pawn_ticket_no,
         date: redeemDate,
       });
-      await conn.query(
-        `UPDATE customer_tracking SET status = 'SETTLED', amount_due = 0
-         WHERE reference_type = 'PAWN' AND reference_id = :ref`,
-        { ref: String(pawnId) }
-      );
 
       await conn.commit();
       const [updated] = await pool.query<RowDataPacket[]>(`SELECT * FROM pawn_records WHERE id = :id`, {
@@ -2271,166 +2155,42 @@ export const shopService = {
     if (!result.affectedRows) throw new HttpError(404, 'Ledger entry not found');
   },
 
-  async listTracking() {
-    await getPool().query(
-      `UPDATE customer_tracking
-       SET days_overdue = GREATEST(0, DATEDIFF(CURDATE(), due_date))
-       WHERE status <> 'SETTLED'`
-    );
-    const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT * FROM customer_tracking ORDER BY id DESC`
-    );
-    return rows.map(mapTracking);
-  },
-
-  async addTracking(data: Record<string, unknown>) {
-    const customerId = parseOptionalId(data.customer_id);
-    const [result] = await getPool().query<ResultSetHeader>(
-      `INSERT INTO customer_tracking (
-        customer_id, customer_name, customer_phone, reference_type, reference_id, reference_no,
-        tracking_type, amount_due, due_date, days_overdue, status, notes
-      ) VALUES (
-        :customer_id, :customer_name, :customer_phone, :reference_type, :reference_id, :reference_no,
-        :tracking_type, :amount_due, :due_date, GREATEST(0, DATEDIFF(CURDATE(), :due_date)), :status, :notes
-      )`,
-      {
-        customer_id: customerId,
-        customer_name: data.customer_name,
-        customer_phone: data.customer_phone,
-        reference_type: data.reference_type,
-        reference_id: String(data.reference_id),
-        reference_no: data.reference_no,
-        tracking_type: data.tracking_type,
-        amount_due: num(data.amount_due),
-        due_date: data.due_date,
-        status: data.status ?? 'UNPAID',
-        notes: data.notes ?? '',
-      }
-    );
-    const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT * FROM customer_tracking WHERE id = :id`,
-      { id: result.insertId }
-    );
-    return mapTracking(rows[0]);
-  },
-
-  async settleTracking(id: string, amountPaid: number) {
-    const pool = getPool();
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      const trackId = parseId(id);
-      const [rows] = await conn.query<RowDataPacket[]>(
-        `SELECT * FROM customer_tracking WHERE id = :id FOR UPDATE`,
-        { id: trackId }
-      );
-      if (!rows[0]) throw new HttpError(404, 'Tracking record not found');
-
-      const newDue = Math.max(0, num(rows[0].amount_due) - amountPaid);
-      const status = newDue === 0 ? 'SETTLED' : 'PARTIAL';
-      await conn.query(
-        `UPDATE customer_tracking SET amount_due = :due, status = :status WHERE id = :id`,
-        { due: newDue, status, id: trackId }
-      );
-
-      if (rows[0].customer_id) {
-        await conn.query(
-          `UPDATE customers
-           SET outstanding_balance = GREATEST(0, outstanding_balance - :amt)
-           WHERE id = :id`,
-          { amt: amountPaid, id: rows[0].customer_id }
-        );
-      }
-
-      await insertLedger(conn, {
-        type: 'INCOME',
-        category: 'OTHER_INCOME',
-        amount: amountPaid,
-        description: `ဖောက်သည် ကျန်ငွေ/ရက်လွှဲ လာရောက်ရှင်းလင်းငွေ (Track ID: ${id})`,
-        date: new Date().toISOString().slice(0, 10),
-      });
-
-      await conn.commit();
-      const [updated] = await pool.query<RowDataPacket[]>(
-        `SELECT * FROM customer_tracking WHERE id = :id`,
-        { id: trackId }
-      );
-      return mapTracking(updated[0]);
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
-  },
-
-  async reportOutstandingCredit() {
-    await this.listTracking();
-    const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT *
-       FROM customer_tracking
-       WHERE status <> 'SETTLED'
-         AND tracking_type = 'OUTSTANDING_CREDIT'
-       ORDER BY due_date ASC, amount_due DESC`
-    );
-    const items = rows.map(mapTracking);
-    const totalDue = items.reduce((s, r) => s + r.amount_due, 0);
-    return {
-      report: 'outstanding_credit',
-      generated_at: new Date().toISOString(),
-      count: items.length,
-      total_amount_due: totalDue,
-      items,
-    };
-  },
-
-  async reportDelayedPayments() {
-    await this.listTracking();
-    const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT *
-       FROM customer_tracking
-       WHERE status <> 'SETTLED'
-         AND (
-           tracking_type = 'DELAYED_PAYMENT'
-           OR days_overdue > 0
-         )
-       ORDER BY days_overdue DESC, due_date ASC`
-    );
-    const items = rows.map(mapTracking);
-    const totalDue = items.reduce((s, r) => s + r.amount_due, 0);
-    const aging = {
-      d0_7: items.filter((i) => (i.days_overdue || 0) <= 7).length,
-      d8_30: items.filter((i) => (i.days_overdue || 0) > 7 && (i.days_overdue || 0) <= 30).length,
-      d31_plus: items.filter((i) => (i.days_overdue || 0) > 30).length,
-    };
-    return {
-      report: 'delayed_installment',
-      generated_at: new Date().toISOString(),
-      count: items.length,
-      total_amount_due: totalDue,
-      aging,
-      items,
-    };
-  },
-
   async reportSummary() {
-    const [outstanding, delayed, customers] = await Promise.all([
-      this.reportOutstandingCredit(),
-      this.reportDelayedPayments(),
+    const [customers, inventory, transactions, orders, pawns] = await Promise.all([
       this.listCustomers(),
+      this.listInventory(),
+      this.listTransactions(),
+      this.listOrders(),
+      this.listPawns(),
     ]);
+    const today = new Date().toISOString().slice(0, 10);
+    const todaySales = transactions.filter(
+      (t) => t.transaction_type === 'SALE' && String(t.created_at).slice(0, 10) === today
+    );
+    const todayPurchases = transactions.filter(
+      (t) => t.transaction_type === 'PURCHASE' && String(t.created_at).slice(0, 10) === today
+    );
+    const inStock = inventory.filter((i) => i.status === 'IN_STOCK');
     const customersWithBalance = customers.filter((c) => c.outstanding_balance > 0);
+    const openOrders = orders.filter((o) => o.status === 'PENDING' || o.status === 'IN_PRODUCTION');
+    const activePawns = pawns.filter((p) => p.status === 'ACTIVE' || p.status === 'OVERDUE');
+
     return {
       generated_at: new Date().toISOString(),
-      outstanding_credit: {
-        count: outstanding.count,
-        total: outstanding.total_amount_due,
+      today_sales: {
+        count: todaySales.length,
+        total: todaySales.reduce((s, t) => s + t.paid_amount, 0),
       },
-      delayed_payments: {
-        count: delayed.count,
-        total: delayed.total_amount_due,
-        aging: delayed.aging,
+      today_purchases: {
+        count: todayPurchases.length,
+        total: todayPurchases.reduce((s, t) => s + t.paid_amount, 0),
       },
+      stock: {
+        count: inStock.length,
+        estimated_value: inStock.reduce((s, i) => s + (i.selling_price_estimated || 0), 0),
+      },
+      open_orders: openOrders.length,
+      active_pawns: activePawns.length,
       customers_with_balance: customersWithBalance.length,
       customer_balance_total: customersWithBalance.reduce((s, c) => s + c.outstanding_balance, 0),
     };

@@ -301,26 +301,6 @@ export const shopController = {
     res.json({ success: true });
   }),
 
-  listTracking: asyncHandler(async (req, res) => {
-    const items = await shopService.listTracking();
-    res.json({ success: true, data: maybePaginate(req, items) });
-  }),
-
-  addTracking: asyncHandler(async (req, res) => {
-    const data = await shopService.addTracking(req.body);
-    res.status(201).json({ success: true, data });
-  }),
-
-  settleTracking: asyncHandler(async (req, res) => {
-    const { amountPaid } = req.body as { amountPaid?: number };
-    if (amountPaid === undefined) {
-      res.status(400).json({ success: false, message: 'amountPaid required' });
-      return;
-    }
-    const data = await shopService.settleTracking(req.params.id, Number(amountPaid));
-    res.json({ success: true, data });
-  }),
-
   resetDemo: asyncHandler(async (_req, res) => {
     const data = await shopService.resetDemoData();
     res.json({ success: true, data });
@@ -342,34 +322,6 @@ export const shopController = {
   revalueInventory: asyncHandler(async (_req, res) => {
     const data = await shopService.revalueInStockInventory();
     res.json({ success: true, data });
-  }),
-
-  reportOutstanding: asyncHandler(async (req, res) => {
-    const report = await shopService.reportOutstandingCredit();
-    if (req.query.page != null || req.query.pageSize != null || req.query.limit != null) {
-      const { page, pageSize } = parsePagination(req.query as Record<string, unknown>);
-      const paged = paginateSlice(report.items, page, pageSize);
-      res.json({
-        success: true,
-        data: { ...report, items: paged.items, page: paged.page, pageSize: paged.pageSize, totalPages: paged.totalPages },
-      });
-      return;
-    }
-    res.json({ success: true, data: report });
-  }),
-
-  reportDelayed: asyncHandler(async (req, res) => {
-    const report = await shopService.reportDelayedPayments();
-    if (req.query.page != null || req.query.pageSize != null || req.query.limit != null) {
-      const { page, pageSize } = parsePagination(req.query as Record<string, unknown>);
-      const paged = paginateSlice(report.items, page, pageSize);
-      res.json({
-        success: true,
-        data: { ...report, items: paged.items, page: paged.page, pageSize: paged.pageSize, totalPages: paged.totalPages },
-      });
-      return;
-    }
-    res.json({ success: true, data: report });
   }),
 
   reportSummary: asyncHandler(async (_req, res) => {

@@ -28,6 +28,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
     refreshData,
     currentUser,
     logout,
+    can,
   } = useGoldShop();
 
   const [isEditingPrices, setIsEditingPrices] = useState(false);
@@ -158,13 +159,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                     </span>
                   </div>
                 )}
-                <button
-                  onClick={startEditPrices}
-                  className="ml-1 p-1 text-gray-400 hover:text-[#D4AF37] dark:hover:text-[#FFD700] transition"
-                  title="ရွှေဈေး ပြင်ဆင်ရန်"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
+                {can('prices', 'update') && (
+                  <button
+                    onClick={startEditPrices}
+                    className="ml-1 p-1 text-gray-400 hover:text-[#D4AF37] dark:hover:text-[#FFD700] transition"
+                    title="ရွှေဈေး ပြင်ဆင်ရန်"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -191,23 +191,6 @@ export async function seedDatabase(pool: Pool): Promise<void> {
       (5, 'EXPENSE', 'EQUIPMENT_ACID', 95000, 'ရွှေအရည်ကျို အက်ဆစ် (ရွှေစမ်းရည်) နှင့် ပန်းထိမ်သုံး ပစ္စည်းများ ဝယ်ယူစရိတ်', NULL, '2026-09-09')
     `);
 
-    await conn.query(`
-      INSERT INTO customer_tracking (
-        id, customer_id, customer_name, customer_phone, reference_type, reference_id, reference_no,
-        tracking_type, amount_due, due_date, days_overdue, status, notes, created_at
-      ) VALUES
-      (1, 1, 'ဒေါ်ခင်လှိုင်', '09-450012345', 'TRANSACTION', 'prior-1', 'INV-202608-0112',
-        'OUTSTANDING_CREDIT', 450000, '2026-09-12', 0, 'PARTIAL', 'ကျောက်စီလက်ကောက် ဝယ်ယူမှုမှ ကျန်ငွေ (ဖုန်းဆက်သတိပေးထားသည်)', '2026-08-28 10:00:00'),
-      (2, 2, 'ဦးကျော်ဇင်ဝင်း', '09-795678901', 'CUSTOM_ORDER', '1', 'ORD-202609-301',
-        'OUTSTANDING_CREDIT', 6750000, '2026-09-05', 0, 'UNPAID', 'Order ပစ္စည်း အထည်ပြီးစီးပြီဖြစ်၍ ကျန်ငွေ လာရောက်ရှင်းယူရန် လိုအပ်', '2026-09-05 08:00:00'),
-      (3, 4, 'ဒေါ်နီလာဆွေ', '09-421155990', 'TRANSACTION', 'prior-2', 'INV-202608-0554',
-        'OUTSTANDING_CREDIT', 780000, '2026-09-07', 0, 'UNPAID', 'လက်ကျန်ငွေ ၇ သိန်း ၈ သောင်း မလွှဲရသေး', '2026-08-30 14:00:00'),
-      (4, 2, 'ဦးကျော်ဇင်ဝင်း', '09-795678901', 'CUSTOM_ORDER', '1', 'ORD-202609-301',
-        'DELAYED_PAYMENT', 6750000, '2026-09-05', 5, 'UNPAID', 'အော်ဒါ ထုတ်ယူရမည့်ရက် စက်တင်ဘာ ၅ ရက်နေ့ထက် ၅ ရက်ကျော်လွန်နေပါသည်', '2026-09-06 00:00:00'),
-      (5, 4, 'ဒေါ်နီလာဆွေ', '09-421155990', 'PAWN', '1', 'PWN-8801',
-        'DELAYED_PAYMENT', 1484000, '2026-09-10', 1, 'UNPAID', 'ရွှေလက်စွပ် ပေါင်နှံစာချုပ် သက်တမ်းစေ့ပြီး အတိုး/အရင်း လာမရွေးသေးပါ', '2026-09-10 00:00:00')
-    `);
-
     await conn.commit();
     console.log('Database seeded with demo data.');
   } catch (err) {

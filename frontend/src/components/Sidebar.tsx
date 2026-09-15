@@ -38,6 +38,7 @@ const SETUP_TABS: ActiveTab[] = [
   'categories',
   'item-types',
   'users',
+  'customers',
   'permissions',
   'unit-conversion',
 ];
@@ -202,6 +203,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       labelEN: 'Item Types',
       icon: Package,
       visible: can('master', 'read'),
+    },
+    {
+      id: 'customers' as ActiveTab,
+      labelMM: 'ဖောက်သည်',
+      labelEN: 'Customers',
+      icon: Users,
+      visible: can('customers', 'read'),
     },
     {
       id: 'users' as ActiveTab,

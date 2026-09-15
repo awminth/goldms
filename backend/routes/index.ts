@@ -63,15 +63,9 @@ router.post('/ledger', shopController.addLedger);
 router.put('/ledger/:id', shopController.updateLedger);
 router.delete('/ledger/:id', shopController.deleteLedger);
 
-router.get('/tracking', shopController.listTracking);
-router.post('/tracking', shopController.addTracking);
-router.post('/tracking/:id/settle', shopController.settleTracking);
-
 router.post('/calc/valuation', shopController.calcValuation);
 router.post('/calc/thai', shopController.calcThai);
 
-router.get('/reports/outstanding-credit', shopController.reportOutstanding);
-router.get('/reports/delayed', shopController.reportDelayed);
 router.get('/reports/summary', shopController.reportSummary);
 
 export default router;

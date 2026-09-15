@@ -7,7 +7,6 @@ import type {
   PawnRecord,
   PawnInterestPayment,
   FinancialLedger,
-  CustomerTracking,
   StaffUser,
   GoldPurity,
   MasterCategory,
@@ -41,7 +40,6 @@ export type BootstrapData = {
   pawns: PawnRecord[];
   interestPayments?: PawnInterestPayment[];
   ledger: FinancialLedger[];
-  tracking: CustomerTracking[];
   staff: StaffUser[];
   categories?: MasterCategory[];
   modules?: PermissionModule[];
@@ -236,18 +234,6 @@ export const api = {
   deleteLedgerEntry: (id: string) =>
     request<void>(`/ledger/${id}`, { method: 'DELETE' }),
 
-  addCustomerTracking: (entry: Omit<CustomerTracking, 'id' | 'created_at'>) =>
-    request<CustomerTracking>('/tracking', {
-      method: 'POST',
-      body: JSON.stringify(entry),
-    }),
-
-  settleCustomerTracking: (id: string, amountPaid: number) =>
-    request<CustomerTracking>(`/tracking/${id}/settle`, {
-      method: 'POST',
-      body: JSON.stringify({ amountPaid }),
-    }),
-
   calcValuation: (body: Record<string, unknown>) =>
     request<Record<string, unknown>>('/calc/valuation', {
       method: 'POST',
@@ -266,36 +252,18 @@ export const api = {
   revalueInventory: () =>
     request<{ updated: number }>('/inventory/revalue', { method: 'POST' }),
 
-  reportOutstandingCredit: () =>
-    request<OutstandingReport>('/reports/outstanding-credit'),
-
-  reportDelayed: () => request<DelayedReport>('/reports/delayed'),
-
   reportSummary: () => request<ReportSummary>('/reports/summary'),
 
   resetToDemoData: () => request<BootstrapData>('/reset-demo', { method: 'POST' }),
 };
 
-export type OutstandingReport = {
-  report: string;
-  generated_at: string;
-  count: number;
-  total_amount_due: number;
-  items: CustomerTracking[];
-};
-
-export type DelayedReport = OutstandingReport & {
-  aging: { d0_7: number; d8_30: number; d31_plus: number };
-};
-
 export type ReportSummary = {
   generated_at: string;
-  outstanding_credit: { count: number; total: number };
-  delayed_payments: {
-    count: number;
-    total: number;
-    aging: { d0_7: number; d8_30: number; d31_plus: number };
-  };
+  today_sales?: { count: number; total: number };
+  today_purchases?: { count: number; total: number };
+  stock?: { count: number; estimated_value: number };
+  open_orders?: number;
+  active_pawns?: number;
   customers_with_balance: number;
   customer_balance_total: number;
 };

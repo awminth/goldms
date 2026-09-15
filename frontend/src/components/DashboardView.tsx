@@ -28,8 +28,13 @@ function isSameLocalDay(iso: string, ref = new Date()) {
   );
 }
 
+function isOverduePawn(r: { status: string; due_date: string }, today: string): boolean {
+  if (r.status === 'REDEEMED' || r.status === 'CONFISCATED') return false;
+  return r.status === 'OVERDUE' || r.due_date < today;
+}
+
 export const DashboardView: React.FC = () => {
-  const { goldPrices, inventory, transactions, customerTracking, language, customOrders } =
+  const { goldPrices, inventory, transactions, customers, pawnRecords, language, customOrders } =
     useGoldShop();
 
   const [summary, setSummary] = useState<ReportSummary | null>(null);
@@ -58,9 +63,15 @@ export const DashboardView: React.FC = () => {
   const todaySales = todayTxns.filter((t) => t.transaction_type === 'SALE');
   const todayBuybacks = todayTxns.filter((t) => t.transaction_type === 'PURCHASE');
 
-  const todaySalesTotal = todaySales.reduce((s, t) => s + t.paid_amount, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+
+  const todaySalesTotal =
+    summary?.today_sales?.total ?? todaySales.reduce((s, t) => s + t.paid_amount, 0);
   const todaySalesGross = todaySales.reduce((s, t) => s + t.total_amount, 0);
-  const todayBuyTotal = todayBuybacks.reduce((s, t) => s + t.paid_amount, 0);
+  const todaySalesCount = summary?.today_sales?.count ?? todaySales.length;
+  const todayBuyTotal =
+    summary?.today_purchases?.total ?? todayBuybacks.reduce((s, t) => s + t.paid_amount, 0);
+  const todayBuyCount = summary?.today_purchases?.count ?? todayBuybacks.length;
   const todayCreditIssued = todaySales.reduce((s, t) => s + (t.remaining_amount || 0), 0);
 
   const totalStockItems = inventory.filter((i) => i.status === 'IN_STOCK');
@@ -70,38 +81,28 @@ export const DashboardView: React.FC = () => {
       0
     )
   );
-  const totalStockEstimatedValue = totalStockItems.reduce(
-    (sum, item) => sum + (item.selling_price_estimated || 0),
-    0
+  const totalStockEstimatedValue =
+    summary?.stock?.estimated_value ??
+    totalStockItems.reduce((sum, item) => sum + (item.selling_price_estimated || 0), 0);
+  const totalStockCount = summary?.stock?.count ?? totalStockItems.length;
+
+  const customerBalanceTotal =
+    summary?.customer_balance_total ??
+    customers.reduce((sum, c) => sum + (c.outstanding_balance || 0), 0);
+
+  const customersWithBalance =
+    summary?.customers_with_balance ??
+    customers.filter((c) => c.outstanding_balance > 0).length;
+
+  const overduePawns = useMemo(
+    () => pawnRecords.filter((p) => isOverduePawn(p, todayStr)),
+    [pawnRecords, todayStr]
   );
+  const pawnOverdueCount = overduePawns.length;
 
-  const creditDue =
-    summary?.outstanding_credit.total ??
-    customerTracking
-      .filter((t) => t.tracking_type === 'OUTSTANDING_CREDIT' && t.status !== 'SETTLED')
-      .reduce((sum, t) => sum + t.amount_due, 0);
-
-  const creditCount =
-    summary?.outstanding_credit.count ??
-    customerTracking.filter(
-      (t) => t.tracking_type === 'OUTSTANDING_CREDIT' && t.status !== 'SETTLED'
-    ).length;
-
-  const overdueCount =
-    summary?.delayed_payments.count ??
-    customerTracking.filter(
-      (t) => t.tracking_type === 'DELAYED_PAYMENT' && t.status !== 'SETTLED'
-    ).length;
-
-  const overdueTotal =
-    summary?.delayed_payments.total ??
-    customerTracking
-      .filter((t) => t.tracking_type === 'DELAYED_PAYMENT' && t.status !== 'SETTLED')
-      .reduce((sum, t) => sum + t.amount_due, 0);
-
-  const pendingOrders = customOrders.filter(
-    (o) => o.status === 'PENDING' || o.status === 'IN_PRODUCTION'
-  ).length;
+  const pendingOrders =
+    summary?.open_orders ??
+    customOrders.filter((o) => o.status === 'PENDING' || o.status === 'IN_PRODUCTION').length;
 
   const dateLabel = today.toLocaleDateString(language === 'MM' ? 'my-MM' : 'en-GB', {
     weekday: 'short',
@@ -115,36 +116,43 @@ export const DashboardView: React.FC = () => {
       key: 'sales',
       label: language === 'MM' ? 'ယနေ့ အရောင်း' : 'Today Sales',
       value: formatMMK(todaySalesTotal),
-      hint: `${todaySales.length} ${language === 'MM' ? 'ဘောင်ချာ' : 'vouchers'} · ${formatMMK(todaySalesGross)}`,
+      hint: `${todaySalesCount} ${language === 'MM' ? 'ဘောင်ချာ' : 'vouchers'} · ${formatMMK(todaySalesGross)}`,
       icon: ArrowUpRight,
     },
     {
       key: 'buy',
       label: language === 'MM' ? 'ယနေ့ အဝယ်' : 'Today Buyback',
       value: formatMMK(todayBuyTotal),
-      hint: `${todayBuybacks.length} ${language === 'MM' ? 'စောင်' : 'txns'}`,
+      hint: `${todayBuyCount} ${language === 'MM' ? 'စောင်' : 'txns'}`,
       icon: ArrowDownLeft,
     },
     {
       key: 'stock',
       label: language === 'MM' ? 'စတော့လက်ကျန်' : 'Stock on Hand',
       value: language === 'MM' ? formatKPYMyanmar(totalStockKpy) : formatKPYEnglish(totalStockKpy),
-      hint: `${totalStockItems.length} ${language === 'MM' ? 'ခု' : 'pcs'} · ${formatMMK(totalStockEstimatedValue)}`,
+      hint: `${totalStockCount} ${language === 'MM' ? 'ခု' : 'pcs'} · ${formatMMK(totalStockEstimatedValue)}`,
       icon: Gem,
     },
     {
-      key: 'credit',
-      label: language === 'MM' ? 'ငွေထပ်လွှဲ' : 'Outstanding',
-      value: formatMMK(creditDue),
-      hint: `${creditCount} ${language === 'MM' ? 'စာရင်း' : 'accounts'}`,
+      key: 'customer-balance',
+      label: language === 'MM' ? 'ဖောက်သည် လက်ကျန်ငွေ' : 'Customer Balances',
+      value: formatMMK(customerBalanceTotal),
+      hint: `${customersWithBalance} ${language === 'MM' ? 'ဦး' : 'cust.'}`,
       icon: Coins,
       accent: 'text-rose-600 dark:text-rose-400',
     },
     {
-      key: 'overdue',
-      label: language === 'MM' ? 'ရက်လွှဲ' : 'Delayed',
-      value: String(overdueCount),
-      hint: formatMMK(overdueTotal),
+      key: 'pawn-overdue',
+      label: language === 'MM' ? 'အပေါင် ရက်လွန်' : 'Pawn Overdue',
+      value: String(pawnOverdueCount),
+      hint:
+        pawnOverdueCount > 0
+          ? language === 'MM'
+            ? 'စာရင်းကြည့်ရန် အပေါင်သို့'
+            : 'view list in Pawn'
+          : language === 'MM'
+            ? 'ရက်လွန် မရှိ'
+            : 'none overdue',
       icon: Clock,
       accent: 'text-amber-700 dark:text-amber-400',
     },
@@ -307,46 +315,39 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
 
-          {/* Credit / delayed snapshot */}
+          {/* Balances / pawn snapshot */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div className="rounded-xl border border-line dark:border-gray-800 p-3">
               <div className="text-gray-500 font-semibold mb-1">
-                {language === 'MM' ? 'ငွေထပ်လွှဲ စုစုပေါင်း' : 'Outstanding total'}
+                {language === 'MM' ? 'ဖောက်သည် လက်ကျန်ငွေ' : 'Customer balance total'}
               </div>
               <div className="font-mono font-bold text-rose-600 dark:text-rose-400">
-                {formatMMK(creditDue)}
+                {formatMMK(customerBalanceTotal)}
               </div>
               <div className="text-[10px] text-gray-400 mt-0.5">
-                {creditCount} {language === 'MM' ? 'စာရင်း' : 'records'}
+                {customersWithBalance} {language === 'MM' ? 'ဦး' : 'customers'}
               </div>
             </div>
             <div className="rounded-xl border border-line dark:border-gray-800 p-3">
               <div className="text-gray-500 font-semibold mb-1">
-                {language === 'MM' ? 'ရက်လွှဲ စုစုပေါင်း' : 'Delayed total'}
+                {language === 'MM' ? 'အပေါင် ရက်လွန်' : 'Pawn overdue'}
               </div>
               <div className="font-mono font-bold text-amber-700 dark:text-amber-400">
-                {formatMMK(overdueTotal)}
+                {pawnOverdueCount}
               </div>
               <div className="text-[10px] text-gray-400 mt-0.5">
-                {overdueCount} {language === 'MM' ? 'မှုခင်း' : 'cases'}
-                {summary?.delayed_payments.aging
-                  ? ` · 0–7: ${summary.delayed_payments.aging.d0_7} / 8–30: ${summary.delayed_payments.aging.d8_30} / 31+: ${summary.delayed_payments.aging.d31_plus}`
-                  : ''}
+                {language === 'MM' ? 'လက်ရှိ အပေါင်များ' : 'active pawn records'}
               </div>
             </div>
             <div className="rounded-xl border border-line dark:border-gray-800 p-3">
               <div className="text-gray-500 font-semibold mb-1">
-                {language === 'MM' ? 'အကြွေးရှိ ဖောက်သည်' : 'Customers w/ balance'}
+                {language === 'MM' ? 'Order လက်ကျန်' : 'Open orders'}
               </div>
               <div className="font-mono font-bold text-gray-900 dark:text-white">
-                {summary?.customers_with_balance ?? '—'}
+                {pendingOrders}
               </div>
               <div className="text-[10px] text-gray-400 mt-0.5">
-                {summary
-                  ? formatMMK(summary.customer_balance_total)
-                  : language === 'MM'
-                    ? 'အစီရင်ခံစာမှ'
-                    : 'from reports'}
+                {language === 'MM' ? 'စရံ / ထုတ်လုပ်ဆဲ' : 'pending / in production'}
               </div>
             </div>
           </div>

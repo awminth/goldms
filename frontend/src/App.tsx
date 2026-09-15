@@ -39,8 +39,8 @@ const ALL_TABS: ActiveTab[] = [
   'pawn-interest-new',
   'pawn-redeem-new',
   'ledger',
-  'tracking',
   'reports',
+  'customers',
   'users',
   'permissions',
   'unit-conversion',
@@ -193,6 +193,9 @@ const MainLayout: React.FC = () => {
           )}
           {activeTab === 'ledger' && can('ledger', 'read') && <LedgerView />}
           {activeTab === 'reports' && can('reports', 'read') && <ReportsView />}
+          {activeTab === 'customers' && can('customers', 'read') && (
+            <SetupView section="settings" initialTab="customers" />
+          )}
           {activeTab === 'users' && can('staff', 'read') && (
             <SetupView section="settings" initialTab="users" />
           )}

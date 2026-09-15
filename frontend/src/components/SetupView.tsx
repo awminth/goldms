@@ -7,6 +7,7 @@ import {
   RolePermission,
   StaffUser,
   UserRole,
+  Customer,
 } from '../types/gold';
 import {
   Settings2,
@@ -22,13 +23,14 @@ import {
   Search,
   Power,
   Scale,
+  Contact,
 } from 'lucide-react';
+import { formatMMK, KYAT_TO_GRAMS, gramsToKpy } from '../utils/goldCalculations';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { PaginationBar } from './PaginationBar';
 import { ModalOverlay } from './ModalOverlay';
-import { KYAT_TO_GRAMS, gramsToKpy } from '../utils/goldCalculations';
 
-type SetupTab = 'categories' | 'item-types' | 'users' | 'permissions' | 'unit-conversion';
+type SetupTab = 'categories' | 'item-types' | 'users' | 'customers' | 'permissions' | 'unit-conversion';
 type SetupSection = 'categories' | 'item-types' | 'settings';
 
 const ROLES: UserRole[] = ['OWNER', 'MANAGER', 'CASHIER'];
@@ -46,6 +48,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     language,
     masterCategories,
     staffUsers,
+    customers,
     permissionModules,
     rolePermissions,
     shopSettings,
@@ -57,6 +60,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
     createStaffUser,
     updateStaffUser,
     deleteStaffUser,
+    addCustomer,
+    updateCustomer,
+    deleteCustomer,
     saveRolePermissions,
     updateShopSettings,
   } = useGoldShop();
@@ -98,11 +104,18 @@ export const SetupView: React.FC<SetupViewProps> = ({
           ? 'လက်စွပ်၊ ဆွဲကြိုး စသည့် ပစ္စည်းအမျိုးအစားများကို စီမံပါ'
           : 'Manage jewelry item types (rings, necklaces, etc.)'
         : language === 'MM'
-          ? 'အသုံးပြုသူ၊ ယူနစ်ပြောင်းလဲမှုနှင့် CRUD ခွင့်ပြုချက်'
-          : 'Staff, unit conversion, and CRUD permissions';
+          ? 'ဖောက်သည်၊ အသုံးပြုသူ၊ ယူနစ်နှင့် CRUD ခွင့်ပြုချက်'
+          : 'Customers, staff, unit conversion, and permissions';
 
   const showSettingsTabs = section === 'settings';
   const settingsTabs = [
+    {
+      id: 'customers' as SetupTab,
+      mm: 'ဖောက်သည်',
+      en: 'Customers',
+      icon: Contact,
+      visible: can('customers', 'read'),
+    },
     {
       id: 'users' as SetupTab,
       mm: 'အသုံးပြုသူအကောင့်',
@@ -199,6 +212,21 @@ export const SetupView: React.FC<SetupViewProps> = ({
           onCreate={createMasterCategory}
           onUpdate={updateMasterCategory}
           onDelete={deleteMasterCategory}
+        />
+      )}
+
+      {section === 'settings' && tab === 'customers' && can('customers', 'read') && (
+        <CustomersPanel
+          language={language}
+          customers={customers}
+          canCreate={can('customers', 'create')}
+          canUpdate={can('customers', 'update')}
+          canDelete={can('customers', 'delete')}
+          onCreate={async (name, phone, address) => {
+            await addCustomer(name, phone, address);
+          }}
+          onUpdate={updateCustomer}
+          onDelete={deleteCustomer}
         />
       )}
 
@@ -873,6 +901,252 @@ function CategoriesPanel({
           onPageSizeChange={pager.setPageSize}
         />
       </div>
+    </div>
+  );
+}
+
+function CustomersPanel({
+  language,
+  customers,
+  canCreate,
+  canUpdate,
+  canDelete,
+  onCreate,
+  onUpdate,
+  onDelete,
+}: {
+  language: string;
+  customers: Customer[];
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  onCreate: (name: string, phone: string, address: string) => Promise<void>;
+  onUpdate: (id: string, updates: Partial<Customer>) => Promise<Customer>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const blank = { name: '', phone: '', address: '' };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        (c.address || '').toLowerCase().includes(q)
+    );
+  }, [customers, query]);
+
+  const pager = useClientPagination(filtered, [query, customers.length]);
+
+  const openNew = () => {
+    setEditingId(null);
+    setForm(blank);
+    setShowForm(true);
+  };
+
+  const openEdit = (c: Customer) => {
+    setEditingId(c.id);
+    setForm({ name: c.name, phone: c.phone, address: c.address || '' });
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setEditingId(null);
+    setForm(blank);
+    setShowForm(false);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) return;
+    setBusy(true);
+    try {
+      if (editingId) {
+        await onUpdate(editingId, {
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          address: form.address.trim(),
+        });
+      } else {
+        await onCreate(form.name.trim(), form.phone.trim(), form.address.trim());
+      }
+      closeForm();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 p-4 flex flex-wrap gap-2 items-center justify-between">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={language === 'MM' ? 'အမည် / ဖုန်း ရှာရန်…' : 'Search name / phone…'}
+            className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212]"
+          />
+        </div>
+        {canCreate && (
+          <button
+            type="button"
+            onClick={openNew}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white text-xs font-bold flex items-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            {language === 'MM' ? 'ဖောက်သည် အသစ်' : 'Add Customer'}
+          </button>
+        )}
+      </div>
+
+      <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 dark:bg-[#141414] text-gray-500">
+            <tr>
+              <th className="text-left px-4 py-3">{language === 'MM' ? 'အမည်' : 'Name'}</th>
+              <th className="text-left px-4 py-3">{language === 'MM' ? 'ဖုန်း' : 'Phone'}</th>
+              <th className="text-left px-4 py-3">{language === 'MM' ? 'လိပ်စာ' : 'Address'}</th>
+              <th className="text-right px-4 py-3">{language === 'MM' ? 'လက်ကျန်' : 'Balance'}</th>
+              <th className="text-center px-4 py-3 w-28">{language === 'MM' ? 'လုပ်ဆောင်ချက်' : 'Actions'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pager.pageItems.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-center py-10 text-gray-400">
+                  {language === 'MM' ? 'ဖောက်သည်မရှိပါ' : 'No customers'}
+                </td>
+              </tr>
+            ) : (
+              pager.pageItems.map((c) => (
+                <tr key={c.id} className="border-t border-gray-100 dark:border-gray-900">
+                  <td className="px-4 py-2.5 font-semibold text-gray-900 dark:text-white">{c.name}</td>
+                  <td className="px-4 py-2.5 font-mono">{c.phone}</td>
+                  <td className="px-4 py-2.5 text-gray-500 max-w-[220px] truncate">{c.address}</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-[#996515]">
+                    {formatMMK(c.outstanding_balance || 0)}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center justify-center gap-1">
+                      {canUpdate && (
+                        <button
+                          type="button"
+                          onClick={() => openEdit(c)}
+                          className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                language === 'MM'
+                                  ? `${c.name} ကို ဖျက်မလား?`
+                                  : `Delete ${c.name}?`
+                              )
+                            ) {
+                              void onDelete(c.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+        <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-900">
+          <PaginationBar
+            language={language === 'MM' ? 'MM' : 'EN'}
+            page={pager.page}
+            totalPages={pager.totalPages}
+            total={pager.total}
+            from={pager.from}
+            to={pager.to}
+            pageSize={pager.pageSize}
+            onPageChange={pager.setPage}
+            onPageSizeChange={pager.setPageSize}
+          />
+        </div>
+      </div>
+
+      {showForm && (
+        <ModalOverlay onBackdropClick={closeForm}>
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl w-full max-w-md border border-gray-200 dark:border-gray-800 p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm">
+                {editingId
+                  ? language === 'MM'
+                    ? 'ဖောက်သည် ပြင်မည်'
+                    : 'Edit Customer'
+                  : language === 'MM'
+                    ? 'ဖောက်သည် အသစ်'
+                    : 'New Customer'}
+              </h3>
+              <button type="button" onClick={closeForm} className="p-1 text-gray-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <label className="block text-[11px] font-bold text-gray-500">
+              {language === 'MM' ? 'အမည်' : 'Name'}
+              <input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-sm"
+              />
+            </label>
+            <label className="block text-[11px] font-bold text-gray-500">
+              {language === 'MM' ? 'ဖုန်း' : 'Phone'}
+              <input
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-sm"
+              />
+            </label>
+            <label className="block text-[11px] font-bold text-gray-500">
+              {language === 'MM' ? 'လိပ်စာ' : 'Address'}
+              <textarea
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                rows={2}
+                className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-sm"
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={closeForm}
+                className="px-3 py-2 rounded-xl text-xs font-bold border border-gray-200 dark:border-gray-700"
+              >
+                {language === 'MM' ? 'ပယ်ဖျက်' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={busy || !form.name.trim()}
+                onClick={() => void handleSave()}
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-[#D4AF37] text-white disabled:opacity-50 flex items-center gap-1"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {language === 'MM' ? 'သိမ်းမည်' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
     </div>
   );
 }

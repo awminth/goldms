@@ -11,7 +11,6 @@ export const PERMISSION_MODULES = [
   { key: 'reports', name_mm: 'အစီရင်ခံစာများ', name_en: 'Reports', sort: 70 },
   { key: 'prices', name_mm: 'နေ့စဉ်ရွှေဈေး', name_en: 'Daily Gold Prices', sort: 80 },
   { key: 'customers', name_mm: 'ဖောက်သည်', name_en: 'Customers', sort: 90 },
-  { key: 'tracking', name_mm: 'ငွေထပ်လွှဲ / ရက်လွှဲ', name_en: 'Credit & Delayed Tracking', sort: 100 },
   { key: 'staff', name_mm: 'အသုံးပြုသူအကောင့်', name_en: 'User Accounts', sort: 110 },
   { key: 'master', name_mm: 'Categories / ပစ္စည်းအမျိုးအစား', name_en: 'Categories & Item Types', sort: 120 },
   { key: 'unit_conversion', name_mm: 'ယူနစ်ပြောင်းလဲမှု', name_en: 'Unit Conversion', sort: 125 },
@@ -234,7 +233,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, Crud>> = {
     reports: READ,
     prices: RU,
     customers: ALL,
-    tracking: CRU,
     staff: CRU,
     master: ALL,
     unit_conversion: RU,
@@ -251,7 +249,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, Crud>> = {
     reports: READ,
     prices: READ,
     customers: CRU,
-    tracking: RU,
     staff: NONE,
     master: NONE,
     unit_conversion: READ,
@@ -418,6 +415,18 @@ export async function ensureMasterAndPermissions(pool: Pool): Promise<void> {
       [m.key, m.name_mm, m.name_en, m.sort]
     );
   }
+
+  // Drop retired modules (e.g. tracking) from existing DBs
+  const keepKeys = PERMISSION_MODULES.map((m) => m.key);
+  const placeholders = keepKeys.map(() => '?').join(',');
+  await pool.query(
+    `DELETE FROM role_permissions WHERE module_key NOT IN (${placeholders})`,
+    keepKeys
+  );
+  await pool.query(
+    `DELETE FROM permission_modules WHERE module_key NOT IN (${placeholders})`,
+    keepKeys
+  );
 
   // Always upsert defaults so new GOLD_CLASS rows appear on existing installs
   await ensureDefaultCategories(pool);

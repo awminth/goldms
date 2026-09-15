@@ -28,7 +28,7 @@ export type ActiveTab =
   | 'pawn-interest-new'
   | 'pawn-redeem-new'
   | 'ledger'
-  | 'tracking'
+  | 'customers'
   | 'reports'
   | 'users'
   | 'permissions'

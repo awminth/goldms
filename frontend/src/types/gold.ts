@@ -232,25 +232,6 @@ export interface FinancialLedger {
   date: string;
 }
 
-export interface CustomerTracking {
-  id: string;
-  customer_id: string;
-  customer_name: string;
-  customer_phone: string;
-  reference_type: 'TRANSACTION' | 'CUSTOM_ORDER' | 'PAWN';
-  reference_id: string;
-  reference_no: string;
-  tracking_type: 'OUTSTANDING_CREDIT' | 'DELAYED_PAYMENT';
-  amount_due: number;
-  due_date: string;
-  days_overdue?: number;
-  interest_rate?: number;
-  monthly_interest?: number;
-  status: 'UNPAID' | 'PARTIAL' | 'SETTLED';
-  notes: string;
-  created_at: string;
-}
-
 export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER';
 export type PermissionAction = 'create' | 'read' | 'update' | 'delete';
 export type CategoryGroup = 'PRODUCT' | 'GOLD_CLASS' | 'OTHER';

@@ -8,7 +8,6 @@ import {
   PawnRecord,
   PawnInterestPayment,
   FinancialLedger,
-  CustomerTracking,
   GoldPurity,
   StaffUser,
   MasterCategory,
@@ -31,7 +30,6 @@ interface GoldShopContextType {
   pawnRecords: PawnRecord[];
   pawnInterestPayments: PawnInterestPayment[];
   ledger: FinancialLedger[];
-  customerTracking: CustomerTracking[];
   staffUsers: StaffUser[];
   masterCategories: MasterCategory[];
   permissionModules: PermissionModule[];
@@ -87,8 +85,9 @@ interface GoldShopContextType {
   addLedgerEntry: (entry: Omit<FinancialLedger, 'id'>) => Promise<FinancialLedger>;
   updateLedgerEntry: (id: string, entry: Partial<FinancialLedger>) => Promise<FinancialLedger>;
   deleteLedgerEntry: (id: string) => Promise<void>;
-  settleCustomerTracking: (id: string, amountPaid: number) => Promise<void>;
   addCustomer: (name: string, phone: string, address: string) => Promise<Customer>;
+  updateCustomer: (id: string, updates: Partial<Customer>) => Promise<Customer>;
+  deleteCustomer: (id: string) => Promise<void>;
   getLivePriceForPurity: (purity: GoldPurity) => number;
   getBuyPriceForPurity: (purity: GoldPurity) => number;
   resetToDemoData: () => Promise<void>;
@@ -132,7 +131,6 @@ function applyBootstrap(
     setPawnRecords: (v: PawnRecord[]) => void;
     setPawnInterestPayments: (v: PawnInterestPayment[]) => void;
     setLedger: (v: FinancialLedger[]) => void;
-    setCustomerTracking: (v: CustomerTracking[]) => void;
     setStaffUsers: (v: StaffUser[]) => void;
     setMasterCategories: (v: MasterCategory[]) => void;
     setPermissionModules: (v: PermissionModule[]) => void;
@@ -148,7 +146,6 @@ function applyBootstrap(
   setters.setPawnRecords(data.pawns);
   setters.setPawnInterestPayments(data.interestPayments || []);
   setters.setLedger(data.ledger);
-  setters.setCustomerTracking(data.tracking);
   setters.setStaffUsers(data.staff);
   setters.setMasterCategories(data.categories || []);
   setters.setPermissionModules(data.modules || []);
@@ -192,7 +189,6 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [pawnRecords, setPawnRecords] = useState<PawnRecord[]>([]);
   const [pawnInterestPayments, setPawnInterestPayments] = useState<PawnInterestPayment[]>([]);
   const [ledger, setLedger] = useState<FinancialLedger[]>([]);
-  const [customerTracking, setCustomerTracking] = useState<CustomerTracking[]>([]);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [masterCategories, setMasterCategories] = useState<MasterCategory[]>([]);
   const [permissionModules, setPermissionModules] = useState<PermissionModule[]>([]);
@@ -214,7 +210,6 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setPawnRecords,
     setPawnInterestPayments,
     setLedger,
-    setCustomerTracking,
     setStaffUsers,
     setMasterCategories,
     setPermissionModules,
@@ -398,6 +393,17 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return customer;
   };
 
+  const updateCustomer = async (id: string, updates: Partial<Customer>) => {
+    const customer = await api.updateCustomer(id, updates);
+    await invalidateAndRefresh();
+    return customer;
+  };
+
+  const deleteCustomer = async (id: string) => {
+    await api.deleteCustomer(id);
+    await invalidateAndRefresh();
+  };
+
   const createTransaction = async (txnData: Omit<Transaction, 'id' | 'created_at'>) => {
     const txn = await api.createTransaction(txnData);
     await invalidateAndRefresh();
@@ -487,11 +493,6 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await invalidateAndRefresh();
   };
 
-  const settleCustomerTracking = async (id: string, amountPaid: number) => {
-    await api.settleCustomerTracking(id, amountPaid);
-    await invalidateAndRefresh();
-  };
-
   const createMasterCategory = async (
     data: Omit<MasterCategory, 'id' | 'created_at' | 'updated_at' | 'usage_count'>
   ) => {
@@ -563,7 +564,6 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         pawnRecords,
         pawnInterestPayments,
         ledger,
-        customerTracking,
         staffUsers,
         masterCategories,
         permissionModules,
@@ -602,8 +602,9 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addLedgerEntry,
         updateLedgerEntry,
         deleteLedgerEntry,
-        settleCustomerTracking,
         addCustomer,
+        updateCustomer,
+        deleteCustomer,
         getLivePriceForPurity,
         getBuyPriceForPurity,
         resetToDemoData,
