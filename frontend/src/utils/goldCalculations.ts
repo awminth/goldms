@@ -135,7 +135,7 @@ export function calculateNetWeight(
   return calculateNetFromParts(grossKpy, { kyat: 0, pae: 0, yway: 0 }, deductionPae, deductionYway);
 }
 
-/** Gross − Gemstone − Wastage (အလျော့တွက်) → Net gold */
+/** Gross − Gemstone + Wastage (အလျော့တွက်) → Net gold (chargeable) */
 export function calculateNetFromParts(
   gross: WeightKPY,
   gemstone: WeightKPY = { kyat: 0, pae: 0, yway: 0 },
@@ -146,7 +146,7 @@ export function calculateNetFromParts(
   const gemTotalYway = kpyToYway(gemstone.kyat, gemstone.pae, gemstone.yway);
   const wasteTotalYway =
     Number(wastagePae || 0) * PAE_TO_YWAY + Number(wastageYway || 0);
-  const netYway = Math.max(0, grossTotalYway - gemTotalYway - wasteTotalYway);
+  const netYway = Math.max(0, grossTotalYway - gemTotalYway + wasteTotalYway);
   return ywayToKpy(netYway);
 }
 
@@ -281,6 +281,17 @@ export function estimateSellingPrice(params: {
   return calculateSaleLineBreakdown(params).lineSubtotal;
 }
 
+/** Format currency into Thai Baht string */
+export function formatBaht(amount: number): string {
+  if (isNaN(amount) || amount === null || amount === undefined) return '0 ฿';
+  return (
+    new Intl.NumberFormat('en-US', {
+      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+    }).format(Number(amount)) + ' ฿'
+  );
+}
+
 /** Format currency into MMK string */
 export function formatMMK(amount: number): string {
   if (isNaN(amount) || amount === null || amount === undefined) return '0 MMK';
@@ -322,4 +333,38 @@ export function generateInvoiceNo(type: string = 'INV'): string {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `${type}-${dateStr}-${rand}`;
+}
+
+/**
+ * Header FX scale: rate is “per 100,000” (e.g. 755 → 755/100000).
+ *
+ * SYSTEM RULE (always):
+ * - Baht → MMK  = SELL rate (ရောင်းဈေး)
+ * - MMK → Baht  = BUY rate (ဝယ်ဈေး)
+ */
+export function bahtToMmk(baht: number, sellRate: number): number {
+  const r = Number(sellRate);
+  if (!Number.isFinite(baht) || !Number.isFinite(r) || r <= 0) return 0;
+  return baht / (r / 100000);
+}
+
+export function mmkToBaht(mmk: number, buyRate: number): number {
+  const r = Number(buyRate);
+  if (!Number.isFinite(mmk) || !Number.isFinite(r) || r <= 0) return 0;
+  return mmk * (r / 100000);
+}
+
+/** Baht → MMK (sell rate) — alias */
+export function thaiBahtToMmk(baht: number, sellRate: number): number {
+  return bahtToMmk(baht, sellRate);
+}
+
+/** MMK → Baht (buy rate) — alias */
+export function meelinMmkToBaht(mmk: number, buyRate: number): number {
+  return mmkToBaht(mmk, buyRate);
+}
+
+/** MMK → Baht for Thai edit display (buy rate) — alias */
+export function mmkToThaiBaht(mmk: number, buyRate: number): number {
+  return mmkToBaht(mmk, buyRate);
 }

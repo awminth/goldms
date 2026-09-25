@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx-js-style';
+import { formatDateTime } from './dateFormat';
 
 export type ExcelCellValue = string | number | boolean | null | undefined;
 
@@ -68,7 +69,7 @@ export function exportToExcel<T>(opts: {
 
   if (title) {
     aoa.push([title]);
-    aoa.push([`Exported: ${new Date().toLocaleString()}`]);
+    aoa.push([`Exported: ${formatDateTime(new Date())}`]);
     aoa.push([]);
   }
 

@@ -7,7 +7,7 @@ import {
   Clock,
   HandCoins,
   BookOpenCheck,
-  FileBarChart2,
+  FileSpreadsheet,
   Settings2,
   Tags,
   Package,
@@ -23,6 +23,8 @@ import {
   AlertOctagon,
   ReceiptText,
   ShoppingBag,
+  PackageOpen,
+  Hammer,
 } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { SOFTWARE_SIDEBAR_LOGO, softwareName, softwareTagline } from '../branding';
@@ -59,14 +61,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile = false,
   setIsOpenMobile,
 }) => {
-  const { customOrders, language, can, pawnRecords } = useGoldShop();
+  const { customOrders, goldsmithJobs, language, can, pawnRecords } = useGoldShop();
   useBodyScrollLock(isOpenMobile);
 
-  const pendingOrders = customOrders.filter(
-    (o) => o.status === 'PENDING' || o.status === 'IN_PRODUCTION'
-  ).length;
+  const pendingOrders = customOrders.filter((o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED').length;
 
   const today = new Date().toISOString().slice(0, 10);
+  const goldsmithOverdue = goldsmithJobs.filter(
+    (j) => j.status === 'SENT' && j.return_due_date && j.return_due_date < today
+  ).length;
+  const goldsmithReturnedOrders = goldsmithJobs.filter(
+    (j) => j.status === 'RETURNED' && j.source_type === 'ORDER'
+  ).length;
+  // Notify: overdue returns + ORDER jobs ready for handoff on Orders page
+  const goldsmithPending = goldsmithOverdue + goldsmithReturnedOrders;
+
   const overdueCount = pawnRecords.filter(
     (r) =>
       r.status !== 'REDEEMED' &&
@@ -121,6 +130,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       module: 'inventory',
     },
     {
+      id: 'old-gold' as ActiveTab,
+      labelMM: 'အဟောင်းထည်',
+      labelEN: 'Old Gold',
+      icon: PackageOpen,
+      badge: null as string | number | null,
+      module: 'inventory',
+    },
+    {
       id: 'orders' as ActiveTab,
       labelMM: 'Order တင်ခြင်း & စရံ',
       labelEN: 'Orders & Deposits',
@@ -128,6 +145,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: pendingOrders > 0 ? pendingOrders : null,
       badgeColor: 'bg-amber-500',
       module: 'orders',
+    },
+    {
+      id: 'goldsmith' as ActiveTab,
+      labelMM: 'ပန်းထိမ်အပ်',
+      labelEN: 'Goldsmith',
+      icon: Hammer,
+      badge: goldsmithPending > 0 ? goldsmithPending : null,
+      badgeColor: 'bg-violet-500',
+      module: 'goldsmith',
     },
   ].filter((item) =>
     item.id === 'pos-history'
@@ -138,7 +164,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const mainNavBottom = [
     {
       id: 'ledger' as ActiveTab,
-      labelMM: 'ငွေစာရင်း & စရိတ်',
+      labelMM: 'ဝင်ငွေ / ထွက်ငွေ',
       labelEN: 'Income & Expenses',
       icon: BookOpenCheck,
       badge: null as string | number | null,
@@ -146,10 +172,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       module: 'ledger',
     },
     {
-      id: 'reports' as ActiveTab,
-      labelMM: 'အစီရင်ခံစာများ',
-      labelEN: 'Reports',
-      icon: FileBarChart2,
+      id: 'financial-report' as ActiveTab,
+      labelMM: 'ဘဏ္ဍာရေးအစီရင်ခံစာ',
+      labelEN: 'Financial Report',
+      icon: FileSpreadsheet,
       badge: null as string | number | null,
       badgeColor: undefined as string | undefined,
       module: 'reports',
@@ -292,7 +318,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
           {mainNavTop.map((item) => {
             const Icon = item.icon;
-            const isActive = activeTab === item.id;
+            const isActive =
+              activeTab === item.id ||
+              (item.id === 'goldsmith' && activeTab === 'goldsmith-handoff') ||
+              (item.id === 'orders' && activeTab === 'order-handoff');
             return (
               <button
                 key={item.id}

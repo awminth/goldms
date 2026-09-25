@@ -7,6 +7,7 @@ import {
   formatKPYMyanmar,
   formatKPYEnglish,
 } from '../utils/goldCalculations';
+import { formatDate } from '../utils/dateFormat';
 import { api, type ReportSummary } from '../services/api';
 import {
   TrendingUp,
@@ -100,16 +101,20 @@ export const DashboardView: React.FC = () => {
   );
   const pawnOverdueCount = overduePawns.length;
 
+  const activePawns = useMemo(
+    () => pawnRecords.filter((p) => p.status === 'ACTIVE' || p.status === 'OVERDUE'),
+    [pawnRecords]
+  );
+  const pawnLoanTotalMmk =
+    summary?.pawn_loan_total_mmk ??
+    activePawns.reduce((sum, p) => sum + (p.loan_amount || 0), 0);
+  const activePawnCount = summary?.active_pawns ?? activePawns.length;
+
   const pendingOrders =
     summary?.open_orders ??
     customOrders.filter((o) => o.status === 'PENDING' || o.status === 'IN_PRODUCTION').length;
 
-  const dateLabel = today.toLocaleDateString(language === 'MM' ? 'my-MM' : 'en-GB', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  const dateLabel = formatDate(today);
 
   const metrics = [
     {
@@ -142,17 +147,10 @@ export const DashboardView: React.FC = () => {
       accent: 'text-rose-600 dark:text-rose-400',
     },
     {
-      key: 'pawn-overdue',
-      label: language === 'MM' ? 'အပေါင် ရက်လွန်' : 'Pawn Overdue',
-      value: String(pawnOverdueCount),
-      hint:
-        pawnOverdueCount > 0
-          ? language === 'MM'
-            ? 'စာရင်းကြည့်ရန် အပေါင်သို့'
-            : 'view list in Pawn'
-          : language === 'MM'
-            ? 'ရက်လွန် မရှိ'
-            : 'none overdue',
+      key: 'pawn-total',
+      label: language === 'MM' ? 'အပေါင်စာရင်းစုစုပေါင်း (ကျပ်)' : 'Pawn loans total (MMK)',
+      value: formatMMK(pawnLoanTotalMmk),
+      hint: `${activePawnCount} ${language === 'MM' ? 'စောင်' : 'active'} · ${pawnOverdueCount} ${language === 'MM' ? 'ရက်လွန်' : 'overdue'}`,
       icon: Clock,
       accent: 'text-amber-700 dark:text-amber-400',
     },
@@ -229,17 +227,17 @@ export const DashboardView: React.FC = () => {
               {language === 'MM' ? 'နေ့စဉ် ရွှေပေါက်ဈေး' : 'Daily Gold Prices'}
             </h2>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+          <div className="overflow-x-hidden">
+            <table className="w-full text-xs table-fixed">
               <thead>
                 <tr className="text-left text-[11px] text-gray-500 border-b border-line dark:border-gray-800 bg-[#FAF8F2]/60 dark:bg-[#141414]">
-                  <th className="px-4 py-2.5 font-semibold">
+                  <th className="px-4 py-2.5 font-semibold w-[40%]">
                     {language === 'MM' ? 'အမျိုးအစား' : 'Type'}
                   </th>
-                  <th className="px-3 py-2.5 font-semibold text-right">
+                  <th className="px-3 py-2.5 font-semibold text-right w-[30%]">
                     {language === 'MM' ? 'အရောင်း' : 'Sell'}
                   </th>
-                  <th className="px-4 py-2.5 font-semibold text-right">
+                  <th className="px-4 py-2.5 font-semibold text-right w-[30%]">
                     {language === 'MM' ? 'အဝယ်' : 'Buy'}
                   </th>
                 </tr>
@@ -330,13 +328,19 @@ export const DashboardView: React.FC = () => {
             </div>
             <div className="rounded-xl border border-line dark:border-gray-800 p-3">
               <div className="text-gray-500 font-semibold mb-1">
-                {language === 'MM' ? 'အပေါင် ရက်လွန်' : 'Pawn overdue'}
+                {language === 'MM'
+                  ? 'အပေါင်စာရင်းစုစုပေါင်း (မြန်မာကျပ်)'
+                  : 'Pawn loans total (MMK)'}
               </div>
               <div className="font-mono font-bold text-amber-700 dark:text-amber-400">
-                {pawnOverdueCount}
+                {formatMMK(pawnLoanTotalMmk)}
               </div>
               <div className="text-[10px] text-gray-400 mt-0.5">
-                {language === 'MM' ? 'လက်ရှိ အပေါင်များ' : 'active pawn records'}
+                {activePawnCount}{' '}
+                {language === 'MM' ? 'စောင် လက်ရှိ' : 'active'}
+                {pawnOverdueCount > 0
+                  ? ` · ${pawnOverdueCount} ${language === 'MM' ? 'ရက်လွန်' : 'overdue'}`
+                  : ''}
               </div>
             </div>
             <div className="rounded-xl border border-line dark:border-gray-800 p-3">

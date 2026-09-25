@@ -14,6 +14,8 @@ import {
   generateBarcode,
   generateInvoiceNo,
   kpyToYway,
+  kpyToGrams,
+  KYAT_TO_GRAMS,
   type WeightKPY,
 } from '../utils/goldCalculations.js';
 
@@ -132,7 +134,9 @@ function mapInventory(row: RowDataPacket) {
     purity: row.purity,
     item_type: row.item_type,
     craftsmanship_fee: num(row.craftsmanship_fee),
+    craftsmanship_profit_fee: num(row.craftsmanship_profit_fee),
     stone_price: num(row.stone_price),
+    stone_profit_price: num(row.stone_profit_price),
     selling_price_estimated: num(row.selling_price_estimated),
     status: row.status,
     thai_weight_unit: row.thai_weight_unit != null ? num(row.thai_weight_unit) : undefined,
@@ -170,6 +174,8 @@ function mapTxnItem(row: RowDataPacket) {
     stone_price: num(row.stone_price),
     subtotal: num(row.subtotal),
     item_type: row.item_type,
+    thai_weight_unit: row.thai_weight_unit != null ? num(row.thai_weight_unit) : undefined,
+    line_role: row.line_role != null ? String(row.line_role) : undefined,
   };
 }
 
@@ -226,12 +232,65 @@ function mapOrder(row: RowDataPacket) {
   };
 }
 
+function mapGoldsmithJob(row: RowDataPacket) {
+  return {
+    id: strId(row.id),
+    job_no: row.job_no,
+    source_type: row.source_type as 'INVENTORY' | 'ORDER' | 'OLD_GOLD',
+    status: row.status as 'SENT' | 'RETURNED' | 'HANDED_OVER',
+    inventory_item_id: optionalStrId(row.inventory_item_id),
+    order_id: optionalStrId(row.order_id),
+    sale_transaction_id: optionalStrId(row.sale_transaction_id),
+    returned_inventory_id: optionalStrId(row.returned_inventory_id),
+    item_name: row.item_name,
+    category: row.category ?? '',
+    purity: row.purity,
+    item_type: row.item_type ?? 'MYANMAR_GOLD',
+    weight: {
+      kyat: num(row.weight_kyat),
+      pae: num(row.weight_pae),
+      yway: num(row.weight_yway),
+    },
+    thai_weight_unit: row.thai_weight_unit != null ? num(row.thai_weight_unit) : undefined,
+    source_grams: num(row.source_grams),
+    source_purity: row.source_purity ? String(row.source_purity) : undefined,
+    source_category: row.source_category ? String(row.source_category) : undefined,
+    craft_fee: num(row.craft_fee),
+    fee_paid: Boolean(Number(row.fee_paid)),
+    fee_paid_at: row.fee_paid_at ? toIso(row.fee_paid_at) : undefined,
+    return_due_date: row.return_due_date
+      ? String(row.return_due_date).slice(0, 10)
+      : undefined,
+    notes: row.notes ? String(row.notes) : undefined,
+    sent_at: toIso(row.sent_at || row.created_at),
+    returned_at: row.returned_at ? toIso(row.returned_at) : undefined,
+    handed_over_at: row.handed_over_at ? toIso(row.handed_over_at) : undefined,
+    created_at: toIso(row.created_at),
+    order_no: row.order_no ? String(row.order_no) : undefined,
+    customer_name: row.customer_name ? String(row.customer_name) : undefined,
+    inventory_barcode: row.inventory_barcode ? String(row.inventory_barcode) : undefined,
+  };
+}
+
 function mapPawn(row: RowDataPacket) {
   const start = String(row.start_date).slice(0, 10);
   const due = String(row.due_date).slice(0, 10);
   const rate = num(row.monthly_interest_rate);
   const principal = num(row.loan_amount);
   const storedAccrued = num(row.accrued_interest);
+  const storedStatus = String(row.status || 'ACTIVE');
+  // Overdue = contract due_date already passed (not last-interest date).
+  // Never keep a stale OVERDUE when due is still in the future.
+  const todayLocal = (() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+  })();
+  const status =
+    storedStatus === 'REDEEMED' || storedStatus === 'CONFISCATED'
+      ? storedStatus
+      : due < todayLocal
+        ? 'OVERDUE'
+        : 'ACTIVE';
   // Accrue by full months elapsed since start (min 1 month while active)
   let months = 1;
   try {
@@ -245,7 +304,7 @@ function mapPawn(row: RowDataPacket) {
     months = 1;
   }
   const liveAccrued =
-    row.status === 'REDEEMED' || row.status === 'CONFISCATED'
+    status === 'REDEEMED' || status === 'CONFISCATED'
       ? storedAccrued
       : Math.round((principal * rate * months) / 100);
 
@@ -279,12 +338,18 @@ function mapPawn(row: RowDataPacket) {
     next_interest_date: row.next_interest_date
       ? String(row.next_interest_date).slice(0, 10)
       : undefined,
-    status: row.status,
+    status,
     accrued_interest: liveAccrued,
     interest_paid_kyat: num(row.interest_paid_kyat),
     interest_paid_baht: num(row.interest_paid_baht),
     redeem_date: row.redeem_date ? String(row.redeem_date).slice(0, 10) : undefined,
     redeem_months: row.redeem_months != null ? num(row.redeem_months) : undefined,
+    redeem_days:
+      row.redeem_days != null
+        ? num(row.redeem_days)
+        : row.redeem_months != null
+          ? Math.max(1, num(row.redeem_months) * 30)
+          : undefined,
     redeem_interest_kyat: row.redeem_interest_kyat != null ? num(row.redeem_interest_kyat) : undefined,
     redeem_interest_baht: row.redeem_interest_baht != null ? num(row.redeem_interest_baht) : undefined,
     discount_kyat: row.discount_kyat != null ? num(row.discount_kyat) : undefined,
@@ -304,6 +369,7 @@ function mapPawnInterest(row: RowDataPacket) {
     voucher_no: row.voucher_no,
     payment_date: String(row.payment_date).slice(0, 10),
     months_paid: num(row.months_paid, 1),
+    days_paid: row.days_paid != null ? num(row.days_paid, 30) : Math.max(1, num(row.months_paid, 1) * 30),
     interest_kyat: num(row.interest_kyat),
     interest_baht: num(row.interest_baht),
     interest_rate: num(row.interest_rate),
@@ -324,6 +390,9 @@ function mapPawnInterest(row: RowDataPacket) {
     weight_grams: row.weight_grams != null ? num(row.weight_grams) : undefined,
     loan_amount: row.loan_amount != null ? num(row.loan_amount) : undefined,
     loan_amount_baht: row.loan_amount_baht != null ? num(row.loan_amount_baht) : undefined,
+    vno: row.vno != null ? String(row.vno) : undefined,
+    pawn_ticket_no: row.pawn_ticket_no != null ? String(row.pawn_ticket_no) : undefined,
+    due_date: row.due_date ? String(row.due_date).slice(0, 10) : undefined,
     last_interest_date: row.last_interest_date
       ? String(row.last_interest_date).slice(0, 10)
       : undefined,
@@ -490,8 +559,9 @@ export const shopService = {
     };
     return {
       kyat_to_grams: pos('kyat_to_grams', 16.6),
-      baht_to_mmk_buy: pos('baht_to_mmk_buy', 85),
-      baht_to_mmk_sell: pos('baht_to_mmk_sell', 88),
+      baht_to_mmk_buy: pos('baht_to_mmk_buy', 755),
+      baht_to_mmk_sell: pos('baht_to_mmk_sell', 765),
+      thai_gold_baht: pos('thai_gold_baht', 65000),
     };
   },
 
@@ -512,11 +582,12 @@ export const shopService = {
     await upsert('kyat_to_grams', data.kyat_to_grams);
     await upsert('baht_to_mmk_buy', data.baht_to_mmk_buy);
     await upsert('baht_to_mmk_sell', data.baht_to_mmk_sell);
+    await upsert('thai_gold_baht', data.thai_gold_baht);
     return this.getShopSettings();
   },
 
   async getBootstrap() {
-    const [prices, inventory, customers, transactions, orders, pawns, interestPayments, ledger, staff, categories, modules, rolePermissions, settings] =
+    const [prices, inventory, customers, transactions, orders, pawns, interestPayments, ledger, staff, categories, modules, rolePermissions, settings, goldsmithJobs] =
       await Promise.all([
         this.listPrices(),
         this.listInventory(),
@@ -531,6 +602,7 @@ export const shopService = {
         this.listPermissionModules(),
         this.listAllRolePermissions(),
         this.getShopSettings(),
+        this.listGoldsmithJobs(),
       ]);
 
     return {
@@ -547,6 +619,7 @@ export const shopService = {
       modules,
       rolePermissions,
       settings,
+      goldsmithJobs,
     };
   },
 
@@ -963,13 +1036,17 @@ export const shopService = {
         yway: num(row.net_weight_yway),
       };
       const specific = this.getLivePriceForPurity(prices, row.purity);
+      // Myanmar: ရွှေတန်ဖိုး + စုစုပေါင်းလက်ခ + ကျောက်ဖိုးစုစုပေါင်း
+      const craftTotal =
+        num(row.craftsmanship_fee) + num(row.craftsmanship_profit_fee);
+      const stoneTotal = num(row.stone_price) + num(row.stone_profit_price);
       const estimated = estimateSellingPrice({
         purity: row.purity,
         itemType: row.item_type,
         netWeight: net,
         thaiWeightUnit: row.thai_weight_unit != null ? num(row.thai_weight_unit) : null,
-        craftsmanshipFee: num(row.craftsmanship_fee),
-        stonePrice: num(row.stone_price),
+        craftsmanshipFee: craftTotal,
+        stonePrice: stoneTotal,
         pricePerKyat16Pe: pure16,
         specificSellPrice: specific,
         thaiRatePerKyat: thaiRate,
@@ -1108,8 +1185,9 @@ export const shopService = {
     const pure16 = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
     const purity = String(data.purity || 'MEELIN');
     const itemType = String(data.item_type ?? 'MYANMAR_GOLD');
-    const craft = num(data.craftsmanship_fee);
-    const stonePrice = num(data.stone_price);
+    const craftTotal =
+      num(data.craftsmanship_fee) + num(data.craftsmanship_profit_fee);
+    const stoneTotal = num(data.stone_price) + num(data.stone_profit_price);
     const thaiUnit = data.thai_weight_unit != null ? num(data.thai_weight_unit) : null;
     const estimated =
       data.selling_price_estimated != null && num(data.selling_price_estimated) > 0
@@ -1119,8 +1197,8 @@ export const shopService = {
             itemType,
             netWeight: net,
             thaiWeightUnit: thaiUnit,
-            craftsmanshipFee: craft,
-            stonePrice,
+            craftsmanshipFee: craftTotal,
+            stonePrice: stoneTotal,
             pricePerKyat16Pe: pure16,
             specificSellPrice: this.getLivePriceForPurity(prices, purity),
             thaiRatePerKyat: this.getLivePriceForPurity(prices, 'THAI_GOLD'),
@@ -1142,7 +1220,7 @@ export const shopService = {
         profit_deduction_pae, profit_deduction_yway,
         deduction_pae, deduction_yway,
         net_weight_kyat, net_weight_pae, net_weight_yway,
-        purity, item_type, thai_weight_unit, craftsmanship_fee, stone_price, selling_price_estimated, status, image_url
+        purity, item_type, thai_weight_unit, craftsmanship_fee, craftsmanship_profit_fee, stone_price, stone_profit_price, selling_price_estimated, status, image_url
       ) VALUES (
         :barcode, :category, :name, :name_mm,
         :weight_kyat, :weight_pae, :weight_yway,
@@ -1151,7 +1229,7 @@ export const shopService = {
         :profit_deduction_pae, :profit_deduction_yway,
         :deduction_pae, :deduction_yway,
         :net_weight_kyat, :net_weight_pae, :net_weight_yway,
-        :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :stone_price, :selling_price_estimated, :status, :image_url
+        :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :craftsmanship_profit_fee, :stone_price, :stone_profit_price, :selling_price_estimated, :status, :image_url
       )`,
       {
         barcode,
@@ -1176,8 +1254,10 @@ export const shopService = {
         purity,
         item_type: itemType,
         thai_weight_unit: thaiUnit,
-        craftsmanship_fee: craft,
-        stone_price: stonePrice,
+        craftsmanship_fee: num(data.craftsmanship_fee),
+        craftsmanship_profit_fee: num(data.craftsmanship_profit_fee),
+        stone_price: num(data.stone_price),
+        stone_profit_price: num(data.stone_profit_price),
         selling_price_estimated: estimated,
         status: data.status ?? 'IN_STOCK',
         image_url: data.image_url ?? null,
@@ -1200,7 +1280,7 @@ export const shopService = {
       'profit_deduction_pae', 'profit_deduction_yway',
       'deduction_pae', 'deduction_yway',
       'net_weight_kyat', 'net_weight_pae', 'net_weight_yway',
-      'purity', 'item_type', 'thai_weight_unit', 'craftsmanship_fee', 'stone_price',
+      'purity', 'item_type', 'thai_weight_unit', 'craftsmanship_fee', 'craftsmanship_profit_fee', 'stone_price', 'stone_profit_price',
       'selling_price_estimated', 'status', 'image_url',
     ] as const;
 
@@ -1294,6 +1374,11 @@ export const shopService = {
           const netYway = kpyToYway(net.kyat, net.pae, net.yway);
           goldAmount = Math.round((netYway / 128) * snapshot);
           subtotal = goldAmount;
+        } else if (txnType === 'SHOP_OUT') {
+          // ဆိုင်ထုတ် — no sale valuation; keep client snapshot / zero money
+          snapshot = snapshot > 0 ? snapshot : this.getLivePriceForPurity(prices, purity);
+          goldAmount = goldAmount > 0 ? goldAmount : 0;
+          subtotal = 0;
         } else if (txnType === 'SALE' || txnType === 'EXCHANGE') {
           const breakdown = calculateSaleLineBreakdown({
             purity,
@@ -1335,8 +1420,13 @@ export const shopService = {
       let totalAmount = num(data.total_amount);
       if (txnType === 'SALE') {
         totalAmount = Math.max(0, itemsTotal - discount + tax);
+        if (num(data.total_amount) >= 0 && data.use_client_total === true) {
+          totalAmount = Math.max(0, num(data.total_amount));
+        }
       } else if (txnType === 'PURCHASE') {
         totalAmount = itemsTotal;
+      } else if (txnType === 'SHOP_OUT') {
+        totalAmount = 0;
       } else if (txnType === 'EXCHANGE') {
         // Net: sale lines − trade-in lines (client may override with computed total)
         const saleSum = normalizedItems
@@ -1368,7 +1458,15 @@ export const shopService = {
       const invoiceNo =
         data.invoice_no && String(data.invoice_no).trim()
           ? String(data.invoice_no)
-          : generateInvoiceNo(txnType === 'PURCHASE' ? 'PUR' : txnType === 'EXCHANGE' ? 'EXC' : 'INV');
+          : generateInvoiceNo(
+              txnType === 'PURCHASE'
+                ? 'PUR'
+                : txnType === 'EXCHANGE'
+                  ? 'EXC'
+                  : txnType === 'SHOP_OUT'
+                    ? 'OUT'
+                    : 'INV'
+            );
 
       const [result] = await conn.query<ResultSetHeader>(
         `INSERT INTO transactions (
@@ -1405,7 +1503,8 @@ export const shopService = {
       );
 
       const txnId = result.insertId;
-      const addToStock = data.add_to_stock !== false; // default true for purchases
+      const addToStock =
+        txnType !== 'PURCHASE' && data.add_to_stock !== false; // purchase never stocks; exchange trade-in does
 
       for (const raw of normalizedItems) {
         const weight = (raw.weight as WeightKPY) || { kyat: 0, pae: 0, yway: 0 };
@@ -1418,13 +1517,15 @@ export const shopService = {
             weight_kyat, weight_pae, weight_yway,
             gemstone_weight_kyat, gemstone_weight_pae, gemstone_weight_yway,
             net_weight_kyat, net_weight_pae, net_weight_yway,
-            purity, gold_price_snapshot, gold_amount, craftsmanship_fee, stone_price, subtotal, item_type
+            purity, gold_price_snapshot, gold_amount, craftsmanship_fee, stone_price, subtotal, item_type,
+            thai_weight_unit, line_role
           ) VALUES (
             :transaction_id, :item_id, :item_name, :category,
             :weight_kyat, :weight_pae, :weight_yway,
             :gemstone_weight_kyat, :gemstone_weight_pae, :gemstone_weight_yway,
             :net_weight_kyat, :net_weight_pae, :net_weight_yway,
-            :purity, :gold_price_snapshot, :gold_amount, :craftsmanship_fee, :stone_price, :subtotal, :item_type
+            :purity, :gold_price_snapshot, :gold_amount, :craftsmanship_fee, :stone_price, :subtotal, :item_type,
+            :thai_weight_unit, :line_role
           )`,
           {
             transaction_id: txnId,
@@ -1447,18 +1548,24 @@ export const shopService = {
             stone_price: num(raw.stone_price),
             subtotal: num(raw.subtotal),
             item_type: raw.item_type ?? 'MYANMAR_GOLD',
+            thai_weight_unit:
+              raw.thai_weight_unit != null ? num(raw.thai_weight_unit) : null,
+            line_role: raw.line_role != null ? String(raw.line_role) : null,
           }
         );
 
         if ((txnType === 'SALE' || txnType === 'EXCHANGE') && itemId && raw.line_role !== 'TRADE_IN') {
           await conn.query(`UPDATE inventory_items SET status = 'SOLD' WHERE id = :id`, { id: itemId });
         }
+        if (txnType === 'SHOP_OUT' && itemId) {
+          await conn.query(
+            `UPDATE inventory_items SET status = 'SHOP_OUT' WHERE id = :id AND status = 'IN_STOCK'`,
+            { id: itemId }
+          );
+        }
 
-        // Purchase / trade-in → create stock item with barcode
-        if (
-          addToStock &&
-          (txnType === 'PURCHASE' || (txnType === 'EXCHANGE' && raw.line_role === 'TRADE_IN'))
-        ) {
+        // Trade-in on exchange only → create stock (purchase never enters inventory)
+        if (addToStock && txnType === 'EXCHANGE' && raw.line_role === 'TRADE_IN') {
           await this.insertPurchaseStock(conn, {
             item_name: String(raw.item_name || 'ရွှေဟောင်း'),
             category: String(raw.category || 'OLD_GOLD'),
@@ -1468,6 +1575,8 @@ export const shopService = {
             item_type: String(raw.item_type ?? 'MYANMAR_GOLD'),
             gold_price_snapshot: num(raw.gold_price_snapshot),
             invoice_no: invoiceNo,
+            thai_weight_unit:
+              raw.thai_weight_unit != null ? num(raw.thai_weight_unit) : null,
           });
         }
       }
@@ -1539,11 +1648,18 @@ export const shopService = {
         { id: txnId }
       );
 
-      // Restore sold inventory lines
+      // Restore sold / shop-out inventory lines
       for (const item of items) {
-        if (item.item_id && (txn.transaction_type === 'SALE' || txn.transaction_type === 'EXCHANGE')) {
+        if (!item.item_id) continue;
+        if (txn.transaction_type === 'SALE' || txn.transaction_type === 'EXCHANGE') {
           await conn.query(
             `UPDATE inventory_items SET status = 'IN_STOCK' WHERE id = :id AND status = 'SOLD'`,
+            { id: item.item_id }
+          );
+        }
+        if (txn.transaction_type === 'SHOP_OUT') {
+          await conn.query(
+            `UPDATE inventory_items SET status = 'IN_STOCK' WHERE id = :id AND status = 'SHOP_OUT'`,
             { id: item.item_id }
           );
         }
@@ -1585,6 +1701,7 @@ export const shopService = {
       item_type: string;
       gold_price_snapshot: number;
       invoice_no: string;
+      thai_weight_unit?: number | null;
     }
   ) {
     let barcode = generateBarcode();
@@ -1598,10 +1715,15 @@ export const shopService = {
     }
     const prices = await this.listPrices();
     const pure16 = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+    const thaiUnit =
+      opts.thai_weight_unit != null && Number(opts.thai_weight_unit) > 0
+        ? num(opts.thai_weight_unit)
+        : null;
     const sellEst = estimateSellingPrice({
       purity: opts.purity,
       itemType: opts.item_type,
       netWeight: opts.net,
+      thaiWeightUnit: thaiUnit,
       craftsmanshipFee: 0,
       pricePerKyat16Pe: pure16,
       specificSellPrice: this.getLivePriceForPurity(prices, opts.purity),
@@ -1612,12 +1734,12 @@ export const shopService = {
         barcode, category, name, name_mm,
         weight_kyat, weight_pae, weight_yway, deduction_pae, deduction_yway,
         net_weight_kyat, net_weight_pae, net_weight_yway,
-        purity, item_type, craftsmanship_fee, selling_price_estimated, status
+        purity, item_type, thai_weight_unit, craftsmanship_fee, selling_price_estimated, status
       ) VALUES (
         :barcode, :category, :name, :name_mm,
         :weight_kyat, :weight_pae, :weight_yway, 0, 0,
         :net_weight_kyat, :net_weight_pae, :net_weight_yway,
-        :purity, :item_type, 0, :selling_price_estimated, 'IN_STOCK'
+        :purity, :item_type, :thai_weight_unit, 0, :selling_price_estimated, 'IN_STOCK'
       )`,
       {
         barcode,
@@ -1632,6 +1754,7 @@ export const shopService = {
         net_weight_yway: opts.net.yway,
         purity: opts.purity,
         item_type: opts.item_type,
+        thai_weight_unit: thaiUnit,
         selling_price_estimated: sellEst,
       }
     );
@@ -1714,7 +1837,122 @@ export const shopService = {
     }
   },
 
-  async updateOrderStatus(id: string, status: string, remainingPaid?: number) {
+  async updateOrder(id: string, data: Record<string, unknown>) {
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const orderId = parseId(id);
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT * FROM orders WHERE id = :id FOR UPDATE`,
+        { id: orderId }
+      );
+      if (!rows[0]) throw new HttpError(404, 'Order not found');
+      if (['COMPLETED', 'CANCELLED'].includes(String(rows[0].status))) {
+        throw new HttpError(400, 'Cannot edit completed/cancelled order');
+      }
+
+      const [openJobs] = await conn.query<RowDataPacket[]>(
+        `SELECT id FROM goldsmith_jobs
+         WHERE order_id = :id AND status IN ('SENT', 'RETURNED') LIMIT 1`,
+        { id: orderId }
+      );
+      if (openJobs[0]) {
+        throw new HttpError(400, 'Cannot edit order while goldsmith job is active');
+      }
+
+      const tw = (data.target_weight as Record<string, number>) || {};
+      const customerId =
+        data.customer_id !== undefined
+          ? parseOptionalId(data.customer_id)
+          : rows[0].customer_id;
+      const newRemaining = num(
+        data.remaining_balance !== undefined
+          ? data.remaining_balance
+          : rows[0].remaining_balance
+      );
+      const oldRemaining = num(rows[0].remaining_balance);
+      const deltaRemaining = newRemaining - oldRemaining;
+
+      await conn.query(
+        `UPDATE orders SET
+          customer_id = :customer_id,
+          customer_name = :customer_name,
+          customer_phone = :customer_phone,
+          item_type = :item_type,
+          description = :description,
+          purity = :purity,
+          target_weight_kyat = :target_weight_kyat,
+          target_weight_pae = :target_weight_pae,
+          target_weight_yway = :target_weight_yway,
+          craftsmanship_fee = :craftsmanship_fee,
+          deposit_amount = :deposit_amount,
+          estimated_total_price = :estimated_total_price,
+          remaining_balance = :remaining_balance,
+          due_date = :due_date,
+          gold_rate_snapshot = :gold_rate_snapshot
+         WHERE id = :id`,
+        {
+          id: orderId,
+          customer_id: customerId,
+          customer_name: data.customer_name ?? rows[0].customer_name,
+          customer_phone: data.customer_phone ?? rows[0].customer_phone,
+          item_type: data.item_type ?? rows[0].item_type,
+          description: data.description ?? rows[0].description,
+          purity: data.purity ?? rows[0].purity,
+          target_weight_kyat:
+            data.target_weight != null ? num(tw.kyat) : num(rows[0].target_weight_kyat),
+          target_weight_pae:
+            data.target_weight != null ? num(tw.pae) : num(rows[0].target_weight_pae),
+          target_weight_yway:
+            data.target_weight != null ? num(tw.yway) : num(rows[0].target_weight_yway),
+          craftsmanship_fee:
+            data.craftsmanship_fee != null
+              ? num(data.craftsmanship_fee)
+              : num(rows[0].craftsmanship_fee),
+          deposit_amount:
+            data.deposit_amount != null ? num(data.deposit_amount) : num(rows[0].deposit_amount),
+          estimated_total_price:
+            data.estimated_total_price != null
+              ? num(data.estimated_total_price)
+              : num(rows[0].estimated_total_price),
+          remaining_balance: newRemaining,
+          due_date: data.due_date != null ? String(data.due_date).slice(0, 10) : rows[0].due_date,
+          gold_rate_snapshot:
+            data.gold_rate_snapshot != null
+              ? num(data.gold_rate_snapshot)
+              : num(rows[0].gold_rate_snapshot),
+        }
+      );
+
+      if (deltaRemaining !== 0 && rows[0].customer_id) {
+        await conn.query(
+          `UPDATE customers
+           SET outstanding_balance = GREATEST(0, outstanding_balance + :amt)
+           WHERE id = :id`,
+          { amt: deltaRemaining, id: rows[0].customer_id }
+        );
+      }
+
+      await conn.commit();
+      const [updated] = await pool.query<RowDataPacket[]>(`SELECT * FROM orders WHERE id = :id`, {
+        id: orderId,
+      });
+      return mapOrder(updated[0]);
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+
+  async updateOrderStatus(
+    id: string,
+    status: string,
+    remainingPaid?: number,
+    opts?: { via_sale?: boolean }
+  ) {
     const pool = getPool();
     const conn = await pool.getConnection();
     try {
@@ -1724,6 +1962,70 @@ export const shopService = {
         id: orderId,
       });
       if (!rows[0]) throw new HttpError(404, 'Order not found');
+
+      const viaSale = Boolean(opts?.via_sale);
+      if (viaSale && status === 'COMPLETED') {
+        await conn.query(
+          `UPDATE orders SET status = 'COMPLETED', remaining_balance = 0 WHERE id = :id`,
+          { id: orderId }
+        );
+        if (rows[0].customer_id && num(rows[0].remaining_balance) > 0) {
+          await conn.query(
+            `UPDATE customers
+             SET outstanding_balance = GREATEST(0, outstanding_balance - :amt)
+             WHERE id = :id`,
+            { amt: num(rows[0].remaining_balance), id: rows[0].customer_id }
+          );
+        }
+        await conn.commit();
+        const [updated] = await pool.query<RowDataPacket[]>(`SELECT * FROM orders WHERE id = :id`, {
+          id: orderId,
+        });
+        return mapOrder(updated[0]);
+      }
+
+      if (status === 'CANCELLED') {
+        if (String(rows[0].status) === 'COMPLETED') {
+          throw new HttpError(400, 'Cannot cancel completed order');
+        }
+        // Reverse active SENT goldsmith job back to source
+        const [sentJobs] = await conn.query<RowDataPacket[]>(
+          `SELECT * FROM goldsmith_jobs
+           WHERE order_id = :id AND status = 'SENT' FOR UPDATE`,
+          { id: orderId }
+        );
+        for (const job of sentJobs) {
+          await this.reverseGoldsmithJobOnConn(conn, job);
+        }
+        const [returnedJobs] = await conn.query<RowDataPacket[]>(
+          `SELECT id FROM goldsmith_jobs
+           WHERE order_id = :id AND status = 'RETURNED' LIMIT 1`,
+          { id: orderId }
+        );
+        if (returnedJobs[0]) {
+          throw new HttpError(
+            400,
+            'Order has returned goldsmith work — complete handoff or cancel job first'
+          );
+        }
+
+        await conn.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = :id`, {
+          id: orderId,
+        });
+        if (rows[0].customer_id && num(rows[0].remaining_balance) > 0) {
+          await conn.query(
+            `UPDATE customers
+             SET outstanding_balance = GREATEST(0, outstanding_balance - :amt)
+             WHERE id = :id`,
+            { amt: num(rows[0].remaining_balance), id: rows[0].customer_id }
+          );
+        }
+        await conn.commit();
+        const [updated] = await pool.query<RowDataPacket[]>(`SELECT * FROM orders WHERE id = :id`, {
+          id: orderId,
+        });
+        return mapOrder(updated[0]);
+      }
 
       const paid = num(remainingPaid);
       const newBalance = paid > 0 ? Math.max(0, num(rows[0].remaining_balance) - paid) : num(rows[0].remaining_balance);
@@ -1765,8 +2067,571 @@ export const shopService = {
     }
   },
 
-  async listPawns() {
+  /** Undo a SENT goldsmith job inside an open transaction (delete + restore source). */
+  async reverseGoldsmithJobOnConn(conn: PoolConnection, job: RowDataPacket) {
+    const sourceType = String(job.source_type);
+    if (sourceType === 'INVENTORY' && job.inventory_item_id) {
+      await conn.query(`UPDATE inventory_items SET status = 'IN_STOCK' WHERE id = :id`, {
+        id: job.inventory_item_id,
+      });
+    } else if (sourceType === 'ORDER' && job.order_id) {
+      await conn.query(
+        `UPDATE orders SET status = 'PENDING' WHERE id = :id AND status = 'IN_PRODUCTION'`,
+        { id: job.order_id }
+      );
+    }
+    // OLD_GOLD: deleting job restores available grams via SUM(source_grams)
+    await conn.query(`DELETE FROM goldsmith_jobs WHERE id = :id AND status = 'SENT'`, {
+      id: job.id,
+    });
+  },
+
+  async cancelGoldsmithJob(id: string) {
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const jobId = parseId(id);
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT * FROM goldsmith_jobs WHERE id = :id FOR UPDATE`,
+        { id: jobId }
+      );
+      if (!rows[0]) throw new HttpError(404, 'Goldsmith job not found');
+      if (String(rows[0].status) !== 'SENT') {
+        throw new HttpError(400, 'Only SENT jobs can be cancelled');
+      }
+      await this.reverseGoldsmithJobOnConn(conn, rows[0]);
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+
+  async listGoldsmithJobs() {
     const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT j.*,
+              o.order_no AS order_no,
+              o.customer_name AS customer_name,
+              i.barcode AS inventory_barcode
+       FROM goldsmith_jobs j
+       LEFT JOIN orders o ON o.id = j.order_id
+       LEFT JOIN inventory_items i ON i.id = j.inventory_item_id
+       ORDER BY j.id DESC`
+    );
+    return rows.map(mapGoldsmithJob);
+  },
+
+  async getGoldsmithJob(id: string) {
+    const jobId = parseId(id);
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT j.*,
+              o.order_no AS order_no,
+              o.customer_name AS customer_name,
+              i.barcode AS inventory_barcode
+       FROM goldsmith_jobs j
+       LEFT JOIN orders o ON o.id = j.order_id
+       LEFT JOIN inventory_items i ON i.id = j.inventory_item_id
+       WHERE j.id = :id`,
+      { id: jobId }
+    );
+    if (!rows[0]) throw new HttpError(404, 'Goldsmith job not found');
+    return mapGoldsmithJob(rows[0]);
+  },
+
+  async oldGoldAvailableGrams(purity?: string, category?: string) {
+    const settings = await this.getShopSettings();
+    const kyatToGrams = Number(settings.kyat_to_grams) > 0 ? Number(settings.kyat_to_grams) : KYAT_TO_GRAMS;
+    const txns = await this.listTransactions();
+    let inbound = 0;
+    for (const t of txns) {
+      if (t.transaction_type !== 'PURCHASE' && t.transaction_type !== 'SHOP_OUT') continue;
+      for (const item of t.items) {
+        const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+        if (purity && String(item.purity) !== String(purity)) continue;
+        if (category && String(item.category || '').toUpperCase() !== String(category).toUpperCase()) continue;
+        const unit = Number(item.thai_weight_unit || 0);
+        if (isThai && unit > 0) inbound += unit;
+        else inbound += kpyToGrams(item.net_weight || { kyat: 0, pae: 0, yway: 0 }, kyatToGrams);
+      }
+    }
+    const [usedRows] = await getPool().query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(source_grams), 0) AS used
+       FROM goldsmith_jobs
+       WHERE source_type = 'OLD_GOLD'
+         AND (:purity IS NULL OR source_purity = :purity)
+         AND (:category IS NULL OR source_category = :category)`,
+      {
+        purity: purity || null,
+        category: category || null,
+      }
+    );
+    const used = num(usedRows[0]?.used);
+    return Math.max(0, Number((inbound - used).toFixed(3)));
+  },
+
+  async createGoldsmithJob(data: Record<string, unknown>) {
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const sourceType = String(data.source_type || '').toUpperCase();
+      if (!['INVENTORY', 'ORDER', 'OLD_GOLD'].includes(sourceType)) {
+        throw new HttpError(400, 'source_type must be INVENTORY, ORDER, or OLD_GOLD');
+      }
+      const craftFee = num(data.craft_fee);
+      const notes = data.notes != null ? String(data.notes) : null;
+      const returnDueRaw =
+        data.return_due_date != null ? String(data.return_due_date).slice(0, 10) : '';
+      if (!returnDueRaw || !/^\d{4}-\d{2}-\d{2}$/.test(returnDueRaw)) {
+        throw new HttpError(400, 'return_due_date is required (YYYY-MM-DD)');
+      }
+      const returnDueDate = returnDueRaw;
+      const jobNo = String(data.job_no || generateInvoiceNo('GS'));
+
+      let inventoryItemId: number | null = null;
+      let orderId: number | null = null;
+      let itemName = String(data.item_name || '');
+      let category = String(data.category || '');
+      let purity = String(data.purity || '');
+      let itemType = String(data.item_type || 'MYANMAR_GOLD');
+      let weight: WeightKPY = {
+        kyat: num((data.weight as WeightKPY)?.kyat ?? data.weight_kyat),
+        pae: num((data.weight as WeightKPY)?.pae ?? data.weight_pae),
+        yway: num((data.weight as WeightKPY)?.yway ?? data.weight_yway),
+      };
+      let thaiUnit: number | null =
+        data.thai_weight_unit != null ? num(data.thai_weight_unit) : null;
+      let sourceGrams = num(data.source_grams);
+      let sourcePurity: string | null = data.source_purity ? String(data.source_purity) : null;
+      let sourceCategory: string | null = data.source_category
+        ? String(data.source_category)
+        : null;
+
+      if (sourceType === 'INVENTORY') {
+        const invId = parseId(String(data.inventory_item_id || ''));
+        const [invRows] = await conn.query<RowDataPacket[]>(
+          `SELECT * FROM inventory_items WHERE id = :id FOR UPDATE`,
+          { id: invId }
+        );
+        if (!invRows[0]) throw new HttpError(404, 'Inventory item not found');
+        if (String(invRows[0].status) !== 'IN_STOCK') {
+          throw new HttpError(400, 'Item must be IN_STOCK to send to goldsmith');
+        }
+        const [openJobs] = await conn.query<RowDataPacket[]>(
+          `SELECT id FROM goldsmith_jobs
+           WHERE inventory_item_id = :id AND status = 'SENT' LIMIT 1`,
+          { id: invId }
+        );
+        if (openJobs[0]) throw new HttpError(400, 'Item already sent to goldsmith');
+
+        await conn.query(
+          `UPDATE inventory_items SET status = 'WITH_GOLDSMITH' WHERE id = :id`,
+          { id: invId }
+        );
+        inventoryItemId = invId;
+        itemName = String(invRows[0].name_mm || invRows[0].name);
+        category = String(invRows[0].category);
+        purity = String(invRows[0].purity);
+        itemType = String(invRows[0].item_type);
+        weight = {
+          kyat: num(invRows[0].net_weight_kyat),
+          pae: num(invRows[0].net_weight_pae),
+          yway: num(invRows[0].net_weight_yway),
+        };
+        thaiUnit =
+          invRows[0].thai_weight_unit != null ? num(invRows[0].thai_weight_unit) : null;
+        sourceGrams =
+          thaiUnit && thaiUnit > 0
+            ? thaiUnit
+            : kpyToGrams(weight, Number((await this.getShopSettings()).kyat_to_grams) || KYAT_TO_GRAMS);
+      } else if (sourceType === 'ORDER') {
+        const oid = parseId(String(data.order_id || ''));
+        const [ordRows] = await conn.query<RowDataPacket[]>(
+          `SELECT * FROM orders WHERE id = :id FOR UPDATE`,
+          { id: oid }
+        );
+        if (!ordRows[0]) throw new HttpError(404, 'Order not found');
+        if (['COMPLETED', 'CANCELLED'].includes(String(ordRows[0].status))) {
+          throw new HttpError(400, 'Cannot send completed/cancelled order');
+        }
+        const [openJobs] = await conn.query<RowDataPacket[]>(
+          `SELECT id FROM goldsmith_jobs
+           WHERE order_id = :id AND status IN ('SENT', 'RETURNED') LIMIT 1`,
+          { id: oid }
+        );
+        if (openJobs[0]) throw new HttpError(400, 'Order already has an active goldsmith job');
+
+        await conn.query(`UPDATE orders SET status = 'IN_PRODUCTION' WHERE id = :id`, {
+          id: oid,
+        });
+        orderId = oid;
+        itemName = String(ordRows[0].description || 'အော်ဒါပစ္စည်း');
+        category = String(ordRows[0].item_type || '');
+        purity = String(ordRows[0].purity);
+        itemType = purity === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD';
+        weight = {
+          kyat: num(ordRows[0].target_weight_kyat),
+          pae: num(ordRows[0].target_weight_pae),
+          yway: num(ordRows[0].target_weight_yway),
+        };
+        sourceGrams = kpyToGrams(
+          weight,
+          Number((await this.getShopSettings()).kyat_to_grams) || KYAT_TO_GRAMS
+        );
+      } else {
+        // OLD_GOLD — melt from shared pool (purity/category optional)
+        sourcePurity = data.source_purity
+          ? String(data.source_purity)
+          : data.purity
+            ? String(data.purity)
+            : '';
+        sourceCategory = data.source_category
+          ? String(data.source_category)
+          : data.category
+            ? String(data.category)
+            : null;
+        purity = sourcePurity || 'MEELIN';
+        category = sourceCategory || 'OLD_GOLD';
+        itemType = purity === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD';
+        itemName = String(data.item_name || 'အဟောင်းထည် အရည်ကျို');
+        sourceGrams = num(data.source_grams);
+        if (sourceGrams <= 0) throw new HttpError(400, 'source_grams required');
+        // Shared pool when no purity/category filter
+        const available = await this.oldGoldAvailableGrams(
+          sourcePurity || undefined,
+          sourceCategory || undefined
+        );
+        if (sourceGrams > available + 0.001) {
+          throw new HttpError(
+            400,
+            `Insufficient old gold: available ${available}g, requested ${sourceGrams}g`
+          );
+        }
+        thaiUnit = itemType === 'THAI_GOLD' ? sourceGrams : null;
+        const settings = await this.getShopSettings();
+        const k2g = Number(settings.kyat_to_grams) || KYAT_TO_GRAMS;
+        // Approximate KPY from grams for snapshot
+        const yway = Math.round((sourceGrams / k2g) * 128);
+        weight = {
+          kyat: Math.floor(yway / 128),
+          pae: Math.floor((yway % 128) / 8),
+          yway: yway % 8,
+        };
+      }
+
+      const [result] = await conn.query<ResultSetHeader>(
+        `INSERT INTO goldsmith_jobs (
+          job_no, source_type, status, inventory_item_id, order_id,
+          item_name, category, purity, item_type,
+          weight_kyat, weight_pae, weight_yway, thai_weight_unit,
+          source_grams, source_purity, source_category,
+          craft_fee, return_due_date, notes
+        ) VALUES (
+          :job_no, :source_type, 'SENT', :inventory_item_id, :order_id,
+          :item_name, :category, :purity, :item_type,
+          :weight_kyat, :weight_pae, :weight_yway, :thai_weight_unit,
+          :source_grams, :source_purity, :source_category,
+          :craft_fee, :return_due_date, :notes
+        )`,
+        {
+          job_no: jobNo,
+          source_type: sourceType,
+          inventory_item_id: inventoryItemId,
+          order_id: orderId,
+          item_name: itemName,
+          category,
+          purity,
+          item_type: itemType,
+          weight_kyat: weight.kyat,
+          weight_pae: weight.pae,
+          weight_yway: weight.yway,
+          thai_weight_unit: thaiUnit,
+          source_grams: sourceGrams,
+          source_purity: sourcePurity,
+          source_category: sourceCategory,
+          craft_fee: craftFee,
+          return_due_date: returnDueDate,
+          notes,
+        }
+      );
+
+      await conn.commit();
+      return this.getGoldsmithJob(strId(result.insertId));
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+
+  async returnGoldsmithJob(id: string, data: Record<string, unknown> = {}) {
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const jobId = parseId(id);
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT * FROM goldsmith_jobs WHERE id = :id FOR UPDATE`,
+        { id: jobId }
+      );
+      if (!rows[0]) throw new HttpError(404, 'Goldsmith job not found');
+      if (String(rows[0].status) !== 'SENT') {
+        throw new HttpError(400, 'Job is not in SENT status');
+      }
+
+      const craftFee =
+        data.craft_fee != null ? num(data.craft_fee) : num(rows[0].craft_fee);
+      const today = new Date().toISOString().slice(0, 10);
+      let returnedInventoryId: number | null = null;
+
+      if (String(rows[0].source_type) === 'INVENTORY' && rows[0].inventory_item_id) {
+        await conn.query(
+          `UPDATE inventory_items SET status = 'IN_STOCK' WHERE id = :id`,
+          { id: rows[0].inventory_item_id }
+        );
+      } else if (String(rows[0].source_type) === 'ORDER' && rows[0].order_id) {
+        await conn.query(
+          `UPDATE orders SET status = 'READY_FOR_PICKUP' WHERE id = :id`,
+          { id: rows[0].order_id }
+        );
+      } else if (String(rows[0].source_type) === 'OLD_GOLD') {
+        const invPayload = (data.inventory as Record<string, unknown>) || data;
+        if (!invPayload.name && !invPayload.name_mm) {
+          throw new HttpError(400, 'inventory fields required when returning old-gold melt');
+        }
+        // Commit first then create inventory outside? Better create inside via separate connection-less path
+        // Use insert with same connection by calling SQL here mirroring addInventoryItem essentials
+        const gross: WeightKPY = {
+          kyat: num(invPayload.weight_kyat),
+          pae: num(invPayload.weight_pae),
+          yway: num(invPayload.weight_yway),
+        };
+        const gemstone: WeightKPY = {
+          kyat: num(invPayload.gemstone_weight_kyat),
+          pae: num(invPayload.gemstone_weight_pae),
+          yway: num(invPayload.gemstone_weight_yway),
+        };
+        const craftDedPae = num(invPayload.craft_deduction_pae ?? invPayload.deduction_pae);
+        const craftDedYway = num(invPayload.craft_deduction_yway ?? invPayload.deduction_yway);
+        const profitDedPae = num(invPayload.profit_deduction_pae);
+        const profitDedYway = num(invPayload.profit_deduction_yway);
+        const totalDedPae = craftDedPae + profitDedPae;
+        const totalDedYway = craftDedYway + profitDedYway;
+        const net =
+          invPayload.net_weight_kyat != null
+            ? {
+                kyat: num(invPayload.net_weight_kyat),
+                pae: num(invPayload.net_weight_pae),
+                yway: num(invPayload.net_weight_yway),
+              }
+            : calculateNetFromParts(gross, gemstone, totalDedPae, totalDedYway);
+        const prices = await this.listPrices();
+        const pure16 = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+        const purity = String(invPayload.purity || rows[0].purity || 'MEELIN');
+        const itemType = String(invPayload.item_type ?? rows[0].item_type ?? 'MYANMAR_GOLD');
+        const craftTotal =
+          num(invPayload.craftsmanship_fee) + num(invPayload.craftsmanship_profit_fee);
+        const stoneTotal =
+          num(invPayload.stone_price) + num(invPayload.stone_profit_price);
+        const thaiUnit =
+          invPayload.thai_weight_unit != null ? num(invPayload.thai_weight_unit) : null;
+        const estimated =
+          invPayload.selling_price_estimated != null &&
+          num(invPayload.selling_price_estimated) > 0
+            ? num(invPayload.selling_price_estimated)
+            : estimateSellingPrice({
+                purity,
+                itemType,
+                netWeight: net,
+                thaiWeightUnit: thaiUnit,
+                craftsmanshipFee: craftTotal,
+                stonePrice: stoneTotal,
+                pricePerKyat16Pe: pure16,
+                specificSellPrice: this.getLivePriceForPurity(prices, purity),
+                thaiRatePerKyat: this.getLivePriceForPurity(prices, 'THAI_GOLD'),
+              });
+        const barcode =
+          invPayload.barcode && String(invPayload.barcode).trim()
+            ? String(invPayload.barcode).trim()
+            : await this.allocateUniqueBarcode();
+        const category = await this.assertActiveCategoryCode(
+          invPayload.category || rows[0].source_category || rows[0].category || 'OTHER'
+        );
+        const [invResult] = await conn.query<ResultSetHeader>(
+          `INSERT INTO inventory_items (
+            barcode, category, name, name_mm,
+            weight_kyat, weight_pae, weight_yway,
+            gemstone_weight_kyat, gemstone_weight_pae, gemstone_weight_yway,
+            craft_deduction_pae, craft_deduction_yway,
+            profit_deduction_pae, profit_deduction_yway,
+            deduction_pae, deduction_yway,
+            net_weight_kyat, net_weight_pae, net_weight_yway,
+            purity, item_type, thai_weight_unit, craftsmanship_fee, craftsmanship_profit_fee,
+            stone_price, stone_profit_price, selling_price_estimated, status, image_url
+          ) VALUES (
+            :barcode, :category, :name, :name_mm,
+            :weight_kyat, :weight_pae, :weight_yway,
+            :gemstone_weight_kyat, :gemstone_weight_pae, :gemstone_weight_yway,
+            :craft_deduction_pae, :craft_deduction_yway,
+            :profit_deduction_pae, :profit_deduction_yway,
+            :deduction_pae, :deduction_yway,
+            :net_weight_kyat, :net_weight_pae, :net_weight_yway,
+            :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :craftsmanship_profit_fee,
+            :stone_price, :stone_profit_price, :selling_price_estimated, 'IN_STOCK', :image_url
+          )`,
+          {
+            barcode,
+            category,
+            name: invPayload.name || invPayload.name_mm,
+            name_mm: invPayload.name_mm || invPayload.name,
+            weight_kyat: gross.kyat,
+            weight_pae: gross.pae,
+            weight_yway: gross.yway,
+            gemstone_weight_kyat: gemstone.kyat,
+            gemstone_weight_pae: gemstone.pae,
+            gemstone_weight_yway: gemstone.yway,
+            craft_deduction_pae: craftDedPae,
+            craft_deduction_yway: craftDedYway,
+            profit_deduction_pae: profitDedPae,
+            profit_deduction_yway: profitDedYway,
+            deduction_pae: totalDedPae,
+            deduction_yway: totalDedYway,
+            net_weight_kyat: net.kyat,
+            net_weight_pae: net.pae,
+            net_weight_yway: net.yway,
+            purity,
+            item_type: itemType,
+            thai_weight_unit: thaiUnit,
+            craftsmanship_fee: num(invPayload.craftsmanship_fee),
+            craftsmanship_profit_fee: num(invPayload.craftsmanship_profit_fee),
+            stone_price: num(invPayload.stone_price),
+            stone_profit_price: num(invPayload.stone_profit_price),
+            selling_price_estimated: estimated,
+            image_url: invPayload.image_url ?? null,
+          }
+        );
+        returnedInventoryId = invResult.insertId;
+      }
+
+      if (craftFee > 0) {
+        await insertLedger(conn, {
+          type: 'EXPENSE',
+          category: 'GOLDSMITH_FEE',
+          amount: craftFee,
+          description: `ပန်းထိမ်လက်ခ ${rows[0].job_no} (${rows[0].item_name})`,
+          reference_no: String(rows[0].job_no),
+          date: today,
+        });
+      }
+
+      await conn.query(
+        `UPDATE goldsmith_jobs SET
+           status = 'RETURNED',
+           craft_fee = :craft_fee,
+           fee_paid = 1,
+           fee_paid_at = NOW(),
+           returned_at = NOW(),
+           returned_inventory_id = :returned_inventory_id
+         WHERE id = :id`,
+        {
+          craft_fee: craftFee,
+          returned_inventory_id: returnedInventoryId,
+          id: jobId,
+        }
+      );
+
+      await conn.commit();
+      return this.getGoldsmithJob(id);
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+
+  async handoffGoldsmithJob(id: string, data: Record<string, unknown>) {
+    const job = await this.getGoldsmithJob(id);
+    if (job.source_type !== 'ORDER') {
+      throw new HttpError(400, 'Handoff is only for ORDER jobs');
+    }
+    if (job.status !== 'RETURNED') {
+      throw new HttpError(400, 'Job must be RETURNED before handoff');
+    }
+    if (!job.order_id) throw new HttpError(400, 'Job has no linked order');
+
+    const [ordRows] = await getPool().query<RowDataPacket[]>(
+      `SELECT * FROM orders WHERE id = :id`,
+      { id: parseId(job.order_id) }
+    );
+    if (!ordRows[0]) throw new HttpError(404, 'Order not found');
+    const order = mapOrder(ordRows[0]);
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) throw new HttpError(400, 'Sale items required');
+
+    const invoiceNo = String(data.invoice_no || generateInvoiceNo('INV'));
+    const paidAmount = num(data.paid_amount);
+    const depositCredit = num(data.deposit_credit ?? order.deposit_amount);
+
+    const txn = await this.createTransaction({
+      invoice_no: invoiceNo,
+      customer_id: order.customer_id || '',
+      customer_name: order.customer_name,
+      customer_phone: order.customer_phone,
+      transaction_type: 'SALE',
+      items,
+      gold_price_snapshot: num(data.gold_price_snapshot ?? order.gold_rate_snapshot),
+      craftsmanship_total: num(data.craftsmanship_total),
+      stone_total: num(data.stone_total),
+      discount_amount: num(data.discount_amount ?? depositCredit),
+      tax_amount: 0,
+      total_amount: num(data.total_amount),
+      paid_amount: paidAmount,
+      remaining_amount: num(data.remaining_amount),
+      payment_method: data.payment_method || 'CASH',
+      notes:
+        data.notes ||
+        `ပန်းထိမ်အပ်ရှင်း — Order ${order.order_no} (စရံ ${depositCredit} နှုတ်ပြီး)`,
+      use_client_total: true,
+      add_to_stock: false,
+    });
+
+    // Settle order remaining + mark completed (via_sale avoids double CUSTOM_ORDER ledger;
+    // SALE already posted GOLD_SALE for paid_amount)
+    await this.updateOrderStatus(job.order_id, 'COMPLETED', undefined, { via_sale: true });
+
+    await getPool().query(
+      `UPDATE goldsmith_jobs SET
+         status = 'HANDED_OVER',
+         sale_transaction_id = :txn_id,
+         handed_over_at = NOW()
+       WHERE id = :id`,
+      { txn_id: parseId(txn.id), id: parseId(id) }
+    );
+
+    return {
+      job: await this.getGoldsmithJob(id),
+      transaction: txn,
+    };
+  },
+
+  async listPawns() {
+    const pool = getPool();
+    // Keep DB status aligned with contract due_date (bidirectional)
+    await pool.query(
+      `UPDATE pawn_records SET status = 'OVERDUE'
+       WHERE status = 'ACTIVE' AND due_date IS NOT NULL AND due_date < CURDATE()`
+    );
+    await pool.query(
+      `UPDATE pawn_records SET status = 'ACTIVE'
+       WHERE status = 'OVERDUE' AND (due_date IS NULL OR due_date >= CURDATE())`
+    );
+    const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT * FROM pawn_records ORDER BY id DESC`
     );
     return rows.map(mapPawn);
@@ -1777,7 +2642,8 @@ export const shopService = {
       `SELECT p.*,
               r.customer_name, r.customer_phone, r.item_name, r.item_type, r.gold_kind, r.purity,
               r.weight_kyat, r.weight_pae, r.weight_yway, r.weight_grams,
-              r.loan_amount, r.loan_amount_baht, r.last_interest_date, r.next_interest_date
+              r.loan_amount, r.loan_amount_baht, r.last_interest_date, r.next_interest_date,
+              r.vno, r.pawn_ticket_no, r.due_date
        FROM pawn_interest_payments p
        LEFT JOIN pawn_records r ON r.id = p.pawn_id
        ORDER BY p.id DESC`
@@ -1839,6 +2705,88 @@ export const shopService = {
     if (!rows[0]) throw new HttpError(404, 'Pawn record not found');
     await getPool().query(`DELETE FROM pawn_records WHERE id = :id`, { id: pawnId });
     return { id: String(pawnId) };
+  },
+
+  async deletePawnInterestPayment(id: string) {
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const paymentId = parseId(id);
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT * FROM pawn_interest_payments WHERE id = :id FOR UPDATE`,
+        { id: paymentId }
+      );
+      if (!rows[0]) throw new HttpError(404, 'Interest payment not found');
+      const payment = rows[0];
+      const pawnId = num(payment.pawn_id);
+      const interestKyat = num(payment.interest_kyat);
+      const interestBaht = num(payment.interest_baht);
+      const voucherNo = String(payment.voucher_no || '');
+
+      const [pawnRows] = await conn.query<RowDataPacket[]>(
+        `SELECT * FROM pawn_records WHERE id = :id FOR UPDATE`,
+        { id: pawnId }
+      );
+      if (!pawnRows[0]) throw new HttpError(404, 'Pawn record not found');
+
+      await conn.query(`DELETE FROM pawn_interest_payments WHERE id = :id`, { id: paymentId });
+
+      if (voucherNo) {
+        await conn.query(
+          `DELETE FROM financial_ledger WHERE reference_no = :ref AND category = 'PAWN_INTEREST'`,
+          { ref: voucherNo }
+        );
+      }
+
+      const [remaining] = await conn.query<RowDataPacket[]>(
+        `SELECT payment_date, days_paid
+         FROM pawn_interest_payments
+         WHERE pawn_id = :pawn_id
+         ORDER BY payment_date DESC, id DESC
+         LIMIT 1`,
+        { pawn_id: pawnId }
+      );
+
+      let lastInterest = String(pawnRows[0].start_date).slice(0, 10);
+      let nextInterest = lastInterest;
+      if (remaining[0]) {
+        lastInterest = String(remaining[0].payment_date).slice(0, 10);
+        const days = Math.max(1, num(remaining[0].days_paid, 30));
+        const d = new Date(lastInterest);
+        d.setDate(d.getDate() + days);
+        nextInterest = d.toISOString().slice(0, 10);
+      } else {
+        const d = new Date(lastInterest);
+        d.setMonth(d.getMonth() + 1);
+        nextInterest = d.toISOString().slice(0, 10);
+      }
+
+      await conn.query(
+        `UPDATE pawn_records SET
+           interest_paid_kyat = GREATEST(0, interest_paid_kyat - :kyat),
+           interest_paid_baht = GREATEST(0, interest_paid_baht - :baht),
+           last_interest_date = :last_date,
+           next_interest_date = :next_date,
+           accrued_interest = accrued_interest + :kyat
+         WHERE id = :id`,
+        {
+          id: pawnId,
+          kyat: interestKyat,
+          baht: interestBaht,
+          last_date: lastInterest,
+          next_date: nextInterest,
+        }
+      );
+
+      await conn.commit();
+      return { id: String(paymentId) };
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
   },
 
   async addPawn(data: Record<string, unknown>) {
@@ -1909,9 +2857,12 @@ export const shopService = {
 
       await insertLedger(conn, {
         type: 'EXPENSE',
-        category: 'OTHER_EXPENSE',
-        amount: num(data.loan_amount),
-        description: `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${data.pawn_ticket_no} - ${data.customer_name})`,
+        category: 'PAWN_LOAN',
+        amount: num(data.loan_amount) > 0 ? num(data.loan_amount) : num(data.loan_amount_baht),
+        description:
+          num(data.loan_amount) > 0
+            ? `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${data.pawn_ticket_no} - ${data.customer_name})`
+            : `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း ဘတ် (${data.pawn_ticket_no} - ${data.customer_name})`,
         reference_no: String(data.pawn_ticket_no),
         date: startDate,
       });
@@ -1945,7 +2896,8 @@ export const shopService = {
       }
 
       const paymentDate = String(data.payment_date || new Date().toISOString().slice(0, 10));
-      const monthsPaid = Math.max(1, num(data.months_paid, 1));
+      const daysPaid = Math.max(1, num(data.days_paid, num(data.months_paid, 1) * 30));
+      const monthsPaid = Math.max(1, Math.round(daysPaid / 30) || 1);
       const interestKyat = num(data.interest_kyat);
       const interestBaht = num(data.interest_baht);
       const rate = num(data.interest_rate, num(rows[0].monthly_interest_rate, 5));
@@ -1956,21 +2908,22 @@ export const shopService = {
 
       const nextDate = (() => {
         const base = new Date(paymentDate);
-        base.setMonth(base.getMonth() + monthsPaid);
+        base.setDate(base.getDate() + daysPaid);
         return base.toISOString().slice(0, 10);
       })();
 
       await conn.query<ResultSetHeader>(
         `INSERT INTO pawn_interest_payments (
-          pawn_id, voucher_no, payment_date, months_paid, interest_kyat, interest_baht, interest_rate, notes
+          pawn_id, voucher_no, payment_date, months_paid, days_paid, interest_kyat, interest_baht, interest_rate, notes
         ) VALUES (
-          :pawn_id, :voucher_no, :payment_date, :months_paid, :interest_kyat, :interest_baht, :interest_rate, :notes
+          :pawn_id, :voucher_no, :payment_date, :months_paid, :days_paid, :interest_kyat, :interest_baht, :interest_rate, :notes
         )`,
         {
           pawn_id: pawnId,
           voucher_no: voucherNo,
           payment_date: paymentDate,
           months_paid: monthsPaid,
+          days_paid: daysPaid,
           interest_kyat: interestKyat,
           interest_baht: interestBaht,
           interest_rate: rate,
@@ -2004,6 +2957,15 @@ export const shopService = {
           reference_no: voucherNo,
           date: paymentDate,
         });
+      } else if (interestBaht > 0) {
+        await insertLedger(conn, {
+          type: 'INCOME',
+          category: 'PAWN_INTEREST',
+          amount: interestBaht,
+          description: `အပေါင်အတိုးသွင်း ဘတ် (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
+          reference_no: voucherNo,
+          date: paymentDate,
+        });
       }
 
       await conn.commit();
@@ -2011,7 +2973,8 @@ export const shopService = {
         `SELECT p.*,
                 r.customer_name, r.customer_phone, r.item_name, r.item_type, r.gold_kind, r.purity,
                 r.weight_kyat, r.weight_pae, r.weight_yway, r.weight_grams,
-                r.loan_amount, r.loan_amount_baht, r.last_interest_date, r.next_interest_date
+                r.loan_amount, r.loan_amount_baht, r.last_interest_date, r.next_interest_date,
+                r.vno, r.pawn_ticket_no, r.due_date
          FROM pawn_interest_payments p
          LEFT JOIN pawn_records r ON r.id = p.pawn_id
          WHERE p.pawn_id = :id
@@ -2042,12 +3005,15 @@ export const shopService = {
       const redeemDate = String(extra.redeem_date || new Date().toISOString().slice(0, 10));
       const totalKyat = num(extra.redeem_total_kyat, settlementAmount);
       const totalBaht = num(extra.redeem_total_baht);
+      const redeemDays = Math.max(1, num(extra.redeem_days, num(extra.redeem_months, 1) * 30));
+      const redeemMonths = Math.max(1, Math.round(redeemDays / 30) || 1);
 
       await conn.query(
         `UPDATE pawn_records SET
            status = 'REDEEMED',
            redeem_date = :redeem_date,
            redeem_months = :redeem_months,
+           redeem_days = :redeem_days,
            redeem_interest_kyat = :redeem_interest_kyat,
            redeem_interest_baht = :redeem_interest_baht,
            discount_kyat = :discount_kyat,
@@ -2060,7 +3026,8 @@ export const shopService = {
         {
           id: pawnId,
           redeem_date: redeemDate,
-          redeem_months: num(extra.redeem_months, 1),
+          redeem_months: redeemMonths,
+          redeem_days: redeemDays,
           redeem_interest_kyat: num(extra.redeem_interest_kyat),
           redeem_interest_baht: num(extra.redeem_interest_baht),
           discount_kyat: num(extra.discount_kyat),
@@ -2074,8 +3041,11 @@ export const shopService = {
       await insertLedger(conn, {
         type: 'INCOME',
         category: 'PAWN_INTEREST',
-        amount: totalKyat,
-        description: `ပေါင်နှံပစ္စည်း လာရောက်ရွေးယူငွေ (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
+        amount: totalKyat > 0 ? totalKyat : totalBaht,
+        description:
+          totalKyat > 0
+            ? `ပေါင်နှံပစ္စည်း လာရောက်ရွေးယူငွေ (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`
+            : `ပေါင်နှံပစ္စည်း လာရောက်ရွေးယူငွေ ဘတ် (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
         reference_no: rows[0].pawn_ticket_no,
         date: redeemDate,
       });
@@ -2085,6 +3055,61 @@ export const shopService = {
         id: pawnId,
       });
       return mapPawn(updated[0]);
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+
+  async deletePawnRedeem(id: string) {
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const pawnId = parseId(id);
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT * FROM pawn_records WHERE id = :id FOR UPDATE`,
+        { id: pawnId }
+      );
+      if (!rows[0]) throw new HttpError(404, 'Pawn record not found');
+      if (String(rows[0].status) !== 'REDEEMED') {
+        throw new HttpError(400, 'Pawn is not redeemed');
+      }
+
+      const ticketNo = String(rows[0].pawn_ticket_no || '');
+      if (ticketNo) {
+        await conn.query(
+          `DELETE FROM financial_ledger
+           WHERE reference_no = :ref
+             AND category = 'PAWN_INTEREST'
+             AND description LIKE :desc`,
+          { ref: ticketNo, desc: '%လာရောက်ရွေးယူ%' }
+        );
+      }
+
+      await conn.query(
+        `UPDATE pawn_records SET
+           status = CASE
+             WHEN due_date IS NOT NULL AND due_date < CURDATE() THEN 'OVERDUE'
+             ELSE 'ACTIVE'
+           END,
+           redeem_date = NULL,
+           redeem_months = NULL,
+           redeem_days = NULL,
+           redeem_interest_kyat = NULL,
+           redeem_interest_baht = NULL,
+           discount_kyat = NULL,
+           discount_baht = NULL,
+           redeem_total_kyat = NULL,
+           redeem_total_baht = NULL
+         WHERE id = :id`,
+        { id: pawnId }
+      );
+
+      await conn.commit();
+      return { id: String(pawnId) };
     } catch (err) {
       await conn.rollback();
       throw err;
@@ -2174,6 +3199,7 @@ export const shopService = {
     const customersWithBalance = customers.filter((c) => c.outstanding_balance > 0);
     const openOrders = orders.filter((o) => o.status === 'PENDING' || o.status === 'IN_PRODUCTION');
     const activePawns = pawns.filter((p) => p.status === 'ACTIVE' || p.status === 'OVERDUE');
+    const pawnLoanTotalMmk = activePawns.reduce((s, p) => s + (p.loan_amount || 0), 0);
 
     return {
       generated_at: new Date().toISOString(),
@@ -2191,8 +3217,77 @@ export const shopService = {
       },
       open_orders: openOrders.length,
       active_pawns: activePawns.length,
+      pawn_loan_total_mmk: pawnLoanTotalMmk,
       customers_with_balance: customersWithBalance.length,
       customer_balance_total: customersWithBalance.reduce((s, c) => s + c.outstanding_balance, 0),
+    };
+  },
+
+  /**
+   * Detailed cashflow report from financial_ledger (excludes pawn loan / interest / redeem).
+   */
+  async reportFinancial(from?: string, to?: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const fromDate = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : monthStart;
+    const toDate = to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? to : today;
+
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT * FROM financial_ledger
+       WHERE date >= :fromDate AND date <= :toDate
+       ORDER BY date ASC, id ASC`,
+      { fromDate, toDate }
+    );
+
+    const PAWN_CATS = new Set(['PAWN_INTEREST', 'PAWN_LOAN']);
+    const isExcluded = (row: RowDataPacket) => {
+      const cat = String(row.category || '');
+      if (PAWN_CATS.has(cat)) return true;
+      // Legacy pawn disbursements posted as OTHER_EXPENSE
+      if (
+        cat === 'OTHER_EXPENSE' &&
+        String(row.description || '').startsWith('ပေါင်နှံပစ္စည်း ချေးငွေ')
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    const entries = rows.filter((r) => !isExcluded(r)).map(mapLedger);
+
+    const byCatMap = new Map<string, { category: string; type: string; count: number; total: number }>();
+    let income = 0;
+    let expense = 0;
+    for (const e of entries) {
+      const key = `${e.type}|${e.category}`;
+      const prev = byCatMap.get(key) || {
+        category: String(e.category),
+        type: String(e.type),
+        count: 0,
+        total: 0,
+      };
+      prev.count += 1;
+      prev.total += Number(e.amount) || 0;
+      byCatMap.set(key, prev);
+      if (e.type === 'INCOME') income += Number(e.amount) || 0;
+      else expense += Number(e.amount) || 0;
+    }
+
+    const by_category = Array.from(byCatMap.values()).sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'INCOME' ? -1 : 1;
+      return b.total - a.total;
+    });
+
+    return {
+      from: fromDate,
+      to: toDate,
+      entries,
+      by_category,
+      totals: {
+        income,
+        expense,
+        net: income - expense,
+      },
     };
   },
 
@@ -2206,6 +3301,7 @@ export const shopService = {
         'customer_tracking',
         'financial_ledger',
         'pawn_records',
+        'goldsmith_jobs',
         'orders',
         'transaction_items',
         'transactions',

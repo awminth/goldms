@@ -217,36 +217,207 @@
   }
 }
 
-/* Print Optimization for Gold Shop Vouchers & Pawn Tickets */
+/* Voucher table cells (sales invoice layout) */
+.voucher-th {
+  border: 1px solid #3d2e14;
+  padding: 6px 4px;
+  font-weight: 700;
+  font-size: 10px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.voucher-cell {
+  border: 1px solid #d4c4a0;
+  padding: 4px 3px;
+  vertical-align: middle;
+  background: #fffef9;
+}
+
+.voucher-item-row:nth-child(5n + 1) .voucher-cell,
+.voucher-item-row:nth-child(5n + 2) .voucher-cell,
+.voucher-item-row:nth-child(5n + 3) .voucher-cell,
+.voucher-item-row:nth-child(5n + 4) .voucher-cell,
+.voucher-item-row:nth-child(5n + 5) .voucher-cell {
+  border-bottom-color: #d4c4a0;
+}
+
+.voucher-main-table {
+  border: 1.5px solid #c5a059;
+}
+
+/*
+ * Print: paper size comes from the printer dialog (A4, Letter, 80mm thermal, etc.).
+ * Do not force A4 — keep layout fluid to the printable area.
+ */
 @media print {
-  body {
-    background-color: #ffffff !important;
-    color: #000000 !important;
+  @page {
+    size: auto;
+    margin: 5mm;
   }
 
-  nav, header, button, .print\:hidden {
+  html,
+  body {
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  nav,
+  header,
+  aside,
+  button,
+  .print\:hidden {
     display: none !important;
   }
 
-  #printable-voucher {
-    border: 1px solid #999 !important;
-    box-shadow: none !important;
-    background: #ffffff !important;
+  /* Collapse modal chrome so it does not constrain / offset the page */
+  [role='dialog'] {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
     margin: 0 !important;
-    padding: 10px !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-voucher,
+  #printable-voucher *,
+  .printable-doc,
+  .printable-doc * {
+    visibility: visible !important;
+  }
+
+  #printable-voucher,
+  .printable-doc {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    display: block !important;
     width: 100% !important;
     max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    font-size: 10pt;
+    line-height: 1.35;
+  }
+
+  #printable-voucher *,
+  .printable-doc * {
+    box-sizing: border-box !important;
+  }
+
+  /* Fluid tables — fit whatever paper width the printer uses */
+  #printable-voucher table,
+  .printable-doc table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: auto !important;
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
+  }
+
+  #printable-voucher .voucher-th {
+    background: #1a1208 !important;
+    color: #f5e6c8 !important;
+    border: 1px solid #000 !important;
+    padding: 3px 4px !important;
+    font-size: 8.5pt !important;
+  }
+
+  #printable-voucher .voucher-cell {
+    border: 1px solid #777 !important;
+    background: #fff !important;
+    padding: 2px 3px !important;
+    font-size: 8.5pt !important;
   }
 
   #printable-voucher table th,
-  #printable-voucher table td {
-    padding: 4px 6px !important;
-    border: none !important;
-    border-radius: 0 !important;
-    background: transparent !important;
+  #printable-voucher table td,
+  .printable-doc table th,
+  .printable-doc table td {
+    padding: 2px 3px !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    white-space: normal !important;
   }
 
-  #printable-voucher table {
-    border-spacing: 0 !important;
+  /* Drop screen-only width locks that overflow narrow / thermal paper */
+  #printable-voucher [class*='min-w-'],
+  #printable-voucher [class*='max-w-'],
+  #printable-voucher [class*='w-['],
+  .printable-doc [class*='min-w-'],
+  .printable-doc [class*='max-w-'],
+  .printable-doc [class*='w-['] {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  #printable-voucher .overflow-x-auto,
+  #printable-voucher .overflow-hidden,
+  #printable-voucher .overflow-y-auto,
+  .printable-doc .overflow-x-auto,
+  .printable-doc .overflow-hidden,
+  .printable-doc .overflow-y-auto {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  #printable-voucher img,
+  #printable-voucher svg,
+  .printable-doc img,
+  .printable-doc svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  #printable-voucher tr,
+  .printable-doc tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Prefer fluid 2-col when space allows; always allow shrink */
+  #printable-voucher .voucher-print-split,
+  .printable-doc .voucher-print-split {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) !important;
+    gap: 3mm !important;
+    align-items: start !important;
+  }
+
+  /* Narrow / thermal paper: stack sections */
+  @media (max-width: 100mm) {
+    #printable-voucher .voucher-print-split,
+    .printable-doc .voucher-print-split {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
   }
 }

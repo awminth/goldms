@@ -14,6 +14,7 @@ import type {
   RolePermission,
   UserRole,
   ShopSettings,
+  GoldsmithJob,
 } from '../types/gold';
 
 const API_BASE = '/api';
@@ -31,6 +32,36 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return body.data as T;
 }
 
+/** Retry when API is still booting (ECONNREFUSED / empty proxy response). */
+async function requestWithRetry<T>(
+  path: string,
+  options?: RequestInit,
+  retries = 12,
+  delayMs = 500
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await request<T>(path, options);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const retryable =
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('ECONNREFUSED') ||
+        msg.includes('fetch') ||
+        msg.includes('API starting') ||
+        msg.includes('Request failed (502)') ||
+        msg.includes('Request failed (503)') ||
+        msg.includes('Request failed (504)');
+      if (!retryable || i === retries - 1) throw err;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 export type BootstrapData = {
   prices: DailyGoldPrice[];
   inventory: InventoryItem[];
@@ -45,12 +76,13 @@ export type BootstrapData = {
   modules?: PermissionModule[];
   rolePermissions?: RolePermission[];
   settings?: ShopSettings;
+  goldsmithJobs?: GoldsmithJob[];
 };
 
 export const api = {
   health: () => fetch(`${API_BASE}/health`).then((r) => r.json()),
 
-  bootstrap: () => request<BootstrapData>('/bootstrap'),
+  bootstrap: () => requestWithRetry<BootstrapData>('/bootstrap'),
 
   login: (username: string, pin: string) =>
     request<StaffUser>('/auth/login', {
@@ -169,11 +201,56 @@ export const api = {
       body: JSON.stringify(order),
     }),
 
-  updateOrderStatus: (id: string, status: CustomOrder['status'], remainingPaid?: number) =>
+  updateCustomOrder: (id: string, data: Record<string, unknown>) =>
+    request<CustomOrder>(`/orders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  updateOrderStatus: (
+    id: string,
+    status: CustomOrder['status'],
+    remainingPaid?: number,
+    opts?: { via_sale?: boolean }
+  ) =>
     request<CustomOrder>(`/orders/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, remainingPaid }),
+      body: JSON.stringify({ status, remainingPaid, via_sale: opts?.via_sale }),
     }),
+
+  listGoldsmithJobs: () => request<GoldsmithJob[]>('/goldsmith-jobs'),
+
+  createGoldsmithJob: (data: Record<string, unknown>) =>
+    request<GoldsmithJob>('/goldsmith-jobs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  returnGoldsmithJob: (id: string, data?: Record<string, unknown>) =>
+    request<GoldsmithJob>(`/goldsmith-jobs/${id}/return`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
+  cancelGoldsmithJob: (id: string) =>
+    request<void>(`/goldsmith-jobs/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
+  handoffGoldsmithJob: (id: string, data: Record<string, unknown>) =>
+    request<{ job: GoldsmithJob; transaction: Transaction }>(`/goldsmith-jobs/${id}/handoff`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  oldGoldAvailable: (purity?: string, category?: string) => {
+    const qs = new URLSearchParams();
+    if (purity) qs.set('purity', purity);
+    if (category) qs.set('category', category);
+    const q = qs.toString();
+    return request<{ available: number }>(`/goldsmith-jobs/old-gold-available${q ? `?${q}` : ''}`);
+  },
 
   addPawnRecord: (pawn: Omit<PawnRecord, 'id'>) =>
     request<PawnRecord>('/pawns', {
@@ -192,10 +269,21 @@ export const api = {
       method: 'DELETE',
     }),
 
+  deletePawnInterestPayment: (id: string) =>
+    request<{ id: string }>(`/pawns/interest-payments/${id}`, {
+      method: 'DELETE',
+    }),
+
+  deletePawnRedeem: (id: string) =>
+    request<{ id: string }>(`/pawns/${id}/redeem`, {
+      method: 'DELETE',
+    }),
+
   payPawnInterest: (
     id: string,
     data: {
       payment_date?: string;
+      days_paid?: number;
       months_paid?: number;
       interest_kyat?: number;
       interest_baht?: number;
@@ -254,6 +342,14 @@ export const api = {
 
   reportSummary: () => request<ReportSummary>('/reports/summary'),
 
+  reportFinancial: (from?: string, to?: string) => {
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    const qs = q.toString();
+    return request<FinancialReport>(`/reports/financial${qs ? `?${qs}` : ''}`);
+  },
+
   resetToDemoData: () => request<BootstrapData>('/reset-demo', { method: 'POST' }),
 };
 
@@ -264,6 +360,33 @@ export type ReportSummary = {
   stock?: { count: number; estimated_value: number };
   open_orders?: number;
   active_pawns?: number;
+  /** Active + overdue pawn loan principal sum (MMK) */
+  pawn_loan_total_mmk?: number;
   customers_with_balance: number;
   customer_balance_total: number;
+};
+
+export type FinancialReport = {
+  from: string;
+  to: string;
+  entries: Array<{
+    id: string;
+    type: 'INCOME' | 'EXPENSE' | string;
+    category: string;
+    amount: number;
+    description: string;
+    reference_no?: string;
+    date: string;
+  }>;
+  by_category: Array<{
+    category: string;
+    type: string;
+    count: number;
+    total: number;
+  }>;
+  totals: {
+    income: number;
+    expense: number;
+    net: number;
+  };
 };

@@ -1,23 +1,30 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
+import { useDialog } from '../context/DialogContext';
 import {
   TransactionItem,
   GoldPurity,
   Customer,
   Transaction,
+  InventoryItem,
 } from '../types/gold';
 import {
   formatMMK,
+  formatBaht,
   formatKPYMyanmar,
   kpyToYway,
   calculateNetWeight,
+  calculateNetFromParts,
   estimateSellingPrice,
   calculateSaleLineBreakdown,
+  calculateThaiGoldPrice,
   generateInvoiceNo,
   PURITY_LABELS,
   gramsToKpy,
   kpyToGrams,
   KYAT_TO_GRAMS,
+  bahtToMmk,
+  mmkToBaht,
 } from '../utils/goldCalculations';
 import {
   ReceiptText,
@@ -28,6 +35,7 @@ import {
   Plus,
   Trash2,
   Printer,
+  PackageMinus,
   CheckCircle,
   User,
   Sparkles,
@@ -38,14 +46,124 @@ import {
   Check,
 } from 'lucide-react';
 import { ModalOverlay } from './ModalOverlay';
-import { groupInventoryProducts, type StockProductGroup } from '../utils/inventoryGrouping';
+import { NumberInput } from './NumberInput';
 
-type PosMode = 'SALE' | 'PURCHASE' | 'EXCHANGE';
+type PosMode = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT';
 
 type Props = {
   /** When set, locks to one mode. When omitted, shows SALE / PURCHASE / EXCHANGE tabs. */
   mode?: PosMode;
 };
+
+type ThaiSaleCurrency = 'MMK' | 'BAHT';
+
+type ThaiLineAmounts = {
+  gold_amount: number;
+  craftsmanship_fee: number;
+  stone_price: number;
+  wastage_amount: number;
+  subtotal: number;
+  gold_price_snapshot: number;
+};
+
+function thaiFxRates(shopSettings?: {
+  thai_gold_baht?: number;
+  baht_to_mmk_buy?: number;
+  baht_to_mmk_sell?: number;
+}) {
+  return {
+    thaiBahtRate: shopSettings?.thai_gold_baht || 65000,
+    buyRate: shopSettings?.baht_to_mmk_buy || 755,
+    sellRate: shopSettings?.baht_to_mmk_sell || 765,
+  };
+}
+
+/** Live Thai line in Baht or MMK using Header FX formula (rate / 100000). */
+function buildThaiSaleLine(
+  inv: Pick<
+    InventoryItem,
+    | 'thai_weight_unit'
+    | 'craftsmanship_fee'
+    | 'craftsmanship_profit_fee'
+    | 'stone_price'
+    | 'stone_profit_price'
+  >,
+  currency: ThaiSaleCurrency,
+  shopSettings?: {
+    thai_gold_baht?: number;
+    baht_to_mmk_buy?: number;
+    baht_to_mmk_sell?: number;
+  }
+): ThaiLineAmounts {
+  const { thaiBahtRate, buyRate, sellRate } = thaiFxRates(shopSettings);
+  const grams = Number(inv.thai_weight_unit || 0);
+  const craftMmk =
+    Number(inv.craftsmanship_fee || 0) + Number(inv.craftsmanship_profit_fee || 0);
+  // Inventory saved Baht→MMK with sell rate — reverse MMK→Baht uses BUY rate
+  const craftBaht = mmkToBaht(craftMmk, buyRate);
+  const baht = calculateThaiGoldPrice(grams, thaiBahtRate, 0);
+
+  if (currency === 'BAHT') {
+    const gold = baht.baseGoldPrice;
+    const craft = Number(craftBaht.toFixed(2));
+    return {
+      gold_amount: gold,
+      craftsmanship_fee: craft,
+      stone_price: 0,
+      wastage_amount: 0,
+      subtotal: Math.max(0, gold + craft),
+      gold_price_snapshot: thaiBahtRate,
+    };
+  }
+
+  // Baht → MMK uses SELL rate
+  const goldMmk = Math.round(bahtToMmk(baht.baseGoldPrice, sellRate));
+  return {
+    gold_amount: goldMmk,
+    craftsmanship_fee: craftMmk,
+    stone_price: 0,
+    wastage_amount: 0,
+    subtotal: Math.max(0, goldMmk + craftMmk),
+    gold_price_snapshot: Math.round(bahtToMmk(thaiBahtRate, sellRate)),
+  };
+}
+
+function thaiDisplayPrices(
+  inv: InventoryItem,
+  shopSettings?: {
+    thai_gold_baht?: number;
+    baht_to_mmk_buy?: number;
+    baht_to_mmk_sell?: number;
+  }
+) {
+  const bahtLine = buildThaiSaleLine(inv, 'BAHT', shopSettings);
+  const mmkLine = buildThaiSaleLine(inv, 'MMK', shopSettings);
+  return { baht: bahtLine.subtotal, mmk: mmkLine.subtotal };
+}
+
+function bahtCartLineToMmk(
+  item: TransactionItem,
+  shopSettings?: {
+    baht_to_mmk_buy?: number;
+    baht_to_mmk_sell?: number;
+  }
+): TransactionItem {
+  const { sellRate } = thaiFxRates(shopSettings);
+  // Baht → MMK always uses SELL rate
+  const gold = Math.round(bahtToMmk(Number(item.gold_amount || 0), sellRate));
+  const craft = Math.round(bahtToMmk(Number(item.craftsmanship_fee || 0), sellRate));
+  return {
+    ...item,
+    gold_amount: gold,
+    craftsmanship_fee: craft,
+    stone_price: 0,
+    wastage_amount: 0,
+    subtotal: Math.max(0, gold + craft),
+    gold_price_snapshot: Math.round(
+      bahtToMmk(Number(item.gold_price_snapshot || 0), sellRate)
+    ),
+  };
+}
 
 export const PosView: React.FC<Props> = ({ mode }) => {
   const {
@@ -58,11 +176,19 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     setSelectedVoucher,
     getLivePriceForPurity,
     getBuyPriceForPurity,
-    masterCategories,
     shopSettings,
+    masterCategories,
   } = useGoldShop();
+  const dialog = useDialog();
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
+  const productCategories = useMemo(
+    () =>
+      masterCategories.filter(
+        (c) => (c.category_group || 'PRODUCT') === 'PRODUCT' || c.category_group === 'OTHER'
+      ),
+    [masterCategories]
+  );
 
   const [activeSubTab, setActiveSubTab] = useState<PosMode>(mode || 'SALE');
 
@@ -73,16 +199,30 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const showModeTabs = !mode;
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(customers[0] || null);
-  const [customCustomerName, setCustomCustomerName] = useState('');
-  const [customCustomerPhone, setCustomCustomerPhone] = useState('');
-  const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [draftCustomerName, setDraftCustomerName] = useState('');
   const [draftCustomerPhone, setDraftCustomerPhone] = useState('');
+  const [savingCustomer, setSavingCustomer] = useState(false);
+
+  // Keep selected customer in sync after list refresh / new save
+  useEffect(() => {
+    if (!customers.length) {
+      setSelectedCustomer(null);
+      return;
+    }
+    setSelectedCustomer((prev) => {
+      if (prev) {
+        const still = customers.find((c) => c.id === prev.id);
+        if (still) return still;
+      }
+      return customers[0];
+    });
+  }, [customers]);
 
   const [cartItems, setCartItems] = useState<TransactionItem[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
-  const [stockCategory, setStockCategory] = useState<string>('ALL');
+  const [stockCategory, setStockCategory] = useState<string>('MYANMAR_GOLD');
+  const [thaiSaleCurrency, setThaiSaleCurrency] = useState<ThaiSaleCurrency>('MMK');
   const [stockView, setStockView] = useState<'grid' | 'list'>('grid');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,13 +230,6 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'KPAY' | 'WAVEPAY' | 'BANK_TRANSFER' | 'CARD'>('CASH');
   const [amountPaidInput, setAmountPaidInput] = useState<string>('');
   const [saleNotes, setSaleNotes] = useState('');
-  const [isInstallment, setIsInstallment] = useState(false);
-  const [creditDueDate, setCreditDueDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [interestRate, setInterestRate] = useState(0);
 
   const cartIds = useMemo(
     () => new Set(cartItems.map((c) => c.item_id).filter(Boolean) as string[]),
@@ -116,8 +249,8 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     return inStockItems.filter((i) => {
       if (stockCategory === 'THAI_GOLD') {
         if (!isThaiItem(i)) return false;
-      } else if (stockCategory !== 'ALL') {
-        if (isThaiItem(i) || i.category !== stockCategory) return false;
+      } else if (stockCategory === 'MYANMAR_GOLD') {
+        if (isThaiItem(i)) return false;
       }
       if (!q) return true;
       return (
@@ -129,79 +262,40 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     });
   }, [inStockItems, inventorySearch, stockCategory]);
 
-  const stockFilterChips = useMemo(() => {
-    const myanmarCats = masterCategories.filter(
-      (c) => c.is_active && (c.category_group === 'PRODUCT' || !c.category_group)
-    );
-    const fromStock = Array.from(
-      new Set(
-        inStockItems.filter((i) => !isThaiItem(i)).map((i) => i.category)
-      )
-    );
-    const codes =
-      myanmarCats.length > 0
-        ? myanmarCats.map((c) => ({
-            id: c.code,
-            labelMM: c.name_mm,
-            labelEN: c.name_en,
-          }))
-        : fromStock.map((code) => ({ id: code, labelMM: code, labelEN: code }));
-
-    return [
-      { id: 'ALL', labelMM: 'အားလုံး', labelEN: 'All' },
+  const stockFilterChips = useMemo(
+    () => [
       { id: 'THAI_GOLD', labelMM: 'ထိုင်းရွှေ', labelEN: 'Thai Gold' },
-      ...codes,
-    ];
-  }, [masterCategories, inStockItems]);
-
-  const stockGrouped = useMemo(() => {
-    const toProductGroups = (items: typeof filteredStock) =>
-      groupInventoryProducts(items).filter((g) => g.remainingQty > 0);
-
-    if (stockCategory !== 'ALL') {
-      return [{ key: stockCategory, label: '', products: toProductGroups(filteredStock) }];
-    }
-    const thai = filteredStock.filter(isThaiItem);
-    const byCat = new Map<string, typeof filteredStock>();
-    for (const i of filteredStock.filter((x) => !isThaiItem(x))) {
-      const list = byCat.get(i.category) || [];
-      list.push(i);
-      byCat.set(i.category, list);
-    }
-    const groups: { key: string; label: string; products: StockProductGroup[] }[] = [];
-    if (thai.length) {
-      groups.push({
-        key: 'THAI_GOLD',
-        label: language === 'MM' ? 'ထိုင်းရွှေ' : 'Thai Gold',
-        products: toProductGroups(thai),
-      });
-    }
-    for (const chip of stockFilterChips) {
-      if (chip.id === 'ALL' || chip.id === 'THAI_GOLD') continue;
-      const items = byCat.get(chip.id);
-      if (items?.length) {
-        groups.push({
-          key: chip.id,
-          label: language === 'MM' ? chip.labelMM : chip.labelEN,
-          products: toProductGroups(items),
-        });
-      }
-    }
-    for (const [code, items] of byCat) {
-      if (!groups.some((g) => g.key === code)) {
-        groups.push({ key: code, label: code, products: toProductGroups(items) });
-      }
-    }
-    return groups;
-  }, [filteredStock, stockCategory, stockFilterChips, language]);
-
-  const stockProductCount = useMemo(
-    () => stockGrouped.reduce((n, g) => n + g.products.length, 0),
-    [stockGrouped]
+      { id: 'MYANMAR_GOLD', labelMM: 'မြန်မာရွှေ', labelEN: 'Myanmar Gold' },
+    ],
+    []
   );
 
-  const stockPieceCount = useMemo(
-    () => stockGrouped.reduce((n, g) => n + g.products.reduce((m, p) => m + p.remainingQty, 0), 0),
+  const stockGrouped = useMemo(() => {
+    const list = (items: typeof filteredStock) =>
+      [...items].sort((a, b) =>
+        (a.name_mm || a.name).localeCompare(b.name_mm || b.name)
+      );
+
+    if (stockCategory === 'THAI_GOLD') {
+      return [
+        {
+          key: 'THAI_GOLD',
+          label: language === 'MM' ? 'ထိုင်းရွှေ' : 'Thai Gold',
+          items: list(filteredStock),
+        },
+      ];
+    }
+    return [
+      {
+        key: 'MYANMAR_GOLD',
+        label: language === 'MM' ? 'မြန်မာရွှေ' : 'Myanmar Gold',
+        items: list(filteredStock),
+      },
+    ];
+  }, [filteredStock, stockCategory, language]);
+
+  const stockItemCount = useMemo(
+    () => stockGrouped.reduce((n, g) => n + g.items.length, 0),
     [stockGrouped]
   );
   useEffect(() => {
@@ -212,7 +306,33 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     const inv = inventory.find((i) => i.id === itemId);
     if (!inv) return;
     if (cartItems.some((c) => c.item_id === inv.id)) {
-      alert(language === 'MM' ? 'ဤပစ္စည်းသည် စာရင်းထဲတွင် ရောက်ရှိနေပြီးဖြစ်ပါသည်' : 'Item is already in cart');
+      void dialog.alert(language === 'MM' ? 'ဤပစ္စည်းသည် စာရင်းထဲတွင် ရောက်ရှိနေပြီးဖြစ်ပါသည်' : 'Item is already in cart');
+      return;
+    }
+    const cartHasThai = cartItems.some((c) => isThaiItem(c));
+    const cartHasMm = cartItems.some((c) => !isThaiItem(c));
+    if (cartHasThai && !isThaiItem(inv)) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'ထိုင်းရွှေနဲ့ မြန်မာရွှေ တူတူရောင်းလို့ မရပါ — မြန်မာရွှေမထည့်မီ ထိုင်းရွှေကို ဖယ်ပါ'
+          : 'Cannot mix Thai and Myanmar gold — clear Thai items first'
+      );
+      return;
+    }
+    if (cartHasMm && isThaiItem(inv)) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'ထိုင်းရွှေနဲ့ မြန်မာရွှေ တူတူရောင်းလို့ မရပါ — ထိုင်းရွှေမထည့်မီ မြန်မာရွှေကို ဖယ်ပါ'
+          : 'Cannot mix Thai and Myanmar gold — clear Myanmar items first'
+      );
+      return;
+    }
+    if (thaiSaleCurrency === 'BAHT' && !isThaiItem(inv)) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'Baht ငွေကြေးရွေးထားချိန်တွင် မြန်မာရွှေ မထည့်နိုင်ပါ — MMK သို့ ပြောင်းပါ'
+          : 'Myanmar gold cannot be added while Baht currency is selected — switch to MMK'
+      );
       return;
     }
     const netKpy = { kyat: inv.net_weight_kyat, pae: inv.net_weight_pae, yway: inv.net_weight_yway };
@@ -221,19 +341,40 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       pae: inv.gemstone_weight_pae || 0,
       yway: inv.gemstone_weight_yway || 0,
     };
-    const pure16Price = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
-    const specificPrice = getLivePriceForPurity(inv.purity);
-    const breakdown = calculateSaleLineBreakdown({
-      purity: inv.purity,
-      itemType: inv.item_type,
-      netWeight: netKpy,
-      thaiWeightUnit: inv.thai_weight_unit,
-      craftsmanshipFee: inv.craftsmanship_fee,
-      stonePrice: inv.stone_price || 0,
-      pricePerKyat16Pe: pure16Price,
-      specificSellPrice: specificPrice,
-      thaiRatePerKyat: getLivePriceForPurity('THAI_GOLD'),
-    });
+
+    let gold_amount: number;
+    let craftsmanship_fee: number;
+    let stone_price: number;
+    let subtotal: number;
+    let gold_price_snapshot: number;
+
+    if (isThaiItem(inv)) {
+      const line = buildThaiSaleLine(inv, thaiSaleCurrency, shopSettings);
+      gold_amount = line.gold_amount;
+      craftsmanship_fee = line.craftsmanship_fee;
+      stone_price = line.stone_price;
+      subtotal = line.subtotal;
+      gold_price_snapshot = line.gold_price_snapshot;
+    } else {
+      const pure16Price = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+      const specificPrice = getLivePriceForPurity(inv.purity);
+      const breakdown = calculateSaleLineBreakdown({
+        purity: inv.purity,
+        itemType: inv.item_type,
+        netWeight: netKpy,
+        thaiWeightUnit: inv.thai_weight_unit,
+        craftsmanshipFee: inv.craftsmanship_fee + (inv.craftsmanship_profit_fee || 0),
+        stonePrice: (inv.stone_price || 0) + (inv.stone_profit_price || 0),
+        pricePerKyat16Pe: pure16Price,
+        specificSellPrice: specificPrice,
+      });
+      gold_amount = breakdown.goldAmount;
+      craftsmanship_fee = breakdown.craftsmanshipFee;
+      stone_price = breakdown.stonePrice;
+      subtotal = breakdown.lineSubtotal;
+      gold_price_snapshot = breakdown.effectivePricePerKyat;
+    }
+
     setCartItems((prev) => [
       ...prev,
       {
@@ -246,12 +387,12 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         gemstone_weight: gemKpy,
         net_weight: netKpy,
         purity: inv.purity,
-        gold_price_snapshot: breakdown.effectivePricePerKyat,
-        gold_amount: breakdown.goldAmount,
-        craftsmanship_fee: breakdown.craftsmanshipFee,
-        stone_price: breakdown.stonePrice,
+        gold_price_snapshot,
+        gold_amount,
+        craftsmanship_fee,
+        stone_price,
         wastage_amount: 0,
-        subtotal: breakdown.lineSubtotal,
+        subtotal,
         item_type: inv.item_type,
         thai_weight_unit: inv.thai_weight_unit,
       },
@@ -260,17 +401,37 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     searchInputRef.current?.focus();
   };
 
-  const addProductFromGroup = (group: StockProductGroup) => {
-    const next = group.inStockUnits.find((u) => !cartIds.has(u.id));
-    if (!next) {
-      alert(
-        language === 'MM'
-          ? 'ဤပစ္စည်း၏ စတော့အားလုံး ဘောင်ချာထဲ ရောက်ပြီးသားဖြစ်သည်'
-          : 'All units of this product are already in the cart'
-      );
-      return;
+  const applyThaiSaleCurrency = (next: ThaiSaleCurrency) => {
+    if (next === 'BAHT') {
+      const hasMyanmar = cartItems.some((i) => !isThaiItem(i));
+      if (hasMyanmar) {
+        void dialog.alert(
+          language === 'MM'
+            ? 'Baht ရွေးရန် မြန်မာရွှေကို ဘောင်ချာမှ ဖယ်ပါ'
+            : 'Remove Myanmar gold from cart before selecting Baht'
+        );
+        return;
+      }
+      setStockCategory('THAI_GOLD');
     }
-    addItemFromInventory(next.id);
+    setThaiSaleCurrency(next);
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (!isThaiItem(item) || !item.item_id) return item;
+        const inv = inventory.find((i) => i.id === item.item_id);
+        if (!inv) return item;
+        const line = buildThaiSaleLine(inv, next, shopSettings);
+        return {
+          ...item,
+          gold_amount: line.gold_amount,
+          craftsmanship_fee: line.craftsmanship_fee,
+          stone_price: line.stone_price,
+          wastage_amount: 0,
+          subtotal: line.subtotal,
+          gold_price_snapshot: line.gold_price_snapshot,
+        };
+      })
+    );
   };
 
   const tryAddByBarcode = () => {
@@ -300,9 +461,16 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         const next = { ...item, ...patch };
         const gold = Number(next.gold_amount || 0);
         const craft = Number(next.craftsmanship_fee || 0);
-        const stone = Number(next.stone_price || 0);
-        const waste = Number(next.wastage_amount || 0);
-        next.subtotal = Math.max(0, gold + craft + stone - waste);
+        if (isThaiItem(next)) {
+          // ထိုင်းရွှေ — ရွှေချိန်တန်ဖိုး + လက်ခ သာ
+          next.stone_price = 0;
+          next.wastage_amount = 0;
+          next.subtotal = Math.max(0, gold + craft);
+        } else {
+          const stone = Number(next.stone_price || 0);
+          const waste = Number(next.wastage_amount || 0);
+          next.subtotal = Math.max(0, gold + craft + stone - waste);
+        }
         return next;
       })
     );
@@ -313,7 +481,22 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const totalStoneCart = cartItems.reduce((sum, i) => sum + Number(i.stone_price || 0), 0);
   const totalWastageCart = cartItems.reduce((sum, i) => sum + Number(i.wastage_amount || 0), 0);
   const subtotalCart = cartItems.reduce((sum, i) => sum + i.subtotal, 0);
-  const totalSaleAmount = Math.max(0, subtotalCart - Number(discountAmount || 0));
+  const cartHasThai = cartItems.some((i) => isThaiItem(i));
+  const isThaiOnlyCart =
+    cartItems.length > 0 && cartItems.every((i) => isThaiItem(i));
+  // MMK / Baht ရွေးခွင့် — ထိုင်းရွှေ category ရောင်းချိန်မှသာ
+  const showThaiCurrencyToggle = stockCategory === 'THAI_GOLD';
+  const saleInBaht = stockCategory === 'THAI_GOLD' && thaiSaleCurrency === 'BAHT';
+  const formatSaleMoney = (n: number) => (saleInBaht ? formatBaht(n) : formatMMK(n));
+  // ထိုင်းရွှေအရောင်း — ရွှေချိန်တန်ဖိုး + လက်ခ (− လျော့ငွေ)
+  const thaiSaleMode = stockCategory === 'THAI_GOLD' || isThaiOnlyCart;
+  const effectiveDiscount = Number(discountAmount || 0);
+  const totalSaleAmount = Math.max(
+    0,
+    thaiSaleMode
+      ? totalGoldAmount + totalCraftsmanshipCart - effectiveDiscount
+      : subtotalCart - effectiveDiscount
+  );
   const totalCartGrams = cartItems.reduce((sum, i) => {
     if (i.item_type === 'THAI_GOLD' && i.thai_weight_unit) return sum + Number(i.thai_weight_unit);
     return sum + kpyToGrams(i.net_weight, kyatToGrams);
@@ -327,60 +510,92 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     }, {});
   const effectivePaidAmount = amountPaidInput === '' ? totalSaleAmount : Number(amountPaidInput);
   const remainingCreditAmount = Math.max(0, totalSaleAmount - effectivePaidAmount);
-  const monthlyInterestPreview = Math.round((remainingCreditAmount * Number(interestRate || 0)) / 100);
 
   const handleCompleteSale = async () => {
     if (cartItems.length === 0) {
-      alert(language === 'MM' ? 'ရောင်းချမည့် ပစ္စည်းထည့်သွင်းပါ' : 'Please add items to sell');
+      void dialog.alert(language === 'MM' ? 'ရောင်းချမည့် ပစ္စည်းထည့်သွင်းပါ' : 'Please add items to sell');
       return;
     }
-    if (remainingCreditAmount > 0 && !selectedCustomer && !(isNewCustomer && customCustomerName)) {
-      alert(
+    if (remainingCreditAmount > 0) {
+      void dialog.alert(
         language === 'MM'
-          ? 'အကြွေး / အရစ်ကျအတွက် ဖောက်သည် ရွေးပါ'
-          : 'Select a customer for credit / installment'
+          ? 'လက်ငင်းရောင်းသာ — ကျသင့်ငွေ အပြည့် လက်ခံငွေ ထည့်ပါ (အရစ်ကျ / အကြွေး မရပါ)'
+          : 'Cash sale only — enter full payment (no installment / credit)'
       );
       return;
     }
-    let customerId = selectedCustomer?.id || '';
-    let customerName = selectedCustomer?.name || 'ဧည့်သည်';
-    let customerPhone = selectedCustomer?.phone || '';
-    if (isNewCustomer && customCustomerName) {
-      const created = await addCustomer(customCustomerName, customCustomerPhone, 'Walk-in');
-      customerId = created.id;
-      customerName = created.name;
-      customerPhone = created.phone;
+    if (cartHasThai && cartItems.some((i) => !isThaiItem(i))) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'ထိုင်းရွှေနဲ့ မြန်မာရွှေ တူတူရောင်းလို့ မရပါ'
+          : 'Cannot mix Thai and Myanmar gold in one sale'
+      );
+      return;
     }
+    const customerId = selectedCustomer?.id || '';
+    const customerName = selectedCustomer?.name || 'ဧည့်သည်';
+    const customerPhone = selectedCustomer?.phone || '';
+
+    // Persist sale in MMK (convert Baht cart via Header FX formula)
+    const itemsForApi =
+      thaiSaleCurrency === 'BAHT'
+        ? cartItems.map((item) =>
+            isThaiItem(item) ? bahtCartLineToMmk(item, shopSettings) : item
+          )
+        : cartItems.map((item) =>
+            isThaiItem(item)
+              ? {
+                  ...item,
+                  stone_price: 0,
+                  wastage_amount: 0,
+                  subtotal: Math.max(
+                    0,
+                    Number(item.gold_amount || 0) + Number(item.craftsmanship_fee || 0)
+                  ),
+                }
+              : item
+          );
+    const craftTotalApi = itemsForApi.reduce((s, i) => s + Number(i.craftsmanship_fee || 0), 0);
+    const stoneTotalApi = thaiSaleMode
+      ? 0
+      : itemsForApi.reduce((s, i) => s + Number(i.stone_price || 0), 0);
+    const subtotalApi = itemsForApi.reduce((s, i) => s + Number(i.subtotal || 0), 0);
+    const discountMmk =
+      thaiSaleCurrency === 'BAHT'
+        ? Math.round(bahtToMmk(Number(discountAmount || 0), thaiFxRates(shopSettings).sellRate))
+        : Number(discountAmount || 0);
+    const totalMmk = Math.max(0, subtotalApi - discountMmk);
+    const remainingMmk = 0;
+
     const newTxn = await createTransaction({
       invoice_no: generateInvoiceNo('INV'),
       customer_id: customerId,
       customer_name: customerName,
       customer_phone: customerPhone,
       transaction_type: 'SALE',
-      items: cartItems,
-      gold_price_snapshot: cartItems[0]?.gold_price_snapshot || 5750000,
-      craftsmanship_total: totalCraftsmanshipCart,
-      stone_total: totalStoneCart,
-      discount_amount: Number(discountAmount || 0),
+      items: itemsForApi,
+      gold_price_snapshot: itemsForApi[0]?.gold_price_snapshot || 5750000,
+      craftsmanship_total: craftTotalApi,
+      stone_total: stoneTotalApi,
+      discount_amount: discountMmk,
       tax_amount: 0,
-      total_amount: totalSaleAmount,
-      paid_amount: effectivePaidAmount,
-      remaining_amount: remainingCreditAmount,
+      total_amount: totalMmk,
+      paid_amount: totalMmk,
+      remaining_amount: remainingMmk,
       payment_method: paymentMethod,
-      interest_rate: remainingCreditAmount > 0 ? Number(interestRate || 0) : 0,
-      credit_due_date: remainingCreditAmount > 0 ? creditDueDate : undefined,
-      is_installment: remainingCreditAmount > 0 && (isInstallment || Number(interestRate || 0) > 0),
-      notes: saleNotes,
+      interest_rate: 0,
+      credit_due_date: undefined,
+      is_installment: false,
+      notes:
+        thaiSaleCurrency === 'BAHT'
+          ? `${saleNotes ? saleNotes + ' — ' : ''}Thai sale priced in Baht (converted to MMK)`
+          : saleNotes,
     } as Omit<Transaction, 'id' | 'created_at'>);
     setCartItems([]);
     setDiscountAmount(0);
     setAmountPaidInput('');
     setSaleNotes('');
-    setIsInstallment(false);
-    setInterestRate(0);
-    setIsNewCustomer(false);
-    setCustomCustomerName('');
-    setCustomCustomerPhone('');
+    setThaiSaleCurrency('MMK');
     setSelectedVoucher(newTxn);
   };
 
@@ -391,6 +606,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const [purCustomerName, setPurCustomerName] = useState('ဦးဇော်လင်း');
   const [purCustomerPhone, setPurCustomerPhone] = useState('09-445566778');
   const [purItemName, setPurItemName] = useState('ရွှေဟောင်းဆွဲကြိုး (အလဲ/အဝယ်)');
+  const [purCategory, setPurCategory] = useState('NECKLACE');
   const [purPurity, setPurPurity] = useState<GoldPurity>('PE15A');
 
   const [purGrossKyat, setPurGrossKyat] = useState<number>(1);
@@ -398,27 +614,44 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const [purGrossYway, setPurGrossYway] = useState<number>(0);
   const [purGrossGrams, setPurGrossGrams] = useState<number>(KYAT_TO_GRAMS);
 
-  const [purDeductPae, setPurDeductPae] = useState<number>(0);
-  const [purDeductYway, setPurDeductYway] = useState<number>(4); // Default 4 Yway deduction
+  // နုတ်ပယ်ချက် = ကျောက်ချိန် သာ
+  const [purGemKyat, setPurGemKyat] = useState(0);
+  const [purGemPae, setPurGemPae] = useState(0);
+  const [purGemYway, setPurGemYway] = useState(0);
+  const [purGemGrams, setPurGemGrams] = useState(0);
 
   const [purPaymentMethod, setPurPaymentMethod] = useState<'CASH' | 'KPAY' | 'WAVEPAY' | 'BANK_TRANSFER'>('CASH');
-  const [purNotes, setPurNotes] = useState('အလျော့တွက် ၄ ရွေး နုတ်ပြီး ပေါက်ဈေးအတိုင်း ရှင်းပေးသည်။');
-  const [purAddToStock, setPurAddToStock] = useState(true);
+  const [purNotes, setPurNotes] = useState('ကျောက်ချိန် နုတ်ပြီး အဝယ်ပေါက်ဈေးအတိုင်း ရှင်းပေးသည်။');
   const [purManualAmount, setPurManualAmount] = useState<string>('');
+  /** Editable buy rate (MMK per kyat) — drives payout */
+  const [purBuyPriceInput, setPurBuyPriceInput] = useState<number>(() => getBuyPriceForPurity('PE15A'));
 
-  // Purchase Net Calculation
-  const purNetKpy = calculateNetWeight(
+  const isPurThai = purPurity === 'THAI_GOLD';
+  const fxBuy = shopSettings?.baht_to_mmk_buy || 755;
+
+  // Purchase Net = Gross − Gem (no wastage)
+  const purNetKpy = calculateNetFromParts(
     { kyat: purGrossKyat, pae: purGrossPae, yway: purGrossYway },
-    purDeductPae,
-    purDeductYway
+    { kyat: purGemKyat, pae: purGemPae, yway: purGemYway },
+    0,
+    0
   );
+  const purNetGrams = kpyToGrams(purNetKpy, kyatToGrams);
 
-  const purBuyRate = getBuyPriceForPurity(purPurity);
+  const purBuyRateMmk = Number(purBuyPriceInput) || 0;
+  const purBuyRateBaht = mmkToBaht(purBuyRateMmk, fxBuy); // MMK → Baht = buy rate
 
   const purNetYway = kpyToYway(purNetKpy.kyat, purNetKpy.pae, purNetKpy.yway);
-  const purCalcPayout = Math.round((purNetYway / 128) * purBuyRate);
+  const purCalcPayoutMmk = Math.round((purNetYway / 128) * purBuyRateMmk);
+  const purCalcPayoutBaht = Number(mmkToBaht(purCalcPayoutMmk, fxBuy).toFixed(2));
   const purTotalPayout =
-    purManualAmount === '' ? purCalcPayout : Math.max(0, Number(purManualAmount) || 0);
+    purManualAmount === '' ? purCalcPayoutMmk : Math.max(0, Number(purManualAmount) || 0);
+  const purTotalPayoutBaht = Number(mmkToBaht(purTotalPayout, fxBuy).toFixed(2));
+
+  useEffect(() => {
+    setPurBuyPriceInput(getBuyPriceForPurity(purPurity));
+    setPurManualAmount('');
+  }, [purPurity]);
 
   const applyPurGrossFromGrams = (grams: number) => {
     setPurGrossGrams(grams);
@@ -435,6 +668,21 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     setPurGrossGrams(kpyToGrams({ kyat, pae, yway }, kyatToGrams));
   };
 
+  const applyPurGemFromGrams = (grams: number) => {
+    setPurGemGrams(grams);
+    const kpy = gramsToKpy(grams, kyatToGrams);
+    setPurGemKyat(kpy.kyat);
+    setPurGemPae(kpy.pae);
+    setPurGemYway(kpy.yway);
+  };
+
+  const applyPurGemFromKpy = (kyat: number, pae: number, yway: number) => {
+    setPurGemKyat(kyat);
+    setPurGemPae(pae);
+    setPurGemYway(yway);
+    setPurGemGrams(kpyToGrams({ kyat, pae, yway }, kyatToGrams));
+  };
+
   const handleCompletePurchase = async () => {
     if (purTotalPayout <= 0) return;
 
@@ -449,26 +697,33 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           id: `item-pur-${Date.now()}`,
           transaction_id: '',
           item_name: purItemName,
-          category: 'OLD_GOLD',
+          category: purCategory || 'OLD_GOLD',
           weight: { kyat: purGrossKyat, pae: purGrossPae, yway: purGrossYway },
+          gemstone_weight: { kyat: purGemKyat, pae: purGemPae, yway: purGemYway },
           net_weight: purNetKpy,
           purity: purPurity,
-          gold_price_snapshot: purBuyRate,
+          gold_price_snapshot: purBuyRateMmk,
+          gold_amount: purTotalPayout,
           craftsmanship_fee: 0,
+          stone_price: 0,
           subtotal: purTotalPayout,
-          item_type: purPurity === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD',
+          item_type: isPurThai ? 'THAI_GOLD' : 'MYANMAR_GOLD',
+          thai_weight_unit: isPurThai ? Number(purNetGrams.toFixed(3)) : undefined,
         },
       ],
-      gold_price_snapshot: purBuyRate,
+      gold_price_snapshot: purBuyRateMmk,
       craftsmanship_total: 0,
+      stone_total: 0,
       discount_amount: 0,
       tax_amount: 0,
       total_amount: purTotalPayout,
       paid_amount: purTotalPayout,
       remaining_amount: 0,
       payment_method: purPaymentMethod as any,
-      notes: purNotes,
-      add_to_stock: purAddToStock,
+      notes: isPurThai
+        ? `${purNotes} · Baht ${purTotalPayoutBaht} ฿ (MMK→Baht @ buy ${fxBuy})`
+        : purNotes,
+      add_to_stock: false,
     } as any);
 
     setSelectedVoucher(newTxn);
@@ -481,6 +736,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const [excCustomerPhone, setExcCustomerPhone] = useState('');
   const [excStockId, setExcStockId] = useState('');
   const [excTradeName, setExcTradeName] = useState('ရွှေဟောင်း အလဲ');
+  const [excTradeCategory, setExcTradeCategory] = useState('NECKLACE');
   const [excTradePurity, setExcTradePurity] = useState<GoldPurity>('PE15A');
   const [excGrossKyat, setExcGrossKyat] = useState(0);
   const [excGrossPae, setExcGrossPae] = useState(0);
@@ -562,7 +818,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           id: `exc-trade-${Date.now()}`,
           transaction_id: '',
           item_name: excTradeName,
-          category: 'OLD_GOLD',
+          category: excTradeCategory || 'OLD_GOLD',
           weight: { kyat: excGrossKyat, pae: excGrossPae, yway: excGrossYway },
           net_weight: excTradeNet,
           purity: excTradePurity,
@@ -570,6 +826,10 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           craftsmanship_fee: 0,
           subtotal: excTradeCredit,
           item_type: excTradePurity === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD',
+          thai_weight_unit:
+            excTradePurity === 'THAI_GOLD'
+              ? Number(kpyToGrams(excTradeNet, kyatToGrams).toFixed(3))
+              : undefined,
           line_role: 'TRADE_IN',
         } as any,
       ],
@@ -586,6 +846,111 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       use_client_total: true,
     } as any);
     setSelectedVoucher(txn);
+  };
+
+  // -------------------------------------------------------------
+  // SHOP_OUT STATE (ဆိုင်ထုတ်)
+  // -------------------------------------------------------------
+  const [outCart, setOutCart] = useState<InventoryItem[]>([]);
+  const [outSearch, setOutSearch] = useState('');
+  const [outNote, setOutNote] = useState('');
+  const [outSaving, setOutSaving] = useState(false);
+
+  const outStockItems = useMemo(
+    () => inventory.filter((i) => i.status === 'IN_STOCK'),
+    [inventory]
+  );
+  const outFiltered = useMemo(() => {
+    const q = outSearch.trim().toLowerCase();
+    const taken = new Set(outCart.map((c) => c.id));
+    return outStockItems.filter((i) => {
+      if (taken.has(i.id)) return false;
+      if (!q) return true;
+      return (
+        i.barcode.toLowerCase().includes(q) ||
+        i.name_mm.toLowerCase().includes(q) ||
+        i.name.toLowerCase().includes(q)
+      );
+    });
+  }, [outStockItems, outSearch, outCart]);
+
+  const addOutItem = (item: InventoryItem) => {
+    setOutCart((prev) => (prev.some((c) => c.id === item.id) ? prev : [...prev, item]));
+  };
+
+  const removeOutItem = (id: string) =>
+    setOutCart((prev) => prev.filter((c) => c.id !== id));
+
+  const handleCompleteShopOut = async () => {
+    if (outCart.length === 0) {
+      void dialog.alert(language === 'MM' ? 'ပစ္စည်း ရွေးထည့်ပါ' : 'Add items first');
+      return;
+    }
+    const note = outNote.trim();
+    if (!note) {
+      void dialog.alert(language === 'MM' ? 'မှတ်ချက် ရေးပါ' : 'Please enter a note');
+      return;
+    }
+    setOutSaving(true);
+    try {
+      const txn = await createTransaction({
+        invoice_no: generateInvoiceNo('OUT'),
+        customer_id: '',
+        customer_name: 'ဆိုင်ထုတ်',
+        customer_phone: '',
+        transaction_type: 'SHOP_OUT',
+        items: outCart.map((inv) => ({
+          id: `out-${inv.id}-${Date.now()}`,
+          transaction_id: '',
+          item_id: inv.id,
+          item_name: inv.name_mm || inv.name,
+          category: inv.category,
+          weight: {
+            kyat: inv.weight_kyat,
+            pae: inv.weight_pae,
+            yway: inv.weight_yway,
+          },
+          gemstone_weight: {
+            kyat: inv.gemstone_weight_kyat || 0,
+            pae: inv.gemstone_weight_pae || 0,
+            yway: inv.gemstone_weight_yway || 0,
+          },
+          net_weight: {
+            kyat: inv.net_weight_kyat,
+            pae: inv.net_weight_pae,
+            yway: inv.net_weight_yway,
+          },
+          purity: inv.purity,
+          gold_price_snapshot: getLivePriceForPurity(inv.purity),
+          gold_amount: 0,
+          craftsmanship_fee: 0,
+          stone_price: 0,
+          subtotal: 0,
+          item_type: inv.item_type,
+          thai_weight_unit: inv.thai_weight_unit,
+          line_role: note,
+        })),
+        gold_price_snapshot:
+          goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 0,
+        craftsmanship_total: 0,
+        stone_total: 0,
+        discount_amount: 0,
+        tax_amount: 0,
+        total_amount: 0,
+        paid_amount: 0,
+        remaining_amount: 0,
+        payment_method: 'CASH',
+        notes: note,
+      } as any);
+      setOutCart([]);
+      setOutSearch('');
+      setOutNote('');
+      setSelectedVoucher(txn);
+    } catch (err) {
+      void dialog.alert(err instanceof Error ? err.message : 'Shop-out failed');
+    } finally {
+      setOutSaving(false);
+    }
   };
 
   return (
@@ -629,12 +994,25 @@ export const PosView: React.FC<Props> = ({ mode }) => {
               <ArrowLeftRight className="w-4 h-4" />
               <span>{language === 'MM' ? 'အလဲအလှယ်' : 'Exchange'}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('SHOP_OUT')}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition flex items-center space-x-1.5 ${
+                activeSubTab === 'SHOP_OUT'
+                  ? 'bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-xs'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
+            >
+              <PackageMinus className="w-4 h-4" />
+              <span>{language === 'MM' ? 'ဆိုင်ထုတ်' : 'Shop Out'}</span>
+            </button>
           </div>
         ) : (
           <div className="flex items-center gap-2">
             {activeSubTab === 'SALE' && <ShoppingBag className="w-5 h-5 text-[#D4AF37]" />}
             {activeSubTab === 'PURCHASE' && <ArrowDownLeft className="w-5 h-5 text-blue-600" />}
             {activeSubTab === 'EXCHANGE' && <ArrowLeftRight className="w-5 h-5 text-emerald-600" />}
+            {activeSubTab === 'SHOP_OUT' && <PackageMinus className="w-5 h-5 text-rose-600" />}
             <h2 className="text-base font-bold text-gray-900 dark:text-white">
               {activeSubTab === 'SALE'
                 ? language === 'MM'
@@ -644,9 +1022,13 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                   ? language === 'MM'
                     ? 'အဝယ်ဘောင်ချာ'
                     : 'Purchase Voucher'
-                  : language === 'MM'
-                    ? 'အလဲအလှယ်'
-                    : 'Exchange'}
+                  : activeSubTab === 'EXCHANGE'
+                    ? language === 'MM'
+                      ? 'အလဲအလှယ်'
+                      : 'Exchange'
+                    : language === 'MM'
+                      ? 'ဆိုင်ထုတ်'
+                      : 'Shop Out'}
             </h2>
           </div>
         )}
@@ -730,20 +1112,21 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                 {stockFilterChips.map((chip) => {
                   const active = stockCategory === chip.id;
                   const count =
-                    chip.id === 'ALL'
-                      ? groupInventoryProducts(inStockItems).filter((g) => g.remainingQty > 0).length
-                      : chip.id === 'THAI_GOLD'
-                        ? groupInventoryProducts(inStockItems.filter(isThaiItem)).filter(
-                            (g) => g.remainingQty > 0
-                          ).length
-                        : groupInventoryProducts(
-                            inStockItems.filter((i) => !isThaiItem(i) && i.category === chip.id)
-                          ).filter((g) => g.remainingQty > 0).length;
+                    chip.id === 'THAI_GOLD'
+                      ? inStockItems.filter(isThaiItem).length
+                      : inStockItems.filter((i) => !isThaiItem(i)).length;
                   return (
                     <button
                       key={chip.id}
                       type="button"
-                      onClick={() => setStockCategory(chip.id)}
+                      onClick={() => {
+                        setStockCategory(chip.id);
+                        if (chip.id === 'MYANMAR_GOLD') {
+                          // မြန်မာရွှေ — MMK သာ၊ Baht ရွေးခွင့် မလို
+                          if (thaiSaleCurrency === 'BAHT') applyThaiSaleCurrency('MMK');
+                          else setThaiSaleCurrency('MMK');
+                        }
+                      }}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
                         active
                           ? chip.id === 'THAI_GOLD'
@@ -759,10 +1142,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                 })}
               </div>
               <p className="text-[11px] text-gray-500">
-                {stockProductCount}{' '}
-                {language === 'MM' ? 'ပစ္စည်း' : 'products'}
-                {' · '}
-                {stockPieceCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                {stockItemCount} {language === 'MM' ? 'ခု' : 'items'}
                 {cartItems.length > 0
                   ? ` · ${cartItems.length} ${language === 'MM' ? 'ဘောင်ချာထဲ' : 'in cart'}`
                   : ''}
@@ -770,7 +1150,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 sm:p-5 max-h-[62vh]">
-              {stockProductCount === 0 ? (
+              {stockItemCount === 0 ? (
                 <div className="h-40 flex items-center justify-center text-sm text-gray-400">
                   {language === 'MM' ? 'ပစ္စည်းမတွေ့ပါ' : 'No stock items found'}
                 </div>
@@ -790,39 +1170,32 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                             {group.label}
                           </span>
                           <span className="text-[10px] text-gray-400">
-                            {group.products.length}{' '}
-                            {language === 'MM' ? 'ပစ္စည်း' : 'SKU'} ·{' '}
-                            {group.products.reduce((n, p) => n + p.remainingQty, 0)}{' '}
-                            {language === 'MM' ? 'ခု' : 'pcs'}
+                            {group.items.length} {language === 'MM' ? 'ခု' : 'pcs'}
                           </span>
                           <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
                         </div>
                       )}
                       {stockView === 'grid' ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {group.products.map((product) => {
-                            const item = product.sample;
-                            const available = product.inStockUnits.filter((u) => !cartIds.has(u.id))
-                              .length;
-                            const soldOut = available <= 0;
+                          {group.items.map((item) => {
+                            const inCart = cartIds.has(item.id);
                             return (
                               <button
-                                key={product.key}
+                                key={item.id}
                                 type="button"
-                                disabled={soldOut}
-                                onClick={() => addProductFromGroup(product)}
+                                disabled={inCart}
+                                onClick={() => addItemFromInventory(item.id)}
                                 className={`text-left rounded-2xl border p-3.5 transition ${
-                                  soldOut
+                                  inCart
                                     ? 'border-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/20 opacity-70'
                                     : 'border-gray-200 dark:border-gray-800 bg-[#FAF8F2]/50 dark:bg-[#141414] hover:border-[#D4AF37]/50 hover:shadow-sm'
                                 }`}
                               >
                                 <div className="flex items-start justify-between gap-2 mb-2">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-extrabold bg-[#D4AF37]/15 text-[#996515] dark:text-amber-300 border border-[#D4AF37]/25">
-                                    Qty {product.remainingQty}
-                                    {available < product.remainingQty ? ` · ${available} left` : ''}
+                                  <span className="font-mono text-[10px] font-bold text-gray-500 truncate">
+                                    {item.barcode}
                                   </span>
-                                  {soldOut ? (
+                                  {inCart ? (
                                     <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
                                       <Check className="w-3 h-3" />
                                       CART
@@ -853,7 +1226,21 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                                         })}
                                   </div>
                                   <div className="font-mono font-bold text-[#996515] dark:text-amber-300">
-                                    {formatMMK(item.selling_price_estimated)}
+                                    {isThaiItem(item) ? (
+                                      (() => {
+                                        const p = thaiDisplayPrices(item, shopSettings);
+                                        return (
+                                          <span className="block space-y-0.5">
+                                            <span className="block">{formatMMK(p.mmk)}</span>
+                                            <span className="block text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                                              {formatBaht(p.baht)}
+                                            </span>
+                                          </span>
+                                        );
+                                      })()
+                                    ) : (
+                                      formatMMK(item.selling_price_estimated)
+                                    )}
                                   </div>
                                 </div>
                               </button>
@@ -862,27 +1249,24 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {group.products.map((product) => {
-                            const item = product.sample;
-                            const available = product.inStockUnits.filter((u) => !cartIds.has(u.id))
-                              .length;
-                            const soldOut = available <= 0;
+                          {group.items.map((item) => {
+                            const inCart = cartIds.has(item.id);
                             return (
                               <button
-                                key={product.key}
+                                key={item.id}
                                 type="button"
-                                disabled={soldOut}
-                                onClick={() => addProductFromGroup(product)}
+                                disabled={inCart}
+                                onClick={() => addItemFromInventory(item.id)}
                                 className={`w-full text-left rounded-xl border px-3 py-2.5 flex items-center gap-3 transition ${
-                                  soldOut
+                                  inCart
                                     ? 'border-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/20 opacity-70'
                                     : 'border-gray-200 dark:border-gray-800 hover:border-[#D4AF37]/40'
                                 }`}
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
-                                    <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-[#D4AF37]/15 text-[#996515]">
-                                      Qty {product.remainingQty}
+                                    <span className="font-mono text-[10px] font-bold text-gray-500 shrink-0">
+                                      {item.barcode}
                                     </span>
                                     <span className="text-sm font-bold text-gray-900 dark:text-white truncate">
                                       {item.name_mm || item.name}
@@ -906,9 +1290,23 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                                 </div>
                                 <div className="text-right shrink-0">
                                   <div className="font-mono text-xs font-bold text-[#996515] dark:text-amber-300">
-                                    {formatMMK(item.selling_price_estimated)}
+                                    {isThaiItem(item) ? (
+                                      (() => {
+                                        const p = thaiDisplayPrices(item, shopSettings);
+                                        return (
+                                          <>
+                                            <div>{formatMMK(p.mmk)}</div>
+                                            <div className="text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                                              {formatBaht(p.baht)}
+                                            </div>
+                                          </>
+                                        );
+                                      })()
+                                    ) : (
+                                      formatMMK(item.selling_price_estimated)
+                                    )}
                                   </div>
-                                  {soldOut ? (
+                                  {inCart ? (
                                     <span className="text-[10px] font-bold text-emerald-600">CART</span>
                                   ) : (
                                     <Plus className="w-4 h-4 text-[#D4AF37] ml-auto" />
@@ -956,41 +1354,67 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                     {language === 'MM' ? '+ အသစ်' : '+ New'}
                   </button>
                 </div>
-                {isNewCustomer ? (
-                  <div className="flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg bg-white dark:bg-[#1A1A1A] border border-[#D4AF37]/30">
-                    <div className="min-w-0">
-                      <div className="font-bold truncate">{customCustomerName}</div>
-                      <div className="text-[10px] text-gray-500 font-mono">{customCustomerPhone || '—'}</div>
-                    </div>
+                <select
+                  value={selectedCustomer?.id || ''}
+                  onChange={(e) => {
+                    const c = customers.find((cust) => cust.id === e.target.value);
+                    if (c) setSelectedCustomer(c);
+                  }}
+                  className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] font-medium"
+                >
+                  {customers.length === 0 && (
+                    <option value="">
+                      {language === 'MM' ? 'ဖောက်သည် မရှိသေးပါ' : 'No customers yet'}
+                    </option>
+                  )}
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.phone})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {showThaiCurrencyToggle && (
+                <div className="p-3 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20 space-y-2">
+                  <div className="text-[11px] font-bold text-blue-800 dark:text-blue-300">
+                    {language === 'MM' ? 'ထိုင်းရွှေ ငွေကြေး' : 'Thai gold currency'}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
-                      onClick={() => {
-                        setIsNewCustomer(false);
-                        setCustomCustomerName('');
-                        setCustomCustomerPhone('');
-                      }}
-                      className="text-[10px] font-semibold text-rose-600"
+                      onClick={() => applyThaiSaleCurrency('MMK')}
+                      className={`py-2 rounded-lg text-xs font-extrabold border transition ${
+                        thaiSaleCurrency === 'MMK'
+                          ? 'bg-[#D4AF37] text-white border-[#C5A059]'
+                          : 'bg-white dark:bg-[#121212] border-gray-200 dark:border-gray-700 text-gray-600'
+                      }`}
                     >
-                      {language === 'MM' ? 'ဖယ်' : 'Clear'}
+                      MMK
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyThaiSaleCurrency('BAHT')}
+                      className={`py-2 rounded-lg text-xs font-extrabold border transition ${
+                        thaiSaleCurrency === 'BAHT'
+                          ? 'bg-blue-600 text-white border-blue-700'
+                          : 'bg-white dark:bg-[#121212] border-gray-200 dark:border-gray-700 text-gray-600'
+                      }`}
+                    >
+                      Baht (฿)
                     </button>
                   </div>
-                ) : (
-                  <select
-                    value={selectedCustomer?.id || ''}
-                    onChange={(e) => {
-                      const c = customers.find((cust) => cust.id === e.target.value);
-                      if (c) setSelectedCustomer(c);
-                    }}
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] font-medium"
-                  >
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.phone})
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+                  <p className="text-[10px] text-blue-700/80 dark:text-blue-300/80">
+                    {thaiSaleCurrency === 'BAHT'
+                      ? language === 'MM'
+                        ? 'Baht ဖြင့် တွက်ချက် / ပြသမည်'
+                        : 'Prices calculated & shown in Baht'
+                      : language === 'MM'
+                        ? 'Header FX ဖော်မြူလာဖြင့် MMK တွက်မည်'
+                        : 'MMK via Header FX formula (rate/100000)'}
+                  </p>
+                </div>
+              )}
 
               <div className="rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-900 max-h-52 overflow-y-auto">
                 {cartItems.length === 0 ? (
@@ -1023,47 +1447,43 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                       <div className="grid grid-cols-2 gap-1.5">
                         <div>
                           <label className="text-[10px] text-gray-400">ရွှေချိန်တန်ဖိုး</label>
-                          <input
-                            type="number"
+                          <NumberInput
                             value={Number(item.gold_amount || 0)}
-                            onChange={(e) => updateCartLine(item.id, { gold_amount: Number(e.target.value) })}
+                            onChange={(v) => updateCartLine(item.id, { gold_amount: v })}
                             className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
                           />
                         </div>
                         <div>
                           <label className="text-[10px] text-gray-400">လက်ခ</label>
-                          <input
-                            type="number"
+                          <NumberInput
                             value={Number(item.craftsmanship_fee || 0)}
-                            onChange={(e) =>
-                              updateCartLine(item.id, { craftsmanship_fee: Number(e.target.value) })
-                            }
+                            onChange={(v) => updateCartLine(item.id, { craftsmanship_fee: v })}
                             className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
                           />
                         </div>
-                        <div>
-                          <label className="text-[10px] text-gray-400">ကျောက်ဖိုး</label>
-                          <input
-                            type="number"
-                            value={Number(item.stone_price || 0)}
-                            onChange={(e) => updateCartLine(item.id, { stone_price: Number(e.target.value) })}
-                            className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-gray-400">အလျော့တွက်</label>
-                          <input
-                            type="number"
-                            value={Number(item.wastage_amount || 0)}
-                            onChange={(e) =>
-                              updateCartLine(item.id, { wastage_amount: Number(e.target.value) })
-                            }
-                            className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                          />
-                        </div>
+                        {!isThaiItem(item) && (
+                          <>
+                            <div>
+                              <label className="text-[10px] text-gray-400">ကျောက်ဖိုး</label>
+                              <NumberInput
+                                value={Number(item.stone_price || 0)}
+                                onChange={(v) => updateCartLine(item.id, { stone_price: v })}
+                                className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-gray-400">အလျော့တွက်</label>
+                              <NumberInput
+                                value={Number(item.wastage_amount || 0)}
+                                onChange={(v) => updateCartLine(item.id, { wastage_amount: v })}
+                                className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
+                              />
+                            </div>
+                          </>
+                        )}
                       </div>
                       <div className="text-right font-mono font-bold text-gray-900 dark:text-amber-300">
-                        {formatMMK(item.subtotal)}
+                        {formatSaleMoney(item.subtotal)}
                       </div>
                     </div>
                   ))
@@ -1087,7 +1507,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                   <div className="text-gray-500">{language === 'MM' ? 'Gram စုစုပေါင်း' : 'Total grams'}</div>
                   <div className="text-right font-mono font-bold">{totalCartGrams.toFixed(3)} g</div>
                   <div className="text-gray-500">{language === 'MM' ? 'ငွေစုစုပေါင်း' : 'Total amount'}</div>
-                  <div className="text-right font-mono font-bold">{formatMMK(totalSaleAmount)}</div>
+                  <div className="text-right font-mono font-bold">{formatSaleMoney(totalSaleAmount)}</div>
                 </div>
                 {/* Voucher-style calculation table */}
                 <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -1101,30 +1521,35 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-900">
                       <tr>
                         <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'ရွှေချိန်တန်ဖိုး' : 'Gold value'}</td>
-                        <td className="px-2 py-1.5 text-right font-mono font-bold">{formatMMK(totalGoldAmount)}</td>
+                        <td className="px-2 py-1.5 text-right font-mono font-bold">{formatSaleMoney(totalGoldAmount)}</td>
                       </tr>
                       <tr>
                         <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'လက်ခ' : 'Craft fee'}</td>
-                        <td className="px-2 py-1.5 text-right font-mono font-bold">{formatMMK(totalCraftsmanshipCart)}</td>
+                        <td className="px-2 py-1.5 text-right font-mono font-bold">{formatSaleMoney(totalCraftsmanshipCart)}</td>
                       </tr>
-                      <tr>
-                        <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'ကျောက်ဖိုး' : 'Stone price'}</td>
-                        <td className="px-2 py-1.5 text-right font-mono font-bold">{formatMMK(totalStoneCart)}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'အလျော့တွက်' : 'Wastage'}</td>
-                        <td className="px-2 py-1.5 text-right font-mono font-bold text-rose-600">
-                          −{formatMMK(totalWastageCart)}
-                        </td>
-                      </tr>
+                      {!thaiSaleMode && (
+                        <>
+                          <tr>
+                            <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'ကျောက်ဖိုး' : 'Stone price'}</td>
+                            <td className="px-2 py-1.5 text-right font-mono font-bold">{formatSaleMoney(totalStoneCart)}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'အလျော့တွက်' : 'Wastage'}</td>
+                            <td className="px-2 py-1.5 text-right font-mono font-bold text-rose-600">
+                              −{formatSaleMoney(totalWastageCart)}
+                            </td>
+                          </tr>
+                        </>
+                      )}
                       <tr>
                         <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'လျော့ငွေ' : 'Discount'}</td>
                         <td className="px-2 py-1.5 text-right">
                           <input
                             type="number"
-                            step={5000}
+                            min={0}
+                            step={saleInBaht ? 1 : 5000}
                             value={discountAmount}
-                            onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                            onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value)))}
                             className="w-24 ml-auto block px-2 py-1 text-right font-mono text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212]"
                           />
                         </td>
@@ -1134,7 +1559,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                           {language === 'MM' ? 'ကျသင့်ငွေ' : 'Net payable'}
                         </td>
                         <td className="px-2 py-2 text-right font-mono font-extrabold text-gray-900 dark:text-amber-300">
-                          {formatMMK(totalSaleAmount)}
+                          {formatSaleMoney(totalSaleAmount)}
                         </td>
                       </tr>
                     </tbody>
@@ -1181,57 +1606,17 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                       {language === 'MM' ? 'ကျန်ငွေ' : 'Balance'}
                     </label>
                     <div className="px-2 py-1.5 text-xs font-mono font-bold rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-300">
-                      {formatMMK(remainingCreditAmount)}
+                      {formatSaleMoney(remainingCreditAmount)}
                     </div>
                   </div>
                 </div>
 
                 {remainingCreditAmount > 0 && (
-                  <div className="p-2.5 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20 space-y-2">
-                    <label className="flex items-center gap-2 text-[11px] font-bold text-amber-900 dark:text-amber-300">
-                      <input
-                        type="checkbox"
-                        checked={isInstallment || interestRate > 0}
-                        onChange={(e) => setIsInstallment(e.target.checked)}
-                      />
-                      {language === 'MM' ? 'အရစ်ကျ / အကြွေး စာရင်းသွင်းမည်' : 'Record as installment / credit'}
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 mb-0.5">
-                          {language === 'MM' ? 'သတ်မှတ်ရက်' : 'Due date'}
-                        </label>
-                        <input
-                          type="date"
-                          value={creditDueDate}
-                          onChange={(e) => setCreditDueDate(e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 mb-0.5">
-                          {language === 'MM' ? 'အတိုးနှုန်း %' : 'Interest %'}
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.5}
-                          value={interestRate}
-                          onChange={(e) => {
-                            setInterestRate(Number(e.target.value));
-                            if (Number(e.target.value) > 0) setIsInstallment(true);
-                          }}
-                          className="w-full px-2 py-1.5 text-xs font-mono rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                        />
-                      </div>
-                    </div>
-                    {interestRate > 0 && (
-                      <div className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
-                        {language === 'MM' ? 'လစဉ်အတိုး ခန့်မှန်း:' : 'Est. monthly interest:'}{' '}
-                        {formatMMK(monthlyInterestPreview)}
-                      </div>
-                    )}
-                  </div>
+                  <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold">
+                    {language === 'MM'
+                      ? 'လက်ငင်းငွေရှင်းသာ — ကျသင့်ငွေ အပြည့် လက်ခံငွေ ထည့်ပါ (အရစ်ကျ / အကြွေး မရပါ)'
+                      : 'Cash sale only — enter full payment (no installment / credit)'}
+                  </p>
                 )}
 
                 <textarea
@@ -1272,8 +1657,8 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {language === 'MM'
-                ? 'အလျော့တွက်၊ ပန်းထိန်း နုတ်ပယ်ပြီး ယနေ့အဝယ်ပေါက်ဈေးအတိုင်း တန်ဖိုးရှင်းတွက်ချက်မှု'
-                : 'Automated weight deductions & payout calculation based on daily live buyback rate'}
+                ? 'ကျောက်ချိန် နုတ်ပြီး ရိုက်ထည့်သော အဝယ်ပေါက်ဈေးအတိုင်း တန်ဖိုးရှင်းတွက်သည်'
+                : 'Net = Gross − Gem; payout from editable buyback rate'}
             </p>
           </div>
 
@@ -1306,7 +1691,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             </div>
 
             {/* Item & Purity */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                   {language === 'MM' ? 'ပစ္စည်းဖော်ပြချက်:' : 'Item Description:'}
@@ -1317,6 +1702,22 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                   onChange={(e) => setPurItemName(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  {language === 'MM' ? 'ပစ္စည်းအမျိုးအစား:' : 'Category:'}
+                </label>
+                <select
+                  value={purCategory}
+                  onChange={(e) => setPurCategory(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white font-bold"
+                >
+                  {productCategories.map((c) => (
+                    <option key={c.id || c.code} value={c.code}>
+                      {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
@@ -1338,128 +1739,242 @@ export const PosView: React.FC<Props> = ({ mode }) => {
 
             {/* Weights & Deductions Box */}
             <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#141414] border border-gray-200 dark:border-gray-800 space-y-3">
-              <div className="text-xs font-bold text-gray-800 dark:text-gray-200">
-                {language === 'MM' ? '၁။ အထည်ချိန် (Gram / ကျပ် / ပဲ / ရွေး):' : '1. Gross Weight:'}
+              <div className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center justify-between">
+                <span>{language === 'MM' ? '၁။ အထည်ချိန် (Gross Weight)' : '1. Gross Weight'}</span>
+                <span className="text-gray-400 font-normal">Gram · ကျပ် / ပဲ / ရွေး</span>
               </div>
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <label className="text-[11px] text-gray-400 block">Gram</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.001"
+              <div className="flex flex-wrap items-end gap-y-2">
+                <div className="w-[7.5rem]">
+                  <label className="text-[11px] text-gray-500 block mb-0.5">Gram</label>
+                  <NumberInput
+                    min={0}
+                    step={0.001}
                     value={purGrossGrams}
-                    onChange={(e) => applyPurGrossFromGrams(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A] dark:text-white"
+                    onChange={applyPurGrossFromGrams}
+                    className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]"
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] text-gray-400 block">ကျပ်</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={purGrossKyat}
-                    onChange={(e) =>
-                      applyPurGrossFromKpy(Number(e.target.value), purGrossPae, purGrossYway)
-                    }
-                    className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-gray-400 block">ပဲ</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="15"
-                    value={purGrossPae}
-                    onChange={(e) =>
-                      applyPurGrossFromKpy(purGrossKyat, Number(e.target.value), purGrossYway)
-                    }
-                    className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-gray-400 block">ရွေး</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={purGrossYway}
-                    onChange={(e) =>
-                      applyPurGrossFromKpy(purGrossKyat, purGrossPae, Number(e.target.value))
-                    }
-                    className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] dark:text-white"
-                  />
-                </div>
-              </div>
-
-              {/* Deductions */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                <div className="text-xs font-bold text-rose-600 dark:text-rose-400 mb-1">
-                  {language === 'MM' ? '၂။ နုတ်ပယ်ချက် (အလျော့တွက်/ပန်းထိန်း):' : '2. Deductions:'}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <span className="text-[10px] text-gray-400">ပဲ နုတ်ချက် (Pae):</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={purDeductPae}
-                      onChange={(e) => setPurDeductPae(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] dark:text-white"
+                <div className="hidden sm:block w-8 shrink-0" aria-hidden />
+                <div className="hidden sm:block w-px self-stretch bg-gray-300 dark:bg-gray-600 my-1" />
+                <div className="hidden sm:block w-8 shrink-0" aria-hidden />
+                <div className="flex flex-wrap gap-1.5">
+                  <div className="w-[4.5rem]">
+                    <label className="text-[11px] text-gray-500 block mb-0.5">ကျပ်</label>
+                    <NumberInput
+                      min={0}
+                      value={purGrossKyat}
+                      onChange={(v) => applyPurGrossFromKpy(v, purGrossPae, purGrossYway)}
+                      className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
                     />
                   </div>
-                  <div>
-                    <span className="text-[10px] text-gray-400">ရွေး နုတ်ချက် (Yway):</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={purDeductYway}
-                      onChange={(e) => setPurDeductYway(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] dark:text-white"
+                  <div className="w-[4.5rem]">
+                    <label className="text-[11px] text-gray-500 block mb-0.5">ပဲ</label>
+                    <NumberInput
+                      min={0}
+                      max={15}
+                      value={purGrossPae}
+                      onChange={(v) => applyPurGrossFromKpy(purGrossKyat, v, purGrossYway)}
+                      className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+                    />
+                  </div>
+                  <div className="w-[4.5rem]">
+                    <label className="text-[11px] text-gray-500 block mb-0.5">ရွေး</label>
+                    <NumberInput
+                      min={0}
+                      step={0.1}
+                      value={purGrossYway}
+                      onChange={(v) => applyPurGrossFromKpy(purGrossKyat, purGrossPae, v)}
+                      className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Net weight & rate preview */}
-              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 flex justify-between items-center text-xs">
-                <div>
-                  <span className="text-blue-700 dark:text-blue-300 font-semibold block">
-                    {language === 'MM' ? 'အဝယ် ရွှေချိန်စင် (Net Weight):' : 'Net Buyback Weight:'}
-                  </span>
-                  <span className="text-sm font-extrabold text-blue-900 dark:text-blue-200">
-                    {formatKPYMyanmar(purNetKpy)}
-                  </span>
+              {/* နုတ်ပယ်ချက် = ကျောက်ချိန် သာ */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+                <div className="text-xs font-bold text-sky-700 dark:text-sky-300 flex items-center justify-between">
+                  <span>{language === 'MM' ? '၂။ နုတ်ပယ်ချက် — ကျောက်ချိန်' : '2. Deduction — Gemstone'}</span>
+                  <span className="text-gray-400 font-normal">Gram · ကျပ် / ပဲ / ရွေး</span>
                 </div>
-                <div className="text-right">
-                  <span className="text-gray-500 dark:text-gray-400 text-[11px] block">
-                    {language === 'MM' ? 'ယနေ့အဝယ်ပေါက်ဈေး:' : 'Buyback Rate:'}
-                  </span>
-                  <span className="font-mono font-bold text-gray-900 dark:text-white">
-                    {formatMMK(purBuyRate)}
-                  </span>
+                <div className="flex flex-wrap items-end gap-y-2">
+                  <div className="w-[7.5rem]">
+                    <label className="text-[11px] text-gray-500 block mb-0.5">Gram</label>
+                    <NumberInput
+                      min={0}
+                      step={0.001}
+                      value={purGemGrams}
+                      onChange={applyPurGemFromGrams}
+                      className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]"
+                    />
+                  </div>
+                  <div className="hidden sm:block w-8 shrink-0" aria-hidden />
+                  <div className="hidden sm:block w-px self-stretch bg-gray-300 dark:bg-gray-600 my-1" />
+                  <div className="hidden sm:block w-8 shrink-0" aria-hidden />
+                  <div className="flex flex-wrap gap-1.5">
+                    <div className="w-[4.5rem]">
+                      <label className="text-[11px] text-gray-500 block mb-0.5">ကျပ်</label>
+                      <NumberInput
+                        min={0}
+                        value={purGemKyat}
+                        onChange={(v) => applyPurGemFromKpy(v, purGemPae, purGemYway)}
+                        className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+                      />
+                    </div>
+                    <div className="w-[4.5rem]">
+                      <label className="text-[11px] text-gray-500 block mb-0.5">ပဲ</label>
+                      <NumberInput
+                        min={0}
+                        value={purGemPae}
+                        onChange={(v) => applyPurGemFromKpy(purGemKyat, v, purGemYway)}
+                        className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+                      />
+                    </div>
+                    <div className="w-[4.5rem]">
+                      <label className="text-[11px] text-gray-500 block mb-0.5">ရွေး</label>
+                      <NumberInput
+                        min={0}
+                        step={0.1}
+                        value={purGemYway}
+                        onChange={(v) => applyPurGemFromKpy(purGemKyat, purGemPae, v)}
+                        className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
+              {/* Net weight + editable buy rate */}
+              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 space-y-3">
+                <div className="text-xs font-bold text-blue-800 dark:text-blue-300 flex items-center justify-between">
+                  <span>{language === 'MM' ? 'အဝယ် ရွှေချိန်စင် (Net)' : 'Net buyback weight'}</span>
+                  <span className="text-blue-400/80 font-normal">Gram · ကျပ် / ပဲ / ရွေး</span>
+                </div>
+                <div className="flex flex-wrap items-end gap-y-2">
+                  <div className="w-[7.5rem]">
+                    <label className="text-[11px] text-blue-500/80 block mb-0.5">Gram</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={purNetGrams.toFixed(3)}
+                      className="w-full px-2.5 py-1.5 text-xs font-extrabold rounded-lg border border-blue-300 dark:border-blue-800 bg-white/80 dark:bg-[#1A1A1A] text-blue-900 dark:text-blue-200 font-mono"
+                    />
+                  </div>
+                  <div className="hidden sm:block w-8 shrink-0" aria-hidden />
+                  <div className="hidden sm:block w-px self-stretch bg-blue-300 dark:bg-blue-700 my-1" />
+                  <div className="hidden sm:block w-8 shrink-0" aria-hidden />
+                  <div className="flex flex-wrap gap-1.5">
+                    <div className="w-[4.5rem]">
+                      <label className="text-[11px] text-blue-500/80 block mb-0.5">ကျပ်</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={purNetKpy.kyat}
+                        className="w-full px-1.5 py-1.5 text-xs font-extrabold rounded-lg border border-blue-300 dark:border-blue-800 bg-white/80 dark:bg-[#1A1A1A] font-mono"
+                      />
+                    </div>
+                    <div className="w-[4.5rem]">
+                      <label className="text-[11px] text-blue-500/80 block mb-0.5">ပဲ</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={purNetKpy.pae}
+                        className="w-full px-1.5 py-1.5 text-xs font-extrabold rounded-lg border border-blue-300 dark:border-blue-800 bg-white/80 dark:bg-[#1A1A1A] font-mono"
+                      />
+                    </div>
+                    <div className="w-[4.5rem]">
+                      <label className="text-[11px] text-blue-500/80 block mb-0.5">ရွေး</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={purNetKpy.yway}
+                        className="w-full px-1.5 py-1.5 text-xs font-extrabold rounded-lg border border-blue-300 dark:border-blue-800 bg-white/80 dark:bg-[#1A1A1A] font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-blue-200 dark:border-blue-800 pt-3">
+                  <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                    {language === 'MM' ? 'ယနေ့အဝယ်ပေါက်ဈေး (ကျပ်တန်)' : 'Buyback rate (per kyat)'}
+                  </label>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="min-w-[10rem] flex-1">
+                      <label className="text-[10px] text-gray-500 block mb-0.5">MMK</label>
+                      <NumberInput
+                        min={0}
+                        step={1000}
+                        value={purBuyPriceInput}
+                        onChange={(v) => {
+                          setPurBuyPriceInput(v);
+                          setPurManualAmount('');
+                        }}
+                        className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-[#121212]"
+                      />
+                    </div>
+                    {isPurThai && (
+                      <div className="min-w-[8rem]">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">Baht (ဝယ်ဈေး)</label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={formatBaht(purBuyRateBaht)}
+                          className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-300 dark:border-blue-700 bg-blue-50/80 dark:bg-[#121212] text-blue-800 dark:text-blue-300"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    {language === 'MM'
+                      ? 'ဤဈေးဖြင့်သာ ဝယ်တွက်မည် — ရိုက်ပြင်နိုင်သည်'
+                      : 'Payout uses this rate — editable'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Payout & Payment Method */}
             <div className="p-4 rounded-xl bg-[#FAF8F2] dark:bg-[#201D17] border border-[#D4AF37]/30 space-y-3">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex-1 w-full">
-                  <span className="text-xs text-[#B8860B] dark:text-[#E5C158] font-bold block mb-1">
+                <div className="flex-1 w-full space-y-2">
+                  <span className="text-xs text-[#B8860B] dark:text-[#E5C158] font-bold block">
                     {language === 'MM' ? 'ထုတ်ပေးငွေ (manual ရိုက်နိုင်):' : 'Payout amount (editable):'}
                   </span>
-                  <input
-                    type="number"
-                    value={purManualAmount === '' ? purCalcPayout : purManualAmount}
-                    onChange={(e) => setPurManualAmount(e.target.value)}
-                    className="w-full max-w-xs px-3 py-2 text-xl font-extrabold font-mono rounded-xl border border-[#D4AF37]/40 bg-white dark:bg-[#121212] text-[#996515] dark:text-amber-300"
-                  />
-                  <span className="text-[10px] text-gray-500 mt-1 block">
-                    {language === 'MM' ? `တွက်ချက် = ${formatMMK(purCalcPayout)}` : `Calculated = ${formatMMK(purCalcPayout)}`}
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div className="min-w-[12rem] flex-1">
+                      <label className="text-[10px] text-gray-500 block mb-0.5">MMK</label>
+                      <input
+                        type="number"
+                        value={purManualAmount === '' ? purCalcPayoutMmk : Number(purManualAmount)}
+                        onChange={(e) => setPurManualAmount(e.target.value)}
+                        className="w-full px-3 py-2 text-xl font-extrabold font-mono rounded-xl border border-[#D4AF37]/40 bg-white dark:bg-[#121212] text-[#996515] dark:text-amber-300"
+                      />
+                    </div>
+                    {isPurThai && (
+                      <div className="min-w-[10rem]">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">
+                          Baht (MMK→Baht · ဝယ်ဈေး)
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={formatBaht(
+                            purManualAmount === ''
+                              ? purCalcPayoutBaht
+                              : mmkToBaht(Number(purManualAmount) || 0, fxBuy)
+                          )}
+                          className="w-full px-3 py-2 text-xl font-extrabold font-mono rounded-xl border border-blue-300 bg-blue-50 dark:bg-[#121212] text-blue-800 dark:text-blue-300"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-gray-500 block">
+                    {language === 'MM'
+                      ? `တွက်ချက် = ${formatMMK(purCalcPayoutMmk)}${
+                          isPurThai ? ` · ${formatBaht(purCalcPayoutBaht)}` : ''
+                        }`
+                      : `Calculated = ${formatMMK(purCalcPayoutMmk)}${
+                          isPurThai ? ` · ${formatBaht(purCalcPayoutBaht)}` : ''
+                        }`}
                   </span>
                 </div>
                 <div className="flex items-center space-x-1.5">
@@ -1491,10 +2006,10 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                 />
               </div>
               <div className="text-[11px] text-gray-500 flex flex-wrap gap-3">
-                <span>Type: {purPurity === 'THAI_GOLD' ? 'Thai' : 'Myanmar'}</span>
-                <span>Gram: {kpyToGrams(purNetKpy, kyatToGrams).toFixed(3)} g</span>
-                <span>Qty: 1</span>
+                <span>Type: {isPurThai ? 'Thai' : 'Myanmar'}</span>
+                <span>Gram: {purNetGrams.toFixed(3)} g</span>
                 <span>Amount: {formatMMK(purTotalPayout)}</span>
+                {isPurThai && <span>{formatBaht(purTotalPayoutBaht)}</span>}
               </div>
             </div>
 
@@ -1506,17 +2021,11 @@ export const PosView: React.FC<Props> = ({ mode }) => {
               <span>{language === 'MM' ? 'အဝယ်ဘောင်ချာ ထုတ်ယူပြီး ငွေရှင်းမည်' : 'Complete Buyback & Print Voucher'}</span>
             </button>
 
-            <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={purAddToStock}
-                onChange={(e) => setPurAddToStock(e.target.checked)}
-                className="rounded border-gray-300"
-              />
+            <p className="text-[11px] text-gray-500 text-center">
               {language === 'MM'
-                ? 'ဝယ်ယူသောရွှေကို စတော့ထဲ ထည့်မည် (ဘားကုဒ်အလိုအလျောက်)'
-                : 'Add purchased gold into inventory (auto barcode)'}
-            </label>
+                ? 'အဝယ်ပစ္စည်းများသည် စတော့ထဲ မဝင်ဘဲ «အဟောင်းထည်» စာရင်းတွင် ပြမည်'
+                : 'Purchased items are not added to inventory — they appear under Old Gold'}
+            </p>
 
           </div>
 
@@ -1590,17 +2099,30 @@ export const PosView: React.FC<Props> = ({ mode }) => {
               onChange={(e) => setExcTradeName(e.target.value)}
               className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
             />
-            <select
-              value={excTradePurity}
-              onChange={(e) => setExcTradePurity(e.target.value as GoldPurity)}
-              className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-            >
-              {Object.entries(PURITY_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {language === 'MM' ? v.mm : v.en}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={excTradeCategory}
+                onChange={(e) => setExcTradeCategory(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+              >
+                {productCategories.map((c) => (
+                  <option key={c.id || c.code} value={c.code}>
+                    {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={excTradePurity}
+                onChange={(e) => setExcTradePurity(e.target.value as GoldPurity)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+              >
+                {Object.entries(PURITY_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {language === 'MM' ? v.mm : v.en}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="grid grid-cols-4 gap-2">
               <input
                 type="number"
@@ -1685,6 +2207,278 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         </div>
       )}
 
+      {/* ------------------------------------------------------------- */}
+      {/* 4. SHOP_OUT — remove stock with note (ဆိုင်ထုတ်) */}
+      {/* ------------------------------------------------------------- */}
+      {activeSubTab === 'SHOP_OUT' && (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 min-h-[70vh]">
+          <section className="xl:col-span-6 flex flex-col rounded-2xl bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 shadow-xs overflow-hidden min-w-0">
+            <div className="px-3 py-2.5 border-b border-gray-200 dark:border-gray-800 flex flex-wrap items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <PackageMinus className="w-4 h-4 text-rose-600 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="font-bold text-xs text-gray-900 dark:text-white truncate">
+                    {language === 'MM' ? 'ဆိုင်ရှိ ပစ္စည်းများ' : 'In-stock items'}
+                  </h3>
+                  <p className="text-[10px] text-gray-500 leading-tight">
+                    {language === 'MM'
+                      ? 'နှိပ်ပြီး ညာဘက်သို့ ထည့်မည်'
+                      : 'Click to add →'}
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900">
+                {outStockItems.length} {language === 'MM' ? 'ထည်' : ''}
+              </span>
+            </div>
+
+            <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-900">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={outSearch}
+                  onChange={(e) => setOutSearch(e.target.value)}
+                  placeholder={
+                    language === 'MM'
+                      ? 'ဘားကုဒ် / အမည်…'
+                      : 'Barcode / name…'
+                  }
+                  className="w-full pl-8 pr-2 py-1.5 text-[11px] rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] dark:text-white font-medium focus:ring-2 focus:ring-rose-400 focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 max-h-[58vh]">
+              {outFiltered.length === 0 ? (
+                <p className="text-center text-[11px] text-gray-400 py-8">
+                  {language === 'MM' ? 'ပစ္စည်း မရှိပါ' : 'No items'}
+                </p>
+              ) : (
+                outFiltered.map((item) => {
+                  const thai = isThaiItem(item);
+                  const cat = masterCategories.find((c) => c.code === item.category);
+                  const catName =
+                    language === 'MM'
+                      ? cat?.name_mm || item.category
+                      : cat?.name_en || item.category;
+                  const grossLabel = formatKPYMyanmar({
+                    kyat: item.weight_kyat,
+                    pae: item.weight_pae,
+                    yway: item.weight_yway,
+                  });
+                  const netLabel = thai
+                    ? `${Number(item.thai_weight_unit || 0).toFixed(2)} g`
+                    : formatKPYMyanmar({
+                        kyat: item.net_weight_kyat,
+                        pae: item.net_weight_pae,
+                        yway: item.net_weight_yway,
+                      });
+                  const craftTotal =
+                    Number(item.craftsmanship_fee || 0) +
+                    Number(item.craftsmanship_profit_fee || 0);
+                  const stoneTotal =
+                    Number(item.stone_price || 0) + Number(item.stone_profit_price || 0);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => addOutItem(item)}
+                      className="w-full text-left px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 hover:border-rose-300 dark:hover:border-rose-800 bg-white dark:bg-[#121212] transition"
+                    >
+                      <div className="flex items-start justify-between gap-1.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-[11px] leading-snug text-gray-900 dark:text-white line-clamp-2">
+                            {language === 'MM' ? item.name_mm || item.name : item.name}
+                          </div>
+                          <div className="text-[9px] font-mono text-gray-400 mt-0.5 truncate">
+                            {item.barcode}
+                          </div>
+                        </div>
+                        <span
+                          className={`shrink-0 text-[9px] font-bold px-1 py-0.5 rounded ${
+                            thai
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {thai
+                            ? language === 'MM'
+                              ? 'ထိုင်း'
+                              : 'Thai'
+                            : language === 'MM'
+                              ? 'မြန်မာ'
+                              : 'MM'}
+                        </span>
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-x-1.5 gap-y-0.5 text-[9px] leading-tight">
+                        <div className="text-gray-500 truncate">
+                          <span className="text-gray-400">
+                            {language === 'MM' ? 'အမျိုးအစား' : 'Cat'}
+                          </span>{' '}
+                          <span className="font-semibold text-gray-700 dark:text-gray-300">
+                            {catName}
+                          </span>
+                        </div>
+                        <div className="text-gray-500 truncate text-right">
+                          <span className="text-gray-400">
+                            {language === 'MM' ? 'ရည်' : 'Purity'}
+                          </span>{' '}
+                          <span className="font-semibold text-[#996515] dark:text-amber-300">
+                            {PURITY_LABELS[item.purity]?.mm || item.purity}
+                          </span>
+                        </div>
+                        {!thai && (
+                          <div className="text-gray-500 col-span-2 font-mono">
+                            <span className="text-gray-400">
+                              {language === 'MM' ? 'အထည်' : 'Gross'}
+                            </span>{' '}
+                            {grossLabel}
+                          </div>
+                        )}
+                        <div className="text-gray-500 col-span-2 font-mono">
+                          <span className="text-gray-400">
+                            {language === 'MM' ? 'ရွှေချိန်' : 'Net'}
+                          </span>{' '}
+                          <span className="font-bold text-gray-800 dark:text-gray-200">
+                            {netLabel}
+                          </span>
+                        </div>
+                        {craftTotal > 0 && (
+                          <div className="text-gray-500 font-mono">
+                            <span className="text-gray-400">
+                              {language === 'MM' ? 'လက်ခ' : 'Craft'}
+                            </span>{' '}
+                            {formatMMK(craftTotal)}
+                          </div>
+                        )}
+                        {stoneTotal > 0 && (
+                          <div className="text-gray-500 font-mono text-right">
+                            <span className="text-gray-400">
+                              {language === 'MM' ? 'ကျောက်' : 'Stone'}
+                            </span>{' '}
+                            {formatMMK(stoneTotal)}
+                          </div>
+                        )}
+                        <div className="col-span-2 font-mono font-bold text-[10px] text-rose-700 dark:text-rose-300 pt-0.5 border-t border-gray-100 dark:border-gray-800 mt-0.5">
+                          <span className="font-semibold text-gray-400 mr-1">
+                            {language === 'MM' ? 'ခန့်မှန်း' : 'Est.'}
+                          </span>
+                          {formatMMK(Number(item.selling_price_estimated || 0))}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
+          <section className="xl:col-span-6 flex flex-col rounded-2xl bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 shadow-xs overflow-hidden">
+            <div className="px-4 py-3.5 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <h3 className="font-bold text-sm text-gray-900 dark:text-white">
+                {language === 'MM' ? 'ဆိုင်ထုတ် စာရင်း' : 'Shop-out list'}
+              </h3>
+              <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">
+                {outCart.length} {language === 'MM' ? 'ခု' : 'items'}
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 max-h-[40vh]">
+              {outCart.length === 0 ? (
+                <p className="text-center text-xs text-gray-400 py-10">
+                  {language === 'MM'
+                    ? 'ဘယ်ဘက်မှ ပစ္စည်းများ ရွေးထည့်ပါ'
+                    : 'Pick items on the left'}
+                </p>
+              ) : (
+                outCart.map((inv) => {
+                  const thai = isThaiItem(inv);
+                  const cat = masterCategories.find((c) => c.code === inv.category);
+                  const catName =
+                    language === 'MM'
+                      ? cat?.name_mm || inv.category
+                      : cat?.name_en || inv.category;
+                  return (
+                    <div
+                      key={inv.id}
+                      className="p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#121212]"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs text-gray-900 dark:text-white truncate">
+                            {language === 'MM' ? inv.name_mm || inv.name : inv.name}
+                          </div>
+                          <div className="text-[10px] font-mono text-gray-400">{inv.barcode}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeOutItem(inv.id)}
+                          className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-500">
+                        <span>
+                          {catName} · {PURITY_LABELS[inv.purity]?.mm || inv.purity}
+                        </span>
+                        <span className="font-mono">
+                          {thai
+                            ? `${Number(inv.thai_weight_unit || 0).toFixed(2)} g · ထိုင်း`
+                            : `${formatKPYMyanmar({
+                                kyat: inv.net_weight_kyat,
+                                pae: inv.net_weight_pae,
+                                yway: inv.net_weight_yway,
+                              })} · မြန်မာ`}
+                        </span>
+                        <span className="font-mono font-semibold text-gray-700 dark:text-gray-300">
+                          {formatMMK(Number(inv.selling_price_estimated || 0))}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-200 dark:border-gray-800 space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-rose-800 dark:text-rose-300 block mb-1.5">
+                  {language === 'MM' ? 'မှတ်ချက် *' : 'Note *'}
+                </label>
+                <textarea
+                  value={outNote}
+                  onChange={(e) => setOutNote(e.target.value)}
+                  rows={3}
+                  placeholder={
+                    language === 'MM'
+                      ? 'ပစ္စည်းအားလုံး ထည့်ပြီးမှ အကြောင်းရင်း ရေးပါ…'
+                      : 'After adding all items, write the reason…'
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-[#121212] resize-none focus:ring-2 focus:ring-rose-400 focus:outline-hidden"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCompleteShopOut()}
+                disabled={outCart.length === 0 || outSaving}
+                className="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white font-bold text-sm flex items-center justify-center gap-2"
+              >
+                <CheckCircle className="w-4 h-4" />
+                {outSaving
+                  ? language === 'MM'
+                    ? 'သိမ်းနေသည်…'
+                    : 'Saving…'
+                  : language === 'MM'
+                    ? 'ဆိုင်ထုတ် သိမ်းမည်'
+                    : 'Confirm Shop Out'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {showNewCustomerModal && (
         <ModalOverlay>
           <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800">
@@ -1734,16 +2528,42 @@ export const PosView: React.FC<Props> = ({ mode }) => {
               </button>
               <button
                 type="button"
+                disabled={savingCustomer}
                 onClick={() => {
-                  if (!draftCustomerName.trim()) return;
-                  setCustomCustomerName(draftCustomerName.trim());
-                  setCustomCustomerPhone(draftCustomerPhone.trim());
-                  setIsNewCustomer(true);
-                  setShowNewCustomerModal(false);
+                  void (async () => {
+                    const name = draftCustomerName.trim();
+                    if (!name) return;
+                    setSavingCustomer(true);
+                    try {
+                      const created = await addCustomer(
+                        name,
+                        draftCustomerPhone.trim() || 'N/A',
+                        'Walk-in'
+                      );
+                      setSelectedCustomer(created);
+                      setDraftCustomerName('');
+                      setDraftCustomerPhone('');
+                      setShowNewCustomerModal(false);
+                    } catch (err) {
+                      void dialog.alert(
+                        language === 'MM'
+                          ? `ဖောက်သည် သိမ်းမရပါ: ${err instanceof Error ? err.message : String(err)}`
+                          : `Could not save customer: ${err instanceof Error ? err.message : String(err)}`
+                      );
+                    } finally {
+                      setSavingCustomer(false);
+                    }
+                  })();
                 }}
-                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-white text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-white text-xs font-bold disabled:opacity-50"
               >
-                {language === 'MM' ? 'အတည်ပြု' : 'Confirm'}
+                {savingCustomer
+                  ? language === 'MM'
+                    ? 'သိမ်းနေသည်…'
+                    : 'Saving…'
+                  : language === 'MM'
+                    ? 'သိမ်းမည်'
+                    : 'Save'}
               </button>
             </div>
           </div>

@@ -16,6 +16,7 @@ import {
   PermissionAction,
   UserRole,
   ShopSettings,
+  GoldsmithJob,
 } from '../types/gold';
 import { derivePriceFromMeelin, PURITY_MULTIPLIERS, KYAT_TO_GRAMS } from '../utils/goldCalculations';
 import { api, BootstrapData } from '../services/api';
@@ -27,6 +28,7 @@ interface GoldShopContextType {
   customers: Customer[];
   transactions: Transaction[];
   customOrders: CustomOrder[];
+  goldsmithJobs: GoldsmithJob[];
   pawnRecords: PawnRecord[];
   pawnInterestPayments: PawnInterestPayment[];
   ledger: FinancialLedger[];
@@ -61,14 +63,33 @@ interface GoldShopContextType {
   createTransaction: (txnData: Omit<Transaction, 'id' | 'created_at'>) => Promise<Transaction>;
   deleteTransaction: (id: string) => Promise<void>;
   addCustomOrder: (order: Omit<CustomOrder, 'id' | 'created_at'>) => Promise<CustomOrder>;
-  updateOrderStatus: (id: string, status: CustomOrder['status'], remainingPaid?: number) => Promise<void>;
+  updateCustomOrder: (
+    id: string,
+    data: Partial<CustomOrder> | Record<string, unknown>
+  ) => Promise<CustomOrder>;
+  updateOrderStatus: (
+    id: string,
+    status: CustomOrder['status'],
+    remainingPaid?: number,
+    opts?: { via_sale?: boolean }
+  ) => Promise<void>;
+  createGoldsmithJob: (data: Record<string, unknown>) => Promise<GoldsmithJob>;
+  returnGoldsmithJob: (id: string, data?: Record<string, unknown>) => Promise<GoldsmithJob>;
+  cancelGoldsmithJob: (id: string) => Promise<void>;
+  handoffGoldsmithJob: (
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<{ job: GoldsmithJob; transaction: Transaction }>;
   addPawnRecord: (pawn: Omit<PawnRecord, 'id'>) => Promise<PawnRecord>;
   updatePawnRecord: (id: string, updates: Partial<PawnRecord> | Record<string, unknown>) => Promise<PawnRecord>;
   deletePawnRecord: (id: string) => Promise<void>;
+  deletePawnInterestPayment: (id: string) => Promise<void>;
+  deletePawnRedeem: (id: string) => Promise<void>;
   payPawnInterest: (
     id: string,
     data: {
       payment_date?: string;
+      days_paid?: number;
       months_paid?: number;
       interest_kyat?: number;
       interest_baht?: number;
@@ -128,6 +149,7 @@ function applyBootstrap(
     setCustomers: (v: Customer[]) => void;
     setTransactions: (v: Transaction[]) => void;
     setCustomOrders: (v: CustomOrder[]) => void;
+    setGoldsmithJobs: (v: GoldsmithJob[]) => void;
     setPawnRecords: (v: PawnRecord[]) => void;
     setPawnInterestPayments: (v: PawnInterestPayment[]) => void;
     setLedger: (v: FinancialLedger[]) => void;
@@ -143,6 +165,7 @@ function applyBootstrap(
   setters.setCustomers(data.customers);
   setters.setTransactions(data.transactions);
   setters.setCustomOrders(data.orders);
+  setters.setGoldsmithJobs(data.goldsmithJobs || []);
   setters.setPawnRecords(data.pawns);
   setters.setPawnInterestPayments(data.interestPayments || []);
   setters.setLedger(data.ledger);
@@ -152,8 +175,9 @@ function applyBootstrap(
   setters.setRolePermissions(data.rolePermissions || []);
   setters.setShopSettings({
     kyat_to_grams: data.settings?.kyat_to_grams || KYAT_TO_GRAMS,
-    baht_to_mmk_buy: data.settings?.baht_to_mmk_buy || 85,
-    baht_to_mmk_sell: data.settings?.baht_to_mmk_sell || 88,
+    baht_to_mmk_buy: data.settings?.baht_to_mmk_buy || 755,
+    baht_to_mmk_sell: data.settings?.baht_to_mmk_sell || 765,
+    thai_gold_baht: data.settings?.thai_gold_baht || 65000,
   });
 }
 
@@ -186,6 +210,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [customOrders, setCustomOrders] = useState<CustomOrder[]>([]);
+  const [goldsmithJobs, setGoldsmithJobs] = useState<GoldsmithJob[]>([]);
   const [pawnRecords, setPawnRecords] = useState<PawnRecord[]>([]);
   const [pawnInterestPayments, setPawnInterestPayments] = useState<PawnInterestPayment[]>([]);
   const [ledger, setLedger] = useState<FinancialLedger[]>([]);
@@ -195,8 +220,9 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
   const [shopSettings, setShopSettings] = useState<ShopSettings>({
     kyat_to_grams: KYAT_TO_GRAMS,
-    baht_to_mmk_buy: 85,
-    baht_to_mmk_sell: 88,
+    baht_to_mmk_buy: 755,
+    baht_to_mmk_sell: 765,
+    thai_gold_baht: 65000,
   });
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -207,6 +233,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCustomers,
     setTransactions,
     setCustomOrders,
+    setGoldsmithJobs,
     setPawnRecords,
     setPawnInterestPayments,
     setLedger,
@@ -421,13 +448,46 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return order;
   };
 
+  const updateCustomOrder = async (
+    id: string,
+    data: Partial<CustomOrder> | Record<string, unknown>
+  ) => {
+    const order = await api.updateCustomOrder(id, data as Record<string, unknown>);
+    await invalidateAndRefresh();
+    return order;
+  };
+
   const updateOrderStatus = async (
     id: string,
     status: CustomOrder['status'],
-    remainingPaid?: number
+    remainingPaid?: number,
+    opts?: { via_sale?: boolean }
   ) => {
-    await api.updateOrderStatus(id, status, remainingPaid);
+    await api.updateOrderStatus(id, status, remainingPaid, opts);
     await invalidateAndRefresh();
+  };
+
+  const createGoldsmithJob = async (data: Record<string, unknown>) => {
+    const job = await api.createGoldsmithJob(data);
+    await invalidateAndRefresh();
+    return job;
+  };
+
+  const returnGoldsmithJob = async (id: string, data?: Record<string, unknown>) => {
+    const job = await api.returnGoldsmithJob(id, data);
+    await invalidateAndRefresh();
+    return job;
+  };
+
+  const cancelGoldsmithJob = async (id: string) => {
+    await api.cancelGoldsmithJob(id);
+    await invalidateAndRefresh();
+  };
+
+  const handoffGoldsmithJob = async (id: string, data: Record<string, unknown>) => {
+    const result = await api.handoffGoldsmithJob(id, data);
+    await invalidateAndRefresh();
+    return result;
   };
 
   const addPawnRecord = async (pawnData: Omit<PawnRecord, 'id'>) => {
@@ -450,10 +510,21 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await invalidateAndRefresh();
   };
 
+  const deletePawnInterestPayment = async (id: string) => {
+    await api.deletePawnInterestPayment(id);
+    await invalidateAndRefresh();
+  };
+
+  const deletePawnRedeem = async (id: string) => {
+    await api.deletePawnRedeem(id);
+    await invalidateAndRefresh();
+  };
+
   const payPawnInterest = async (
     id: string,
     data: {
       payment_date?: string;
+      days_paid?: number;
       months_paid?: number;
       interest_kyat?: number;
       interest_baht?: number;
@@ -561,6 +632,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         customers,
         transactions,
         customOrders,
+        goldsmithJobs,
         pawnRecords,
         pawnInterestPayments,
         ledger,
@@ -593,10 +665,17 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createTransaction,
         deleteTransaction,
         addCustomOrder,
+        updateCustomOrder,
         updateOrderStatus,
+        createGoldsmithJob,
+        returnGoldsmithJob,
+        cancelGoldsmithJob,
+        handoffGoldsmithJob,
         addPawnRecord,
         updatePawnRecord,
         deletePawnRecord,
+        deletePawnInterestPayment,
+        deletePawnRedeem,
         payPawnInterest,
         redeemPawnRecord,
         addLedgerEntry,

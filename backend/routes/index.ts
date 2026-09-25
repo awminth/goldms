@@ -48,15 +48,25 @@ router.delete('/transactions/:id', shopController.deleteTransaction);
 
 router.get('/orders', shopController.listOrders);
 router.post('/orders', shopController.addOrder);
+router.put('/orders/:id', shopController.updateOrder);
 router.patch('/orders/:id/status', shopController.updateOrderStatus);
+
+router.get('/goldsmith-jobs', shopController.listGoldsmithJobs);
+router.get('/goldsmith-jobs/old-gold-available', shopController.oldGoldAvailable);
+router.post('/goldsmith-jobs', shopController.createGoldsmithJob);
+router.post('/goldsmith-jobs/:id/return', shopController.returnGoldsmithJob);
+router.post('/goldsmith-jobs/:id/handoff', shopController.handoffGoldsmithJob);
+router.post('/goldsmith-jobs/:id/cancel', shopController.cancelGoldsmithJob);
 
 router.get('/pawns', shopController.listPawns);
 router.get('/pawns/interest-payments', shopController.listPawnInterestPayments);
+router.delete('/pawns/interest-payments/:id', shopController.deletePawnInterestPayment);
 router.post('/pawns', shopController.addPawn);
 router.put('/pawns/:id', shopController.updatePawn);
 router.delete('/pawns/:id', shopController.deletePawn);
 router.post('/pawns/:id/interest', shopController.payPawnInterest);
 router.post('/pawns/:id/redeem', shopController.redeemPawn);
+router.delete('/pawns/:id/redeem', shopController.deletePawnRedeem);
 
 router.get('/ledger', shopController.listLedger);
 router.post('/ledger', shopController.addLedger);
@@ -67,5 +77,6 @@ router.post('/calc/valuation', shopController.calcValuation);
 router.post('/calc/thai', shopController.calcThai);
 
 router.get('/reports/summary', shopController.reportSummary);
+router.get('/reports/financial', shopController.reportFinancial);
 
 export default router;

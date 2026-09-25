@@ -5,9 +5,10 @@ export const PERMISSION_MODULES = [
   { key: 'pos', name_mm: 'အရောင်း / အဝယ် / အလဲ', name_en: 'Sale / Buy / Exchange', sort: 20 },
   { key: 'pos_history', name_mm: 'ဘောင်ချာမှတ်တမ်း', name_en: 'Voucher History', sort: 25 },
   { key: 'inventory', name_mm: 'အထည်စတော့ & ဘားကုဒ်', name_en: 'Inventory & Barcodes', sort: 30 },
-  { key: 'orders', name_mm: 'Order တင်ခြင်း & စရံ', name_en: 'Orders & Deposits', sort: 40 },
+  { key: 'orders', name_mm: 'Order တင်ခြင်း & စရံ', name_en: 'Orders & Deposits', sort: 35 },
+  { key: 'goldsmith', name_mm: 'ပန်းထိမ်အပ်', name_en: 'Goldsmith Workshop', sort: 40 },
   { key: 'pawn', name_mm: 'အပေါင် / အတိုး / ရွေး', name_en: 'Pawn / Interest / Redeem', sort: 50 },
-  { key: 'ledger', name_mm: 'ငွေစာရင်း & စရိတ်', name_en: 'Income & Expenses', sort: 60 },
+  { key: 'ledger', name_mm: 'ဝင်ငွေ / ထွက်ငွေ', name_en: 'Income & Expenses', sort: 60 },
   { key: 'reports', name_mm: 'အစီရင်ခံစာများ', name_en: 'Reports', sort: 70 },
   { key: 'prices', name_mm: 'နေ့စဉ်ရွှေဈေး', name_en: 'Daily Gold Prices', sort: 80 },
   { key: 'customers', name_mm: 'ဖောက်သည်', name_en: 'Customers', sort: 90 },
@@ -27,153 +28,161 @@ export const DEFAULT_CATEGORIES: Array<{
   description: string;
   sort: number;
 }> = [
-  // —— Product / jewelry item types (Setup → ပစ္စည်းအမျိုးအစား) ——
-  {
-    code: 'NECKLACE',
-    name_mm: 'ဆွဲကြိုး',
-    name_en: 'Necklace',
-    category_group: 'PRODUCT',
-    description: 'Necklace / chain jewelry',
-    sort: 10,
-  },
-  {
-    code: 'RING',
-    name_mm: 'လက်စွပ်',
-    name_en: 'Ring',
-    category_group: 'PRODUCT',
-    description: 'Finger rings',
-    sort: 20,
-  },
-  {
-    code: 'BRACELET',
-    name_mm: 'လက်ကောက်',
-    name_en: 'Bracelet',
-    category_group: 'PRODUCT',
-    description: 'Bracelets',
-    sort: 30,
-  },
-  {
-    code: 'EARRING',
-    name_mm: 'နားကပ်',
-    name_en: 'Earring',
-    category_group: 'PRODUCT',
-    description: 'Earrings',
-    sort: 40,
-  },
-  {
-    code: 'PENDANT',
-    name_mm: 'ဆွဲသီး',
-    name_en: 'Pendant',
-    category_group: 'PRODUCT',
-    description: 'Pendants',
-    sort: 50,
-  },
-  {
-    code: 'BANGLE',
-    name_mm: 'ဘယက် / ဟန်းချိန်း',
-    name_en: 'Bangle',
-    category_group: 'PRODUCT',
-    description: 'Bangles / hand chains',
-    sort: 60,
-  },
-  {
-    code: 'GOLD_BAR',
-    name_mm: 'ရွှေတုံး / ဒင်္ဂါး',
-    name_en: 'Gold Bar',
-    category_group: 'PRODUCT',
-    description: 'Bars and coins',
-    sort: 70,
-  },
-  {
-    code: 'ANKLET',
-    name_mm: 'ခြေချင်း',
-    name_en: 'Anklet',
-    category_group: 'PRODUCT',
-    description: 'Anklets',
-    sort: 80,
-  },
-  {
-    code: 'OLD_GOLD',
-    name_mm: 'ရွှေဟောင်း',
-    name_en: 'Old Gold',
-    category_group: 'PRODUCT',
-    description: 'Buyback / scrap old gold',
-    sort: 90,
-  },
-  // —— Categories = shop gold classes (Setup → Categories) ——
-  {
-    code: 'MEELIN',
-    name_mm: 'မီးလင်း',
-    name_en: 'Meelin',
-    category_group: 'GOLD_CLASS',
-    description: '',
-    sort: 10,
-  },
-  {
-    code: 'K24',
-    name_mm: '24K',
-    name_en: '24K',
-    category_group: 'GOLD_CLASS',
-    description: 'မီးလင်း နှင့် တူညီ',
-    sort: 20,
-  },
-  {
-    code: 'PE15A',
-    name_mm: '15A',
-    name_en: '15A',
-    category_group: 'GOLD_CLASS',
-    description: '(မီးလင်း × 16) / 17',
-    sort: 30,
-  },
-  {
-    code: 'PE15B',
-    name_mm: '15B',
-    name_en: '15B',
-    category_group: 'GOLD_CLASS',
-    description: '(မီးလင်း × 16) / 17.5',
-    sort: 40,
-  },
-  {
-    code: 'PE14A',
-    name_mm: '14A',
-    name_en: '14A',
-    category_group: 'GOLD_CLASS',
-    description: '(မီးလင်း × 14) / 16',
-    sort: 50,
-  },
-  {
-    code: 'PE13A',
-    name_mm: '13A',
-    name_en: '13A',
-    category_group: 'GOLD_CLASS',
-    description: '(မီးလင်း × 13) / 16',
-    sort: 60,
-  },
-  {
-    code: 'PE12A',
-    name_mm: '12A',
-    name_en: '12A',
-    category_group: 'GOLD_CLASS',
-    description: '(မီးလင်း × 12) / 16',
-    sort: 70,
-  },
-  {
-    code: 'K18',
-    name_mm: '18K',
-    name_en: '18K',
-    category_group: 'GOLD_CLASS',
-    description: '12A နှင့် တူညီ — (မီးလင်း × 12) / 16',
-    sort: 80,
-  },
-  {
-    code: 'THAI_GOLD',
-    name_mm: 'ထိုင်းရွှေ',
-    name_en: 'Thai Gold',
-    category_group: 'GOLD_CLASS',
-    description: '',
-    sort: 90,
-  },
-];
+    // —— Product / jewelry item types (Setup → ပစ္စည်းအမျိုးအစား) ——
+    {
+      code: 'NECKLACE',
+      name_mm: 'ဆွဲကြိုး',
+      name_en: 'Necklace',
+      category_group: 'PRODUCT',
+      description: 'Necklace / chain jewelry',
+      sort: 10,
+    },
+    {
+      code: 'RING',
+      name_mm: 'လက်စွပ်',
+      name_en: 'Ring',
+      category_group: 'PRODUCT',
+      description: 'Finger rings',
+      sort: 20,
+    },
+    {
+      code: 'BRACELET',
+      name_mm: 'လက်ကောက်',
+      name_en: 'Bracelet',
+      category_group: 'PRODUCT',
+      description: 'Bracelets',
+      sort: 30,
+    },
+    {
+      code: 'EARRING',
+      name_mm: 'နားကပ်',
+      name_en: 'Earring',
+      category_group: 'PRODUCT',
+      description: 'Earrings',
+      sort: 40,
+    },
+    {
+      code: 'PENDANT',
+      name_mm: 'ဆွဲသီး',
+      name_en: 'Pendant',
+      category_group: 'PRODUCT',
+      description: 'Pendants',
+      sort: 50,
+    },
+    {
+      code: 'BANGLE',
+      name_mm: 'ဘယက် / ဟန်းချိန်း',
+      name_en: 'Bangle',
+      category_group: 'PRODUCT',
+      description: 'Bangles / hand chains',
+      sort: 60,
+    },
+    {
+      code: 'GOLD_BAR',
+      name_mm: 'ရွှေတုံး / ဒင်္ဂါး',
+      name_en: 'Gold Bar',
+      category_group: 'PRODUCT',
+      description: 'Bars and coins',
+      sort: 70,
+    },
+    {
+      code: 'ANKLET',
+      name_mm: 'ခြေချင်း',
+      name_en: 'Anklet',
+      category_group: 'PRODUCT',
+      description: 'Anklets',
+      sort: 80,
+    },
+    {
+      code: 'OLD_GOLD',
+      name_mm: 'ရွှေဟောင်း',
+      name_en: 'Old Gold',
+      category_group: 'PRODUCT',
+      description: 'Buyback / scrap old gold',
+      sort: 90,
+    },
+    {
+      code: 'MIXED',
+      name_mm: 'အမယ်စုံ',
+      name_en: 'Mixed items',
+      category_group: 'PRODUCT',
+      description: 'Multiple pawn items (comma-separated names)',
+      sort: 95,
+    },
+    // —— Categories = shop gold classes (Setup → Categories) ——
+    {
+      code: 'MEELIN',
+      name_mm: 'မီးလင်း',
+      name_en: 'Meelin',
+      category_group: 'GOLD_CLASS',
+      description: '',
+      sort: 10,
+    },
+    {
+      code: 'K24',
+      name_mm: '24K',
+      name_en: '24K',
+      category_group: 'GOLD_CLASS',
+      description: 'မီးလင်း နှင့် တူညီ',
+      sort: 20,
+    },
+    {
+      code: 'PE15A',
+      name_mm: '15A',
+      name_en: '15A',
+      category_group: 'GOLD_CLASS',
+      description: '(မီးလင်း × 16) / 17',
+      sort: 30,
+    },
+    {
+      code: 'PE15B',
+      name_mm: '15B',
+      name_en: '15B',
+      category_group: 'GOLD_CLASS',
+      description: '(မီးလင်း × 16) / 17.5',
+      sort: 40,
+    },
+    {
+      code: 'PE14A',
+      name_mm: '14A',
+      name_en: '14A',
+      category_group: 'GOLD_CLASS',
+      description: '(မီးလင်း × 14) / 16',
+      sort: 50,
+    },
+    {
+      code: 'PE13A',
+      name_mm: '13A',
+      name_en: '13A',
+      category_group: 'GOLD_CLASS',
+      description: '(မီးလင်း × 13) / 16',
+      sort: 60,
+    },
+    {
+      code: 'PE12A',
+      name_mm: '12A',
+      name_en: '12A',
+      category_group: 'GOLD_CLASS',
+      description: '(မီးလင်း × 12) / 16',
+      sort: 70,
+    },
+    {
+      code: 'K18',
+      name_mm: '18K',
+      name_en: '18K',
+      category_group: 'GOLD_CLASS',
+      description: '12A နှင့် တူညီ — (မီးလင်း × 12) / 16',
+      sort: 80,
+    },
+    {
+      code: 'THAI_GOLD',
+      name_mm: 'ထိုင်းရွှေ',
+      name_en: 'Thai Gold',
+      category_group: 'GOLD_CLASS',
+      description: '',
+      sort: 90,
+    },
+  ];
 
 const GOLD_CLASS_CODES = DEFAULT_CATEGORIES.filter((c) => c.category_group === 'GOLD_CLASS').map(
   (c) => c.code
@@ -227,6 +236,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, Crud>> = {
     pos: ALL,
     pos_history: ALL,
     inventory: ALL,
+    goldsmith: ALL,
     orders: ALL,
     pawn: ALL,
     ledger: CRU,
@@ -243,6 +253,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, Crud>> = {
     pos: CR,
     pos_history: READ,
     inventory: READ,
+    goldsmith: CRU,
     orders: CRU,
     pawn: CRU,
     ledger: READ,
@@ -282,13 +293,25 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
     );
   }
 
-  // Remap legacy purity codes on live data
-  for (const [from, to] of Object.entries(PURITY_REMAP)) {
-    if (from === to) continue;
-    await pool.query(`UPDATE inventory_items SET purity = ? WHERE purity = ?`, [to, from]);
-    await pool.query(`UPDATE transaction_items SET purity = ? WHERE purity = ?`, [to, from]);
-    await pool.query(`UPDATE orders SET purity = ? WHERE purity = ?`, [to, from]);
-    await pool.query(`UPDATE pawn_records SET purity = ? WHERE purity = ?`, [to, from]);
+  // Remap legacy purity codes on live data only once (flagged in shop_settings)
+  try {
+    const [remapFlag] = await pool.query<RowDataPacket[]>(
+      `SELECT setting_value FROM shop_settings WHERE setting_key = 'purity_remapped_v1'`
+    );
+    if (!remapFlag[0]?.setting_value) {
+      for (const [from, to] of Object.entries(PURITY_REMAP)) {
+        if (from === to) continue;
+        await pool.query(`UPDATE inventory_items SET purity = ? WHERE purity = ?`, [to, from]);
+        await pool.query(`UPDATE transaction_items SET purity = ? WHERE purity = ?`, [to, from]);
+        await pool.query(`UPDATE orders SET purity = ? WHERE purity = ?`, [to, from]);
+        await pool.query(`UPDATE pawn_records SET purity = ? WHERE purity = ?`, [to, from]);
+      }
+      await pool.query(
+        `INSERT INTO shop_settings (setting_key, setting_value) VALUES ('purity_remapped_v1', '1') ON DUPLICATE KEY UPDATE setting_value = '1'`
+      );
+    }
+  } catch {
+    /* ignore if settings table not ready */
   }
 
   // Sync daily_gold_prices — derive Myanmar grades from မီးလင်း base
@@ -301,70 +324,70 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
     sell: number;
     buy: number;
   }> = [
-    {
-      code: 'MEELIN',
-      mm: 'မီးလင်း',
-      en: 'Meelin',
-      sell: meelinSell,
-      buy: meelinBuy,
-    },
-    {
-      code: 'K24',
-      mm: '24K',
-      en: '24K',
-      sell: meelinSell,
-      buy: meelinBuy,
-    },
-    {
-      code: 'PE15A',
-      mm: '15A',
-      en: '15A',
-      sell: Math.round((meelinSell * 16) / 17),
-      buy: Math.round((meelinBuy * 16) / 17),
-    },
-    {
-      code: 'PE15B',
-      mm: '15B',
-      en: '15B',
-      sell: Math.round((meelinSell * 16) / 17.5),
-      buy: Math.round((meelinBuy * 16) / 17.5),
-    },
-    {
-      code: 'PE14A',
-      mm: '14A',
-      en: '14A',
-      sell: Math.round((meelinSell * 14) / 16),
-      buy: Math.round((meelinBuy * 14) / 16),
-    },
-    {
-      code: 'PE13A',
-      mm: '13A',
-      en: '13A',
-      sell: Math.round((meelinSell * 13) / 16),
-      buy: Math.round((meelinBuy * 13) / 16),
-    },
-    {
-      code: 'PE12A',
-      mm: '12A',
-      en: '12A',
-      sell: Math.round((meelinSell * 12) / 16),
-      buy: Math.round((meelinBuy * 12) / 16),
-    },
-    {
-      code: 'K18',
-      mm: '18K',
-      en: '18K',
-      sell: Math.round((meelinSell * 12) / 16),
-      buy: Math.round((meelinBuy * 12) / 16),
-    },
-    {
-      code: 'THAI_GOLD',
-      mm: 'ထိုင်းရွှေ',
-      en: 'Thai Gold',
-      sell: 5520000,
-      buy: 5460000,
-    },
-  ];
+      {
+        code: 'MEELIN',
+        mm: 'မီးလင်း',
+        en: 'Meelin',
+        sell: meelinSell,
+        buy: meelinBuy,
+      },
+      {
+        code: 'K24',
+        mm: '24K',
+        en: '24K',
+        sell: meelinSell,
+        buy: meelinBuy,
+      },
+      {
+        code: 'PE15A',
+        mm: '15A',
+        en: '15A',
+        sell: Math.round((meelinSell * 16) / 17),
+        buy: Math.round((meelinBuy * 16) / 17),
+      },
+      {
+        code: 'PE15B',
+        mm: '15B',
+        en: '15B',
+        sell: Math.round((meelinSell * 16) / 17.5),
+        buy: Math.round((meelinBuy * 16) / 17.5),
+      },
+      {
+        code: 'PE14A',
+        mm: '14A',
+        en: '14A',
+        sell: Math.round((meelinSell * 14) / 16),
+        buy: Math.round((meelinBuy * 14) / 16),
+      },
+      {
+        code: 'PE13A',
+        mm: '13A',
+        en: '13A',
+        sell: Math.round((meelinSell * 13) / 16),
+        buy: Math.round((meelinBuy * 13) / 16),
+      },
+      {
+        code: 'PE12A',
+        mm: '12A',
+        en: '12A',
+        sell: Math.round((meelinSell * 12) / 16),
+        buy: Math.round((meelinBuy * 12) / 16),
+      },
+      {
+        code: 'K18',
+        mm: '18K',
+        en: '18K',
+        sell: Math.round((meelinSell * 12) / 16),
+        buy: Math.round((meelinBuy * 12) / 16),
+      },
+      {
+        code: 'THAI_GOLD',
+        mm: 'ထိုင်းရွှေ',
+        en: 'Thai Gold',
+        sell: 5520000,
+        buy: 5460000,
+      },
+    ];
 
   await pool.query(
     `DELETE FROM daily_gold_prices WHERE gold_type NOT IN (${placeholders})`,
@@ -383,12 +406,13 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
   }
 }
 
-/** Default shop unit conversion: 1 ကျပ် = N grams; Baht ↔ MMK */
+/** Default shop unit conversion: 1 ကျပ် = N grams; Header Baht FX + Thai Baht price */
 export async function ensureShopSettings(pool: Pool): Promise<void> {
   const defaults: Array<[string, string]> = [
     ['kyat_to_grams', '16.6'],
-    ['baht_to_mmk_buy', '85'],
-    ['baht_to_mmk_sell', '88'],
+    ['baht_to_mmk_buy', '755'],
+    ['baht_to_mmk_sell', '765'],
+    ['thai_gold_baht', '65000'],
   ];
   for (const [key, value] of defaults) {
     await pool.query(
@@ -404,17 +428,20 @@ export async function ensureShopSettings(pool: Pool): Promise<void> {
 export async function ensureMasterAndPermissions(pool: Pool): Promise<void> {
   await ensureShopSettings(pool);
 
-  for (const m of PERMISSION_MODULES) {
-    await pool.query(
-      `INSERT INTO permission_modules (module_key, name_mm, name_en, sort_order)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         name_mm = VALUES(name_mm),
-         name_en = VALUES(name_en),
-         sort_order = VALUES(sort_order)`,
-      [m.key, m.name_mm, m.name_en, m.sort]
-    );
-  }
+  const modValues: any[] = [];
+  const modSql = PERMISSION_MODULES.map((m) => {
+    modValues.push(m.key, m.name_mm, m.name_en, m.sort);
+    return '(?, ?, ?, ?)';
+  }).join(', ');
+  await pool.query(
+    `INSERT INTO permission_modules (module_key, name_mm, name_en, sort_order)
+     VALUES ${modSql}
+     ON DUPLICATE KEY UPDATE
+       name_mm = VALUES(name_mm),
+       name_en = VALUES(name_en),
+       sort_order = VALUES(sort_order)`,
+    modValues
+  );
 
   // Drop retired modules (e.g. tracking) from existing DBs
   const keepKeys = PERMISSION_MODULES.map((m) => m.key);
@@ -431,16 +458,19 @@ export async function ensureMasterAndPermissions(pool: Pool): Promise<void> {
   // Always upsert defaults so new GOLD_CLASS rows appear on existing installs
   await ensureDefaultCategories(pool);
 
+  const roleValues: any[] = [];
   for (const role of ['OWNER', 'MANAGER', 'CASHIER'] as const) {
     const matrix = DEFAULT_ROLE_PERMISSIONS[role];
     for (const m of PERMISSION_MODULES) {
       const crud = matrix[m.key] || NONE;
-      await pool.query(
-        `INSERT INTO role_permissions (role, module_key, can_create, can_read, can_update, can_delete)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE module_key = module_key`,
-        [role, m.key, crud[0] ? 1 : 0, crud[1] ? 1 : 0, crud[2] ? 1 : 0, crud[3] ? 1 : 0]
-      );
+      roleValues.push(role, m.key, crud[0] ? 1 : 0, crud[1] ? 1 : 0, crud[2] ? 1 : 0, crud[3] ? 1 : 0);
     }
   }
+  const roleSql = Array(roleValues.length / 6).fill('(?, ?, ?, ?, ?, ?)').join(', ');
+  await pool.query(
+    `INSERT INTO role_permissions (role, module_key, can_create, can_read, can_update, can_delete)
+     VALUES ${roleSql}
+     ON DUPLICATE KEY UPDATE module_key = module_key`,
+    roleValues
+  );
 }

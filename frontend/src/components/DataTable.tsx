@@ -1,9 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { PaginationBar } from './PaginationBar';
+import { ExpandDetailGrid } from './ExpandDetailGrid';
 
 export type DataTableAlign = 'left' | 'center' | 'right';
+
+/** primary = main row; detail = expander only; action = always visible (outside expander) */
+export type DataTableColumnSlot = 'primary' | 'detail' | 'action';
 
 export type DataTableColumn<T> = {
   id: string;
@@ -17,6 +21,14 @@ export type DataTableColumn<T> = {
   headerClassName?: string;
   /** Exclude from global search */
   searchIgnore?: boolean;
+  /**
+   * When DataTable `expandable` is true:
+   * - primary: shown in compact row
+   * - detail: shown only inside expander (bordered chips)
+   * - action: always in row; clicks do not toggle expand
+   * Default: primary
+   */
+  slot?: DataTableColumnSlot;
 };
 
 export type DataTableProps<T> = {
@@ -38,6 +50,13 @@ export type DataTableProps<T> = {
   resetDeps?: unknown[];
   /** Optional expanded content rendered as a full-width row under each data row */
   renderRowExtra?: (row: T) => React.ReactNode;
+  /**
+   * Compact row + expander for detail columns (no horizontal scroll).
+   * Click anywhere on the row (except action cells) to toggle.
+   */
+  expandable?: boolean;
+  /** Extra class on each body row */
+  rowClassName?: (row: T) => string | undefined;
 };
 
 type SortDir = 'asc' | 'desc';
@@ -57,8 +76,13 @@ const alignClass: Record<DataTableAlign, string> = {
   right: 'text-right',
 };
 
+function slotOf<T>(col: DataTableColumn<T>): DataTableColumnSlot {
+  return col.slot || 'primary';
+}
+
 /**
  * Professional compact data table — sort, search, hover, selection, scroll, pagination.
+ * Optional expandable mode keeps important columns visible and details in bordered chips.
  */
 export function DataTable<T>({
   rows,
@@ -75,15 +99,38 @@ export function DataTable<T>({
   className = '',
   resetDeps = [],
   renderRowExtra,
+  expandable = false,
+  rowClassName,
 }: DataTableProps<T>) {
   const useInternalScroll = Boolean(maxHeightClass);
   const scrollClass = useInternalScroll
     ? `overflow-auto ${maxHeightClass}`
-    : 'overflow-x-auto';
+    : expandable
+      ? 'overflow-y-auto overflow-x-hidden'
+      : 'overflow-x-auto';
   const [query, setQuery] = useState('');
   const [sortId, setSortId] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const primaryCols = useMemo(
+    () => (expandable ? columns.filter((c) => slotOf(c) === 'primary') : columns),
+    [columns, expandable]
+  );
+  const detailCols = useMemo(
+    () => (expandable ? columns.filter((c) => slotOf(c) === 'detail') : []),
+    [columns, expandable]
+  );
+  const actionCols = useMemo(
+    () => (expandable ? columns.filter((c) => slotOf(c) === 'action') : []),
+    [columns, expandable]
+  );
+  const visibleCols = useMemo(
+    () => (expandable ? [...primaryCols, ...actionCols] : columns),
+    [expandable, primaryCols, actionCols, columns]
+  );
+  const colSpan = expandable ? visibleCols.length + 1 : columns.length;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -126,6 +173,10 @@ export function DataTable<T>({
     }
   };
 
+  const toggleExpand = (key: string) => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const placeholder =
     searchPlaceholder ||
     (language === 'MM' ? 'ဇယားထဲမှ ရှာဖွေရန်…' : 'Search in table…');
@@ -159,10 +210,19 @@ export function DataTable<T>({
       )}
 
       <div className={`px-3 sm:px-4 w-full max-w-full ${scrollClass}`}>
-        <table className="data-table w-full min-w-max text-left text-xs text-gray-600 dark:text-gray-300">
+        <table
+          className={`data-table w-full text-left text-xs text-gray-600 dark:text-gray-300 ${
+            expandable ? 'min-w-0 table-fixed sm:table-auto' : 'min-w-max'
+          }`}
+        >
           <thead className="sticky top-0 z-10">
             <tr>
-              {columns.map((col) => {
+              {expandable && (
+                <th scope="col" className="w-8 !px-1">
+                  <span className="sr-only">Expand</span>
+                </th>
+              )}
+              {visibleCols.map((col) => {
                 const sortable = col.sortable !== false;
                 const active = sortId === col.id;
                 return (
@@ -198,7 +258,7 @@ export function DataTable<T>({
           <tbody>
             {pager.pageItems.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="!text-center text-gray-400 py-10">
+                <td colSpan={colSpan} className="!text-center text-gray-400 py-10">
                   {empty}
                 </td>
               </tr>
@@ -206,25 +266,70 @@ export function DataTable<T>({
               pager.pageItems.map((row) => {
                 const key = rowKey(row);
                 const selected = selectable && selectedKey === key;
+                const isOpen = Boolean(expanded[key]);
                 const extra = renderRowExtra?.(row);
+                const detailItems = detailCols.map((col) => ({
+                  label: col.header,
+                  value: col.cell(row),
+                }));
+                const showExpandPanel =
+                  expandable && isOpen && (detailItems.length > 0 || Boolean(extra));
+
                 return (
                   <React.Fragment key={key}>
                     <tr
-                      onClick={() => selectable && setSelectedKey(selected ? null : key)}
-                      className={selected ? 'is-selected' : undefined}
+                      onClick={() => {
+                        if (expandable && detailCols.length > 0) {
+                          toggleExpand(key);
+                        }
+                        if (selectable) setSelectedKey(selected ? null : key);
+                      }}
+                      className={[
+                        expandable && detailCols.length > 0 ? 'cursor-pointer' : '',
+                        selected ? 'is-selected' : '',
+                        rowClassName?.(row) || '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ') || undefined}
                     >
-                      {columns.map((col) => (
+                      {expandable && (
+                        <td className="!px-1 w-8 align-middle">
+                          <span className="inline-flex text-gray-400">
+                            {isOpen ? (
+                              <ChevronDown className="w-4 h-4 text-[#D4AF37]" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4" />
+                            )}
+                          </span>
+                        </td>
+                      )}
+                      {visibleCols.map((col) => (
                         <td
                           key={col.id}
                           className={`${alignClass[col.align || 'left']} ${col.className || ''}`}
+                          onClick={
+                            slotOf(col) === 'action'
+                              ? (e) => e.stopPropagation()
+                              : undefined
+                          }
                         >
                           {col.cell(row)}
                         </td>
                       ))}
                     </tr>
-                    {extra ? (
+                    {showExpandPanel ? (
                       <tr className="!bg-transparent hover:!bg-transparent">
-                        <td colSpan={columns.length} className="!p-0 !border-0">
+                        <td colSpan={colSpan} className="!p-0 !border-0">
+                          {detailItems.length > 0 ? (
+                            <ExpandDetailGrid items={detailItems} />
+                          ) : null}
+                          {extra}
+                        </td>
+                      </tr>
+                    ) : null}
+                    {!expandable && extra ? (
+                      <tr className="!bg-transparent hover:!bg-transparent">
+                        <td colSpan={colSpan} className="!p-0 !border-0">
                           {extra}
                         </td>
                       </tr>

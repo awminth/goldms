@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
+import { useDialog } from '../context/DialogContext';
 import { FinancialLedger } from '../types/gold';
 import { formatMMK } from '../utils/goldCalculations';
+import { formatDate } from '../utils/dateFormat';
+import { DateInput } from './DateInput';
 import {
   Wallet,
-  ArrowUpRight,
-  ArrowDownLeft,
   Plus,
-  TrendingUp,
   X,
   Pencil,
   Trash2,
@@ -16,6 +16,18 @@ import { DataTable, type DataTableColumn } from './DataTable';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import { ModalOverlay } from './ModalOverlay';
+
+/** Full-row text color by ledger entry type. */
+function ledgerTypeRowClass(type: string | undefined | null): string {
+  switch (String(type || '').toUpperCase()) {
+    case 'INCOME':
+      return 'text-emerald-700 dark:text-emerald-300';
+    case 'EXPENSE':
+      return 'text-rose-700 dark:text-rose-300';
+    default:
+      return '';
+  }
+}
 
 export const LedgerView: React.FC = () => {
   const {
@@ -26,6 +38,7 @@ export const LedgerView: React.FC = () => {
     language,
     can,
   } = useGoldShop();
+  const dialog = useDialog();
 
   const [filterType, setFilterType] = useState<string>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
@@ -39,16 +52,6 @@ export const LedgerView: React.FC = () => {
   const [formDescription, setFormDescription] = useState('ဆိုင်အထွေထွေ အသုံးစရိတ်');
   const [formRefNo, setFormRefNo] = useState('');
   const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
-
-  const totalIncome = ledger
-    .filter((l) => l.type === 'INCOME')
-    .reduce((sum, l) => sum + l.amount, 0);
-
-  const totalExpense = ledger
-    .filter((l) => l.type === 'EXPENSE')
-    .reduce((sum, l) => sum + l.amount, 0);
-
-  const netBalance = totalIncome - totalExpense;
 
   const resetForm = () => {
     setEditingId(null);
@@ -98,27 +101,33 @@ export const LedgerView: React.FC = () => {
       else await addLedgerEntry(payload);
       closeModal();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Save failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Save failed',
+      });
     } finally {
       setBusy(false);
     }
   };
 
   const handleDelete = async (entry: FinancialLedger) => {
-    if (
-      !window.confirm(
-        language === 'MM'
-          ? 'ဤစာရင်းကို ဖျက်မလား?'
-          : 'Delete this ledger entry?'
-      )
-    ) {
-      return;
-    }
+    const ok = await dialog.confirm({
+      title: language === 'MM' ? 'စာရင်း ဖျက်မည်' : 'Delete entry',
+      message:
+        language === 'MM' ? 'ဤစာရင်းကို ဖျက်မလား?' : 'Delete this ledger entry?',
+      confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
+      cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await deleteLedgerEntry(entry.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Delete failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Delete failed',
+      });
     } finally {
       setBusy(false);
     }
@@ -132,9 +141,9 @@ export const LedgerView: React.FC = () => {
 
   const exportLedgerExcel = () => {
     exportToExcel({
-      filename: 'financial_ledger',
-      sheetName: 'Ledger',
-      title: language === 'MM' ? 'ဘဏ္ဍာရေး စာရင်း (Financial Ledger)' : 'Financial Ledger Report',
+      filename: 'income_expense_entries',
+      sheetName: 'IncomeExpense',
+      title: language === 'MM' ? 'ဝင်ငွေ / ထွက်ငွေ စာရင်း' : 'Income & Expense Entries',
       columns: [
         { header: language === 'MM' ? 'ရက်စွဲ' : 'Date', value: (e) => e.date, width: 12 },
         { header: language === 'MM' ? 'အမျိုးအစား' : 'Type', value: (e) => e.type, width: 10 },
@@ -152,14 +161,16 @@ export const LedgerView: React.FC = () => {
       {
         id: 'date',
         header: language === 'MM' ? 'ရက်စွဲ' : 'Date',
+        slot: 'primary',
         accessor: (e) => e.date,
         cell: (entry) => (
-          <span className="font-mono text-gray-500 whitespace-nowrap">{entry.date}</span>
+          <span className="font-mono whitespace-nowrap opacity-80">{formatDate(entry.date)}</span>
         ),
       },
       {
         id: 'type',
         header: language === 'MM' ? 'အမျိုးအစား' : 'Type',
+        slot: 'primary',
         accessor: (e) => e.type,
         cell: (entry) => (
           <span
@@ -176,40 +187,34 @@ export const LedgerView: React.FC = () => {
       {
         id: 'category',
         header: language === 'MM' ? 'ကဏ္ဍ' : 'Category',
+        slot: 'primary',
         accessor: (e) => e.category,
-        cell: (entry) => (
-          <span className="font-semibold text-gray-800 dark:text-gray-200">{entry.category}</span>
-        ),
+        cell: (entry) => <span className="font-semibold">{entry.category}</span>,
       },
       {
         id: 'description',
         header: language === 'MM' ? 'အကြောင်းအရာ' : 'Description',
+        slot: 'detail',
         accessor: (e) => e.description,
-        cell: (entry) => (
-          <span className="text-gray-700 dark:text-gray-300">{entry.description}</span>
-        ),
+        cell: (entry) => <span>{entry.description}</span>,
       },
       {
         id: 'ref',
         header: language === 'MM' ? 'ကိုးကားအမှတ်' : 'Reference',
+        slot: 'detail',
         accessor: (e) => e.reference_no || '',
         cell: (entry) => (
-          <span className="font-mono text-gray-500">{entry.reference_no || '-'}</span>
+          <span className="font-mono opacity-70">{entry.reference_no || '-'}</span>
         ),
       },
       {
         id: 'amount',
         header: language === 'MM' ? 'ပမာဏ' : 'Amount',
+        slot: 'primary',
         accessor: (e) => (e.type === 'INCOME' ? e.amount : -e.amount),
         align: 'right',
         cell: (entry) => (
-          <span
-            className={`font-mono font-bold whitespace-nowrap ${
-              entry.type === 'INCOME'
-                ? 'text-emerald-700 dark:text-emerald-400'
-                : 'text-rose-600 dark:text-rose-400'
-            }`}
-          >
+          <span className="font-mono font-bold whitespace-nowrap">
             {entry.type === 'INCOME' ? '+' : '-'}
             {formatMMK(entry.amount)}
           </span>
@@ -218,6 +223,7 @@ export const LedgerView: React.FC = () => {
       {
         id: 'actions',
         header: language === 'MM' ? 'လုပ်ဆောင်ချက်' : 'Actions',
+        slot: 'action',
         accessor: () => '',
         sortable: false,
         searchIgnore: true,
@@ -266,14 +272,14 @@ export const LedgerView: React.FC = () => {
             <Wallet className="w-5 h-5 text-[#D4AF37]" />
             <span>
               {language === 'MM'
-                ? 'စာရင်းစစ် & အထွေထွေ ဝင်ငွေ/ထွက်ငွေ (Financial Ledger)'
-                : 'Financial Accounting & General Ledger'}
+                ? 'ဝင်ငွေ / ထွက်ငွေ ထည့်သွင်းခြင်း'
+                : 'Record Income & Expenses'}
             </span>
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {language === 'MM'
-              ? 'ရွှေအရောင်း၊ အဝယ်၊ ပန်းထိန်းလက်ခနှင့် ဆိုင်လည်ပတ်မှု အသုံးစရိတ် စာရင်းဇယားများ'
-              : 'Income, expenses, craftsmanship proceeds, utilities, staff payroll and daily cashflow'}
+              ? 'ဆိုင်အသုံးစရိတ်၊ လစာ၊ အခြားဝင်ငွေ/ထွက်ငွေ ကိုယ်တိုင် ထည့်သွင်းရန်။ စုစုပေါင်းတွက်ချက်မှုကို ဘဏ္ဍာရေးအစီရင်ခံစာတွင် ကြည့်ပါ။'
+              : 'Manual income/expense entries only. See Financial Report for totals and cashflow detail.'}
           </p>
         </div>
 
@@ -294,50 +300,6 @@ export const LedgerView: React.FC = () => {
               <span>{language === 'MM' ? 'စာရင်း အသစ်ထည့်သွင်းမည်' : 'Record Entry'}</span>
             </button>
           )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-emerald-200 dark:border-emerald-950 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold block">
-              {language === 'MM' ? 'စုစုပေါင်း ဝင်ငွေ (Total Income)' : 'Total Revenue / Income'}
-            </span>
-            <div className="text-xl font-mono font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
-              +{formatMMK(totalIncome)}
-            </div>
-          </div>
-          <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-600">
-            <ArrowUpRight className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-rose-200 dark:border-rose-950 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs text-rose-600 dark:text-rose-400 font-semibold block">
-              {language === 'MM' ? 'စုစုပေါင်း ထွက်ငွေ (Total Expense)' : 'Total Expenses'}
-            </span>
-            <div className="text-xl font-mono font-extrabold text-rose-700 dark:text-rose-400 mt-1">
-              -{formatMMK(totalExpense)}
-            </div>
-          </div>
-          <div className="p-3 rounded-xl bg-rose-500/10 text-rose-600">
-            <ArrowDownLeft className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-[#FAF8F2] dark:bg-[#201D17] border border-[#D4AF37]/30 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs text-[#996515] dark:text-[#E5C158] font-bold block">
-              {language === 'MM' ? 'အသားတင် ကျန်ငွေ (Net Cash Balance)' : 'Net Cash Position'}
-            </span>
-            <div className="text-xl font-mono font-extrabold text-[#996515] dark:text-amber-300 mt-1">
-              {formatMMK(netBalance)}
-            </div>
-          </div>
-          <div className="p-3 rounded-xl bg-[#D4AF37]/15 text-[#D4AF37]">
-            <TrendingUp className="w-5 h-5" />
-          </div>
         </div>
       </div>
 
@@ -366,6 +328,7 @@ export const LedgerView: React.FC = () => {
         searchPlaceholder={language === 'MM' ? 'ဖော်ပြချက် / ကိုးကား ရှာရန်…' : 'Search description / reference…'}
         resetDeps={[filterType, filterCategory]}
         emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No ledger entries'}
+        rowClassName={(e) => ledgerTypeRowClass(e.type)}
       />
 
       {isModalOpen && (
@@ -378,10 +341,10 @@ export const LedgerView: React.FC = () => {
                   {editingId
                     ? language === 'MM'
                       ? 'စာရင်း ပြင်ဆင်ရန်'
-                      : 'Edit Ledger Entry'
+                      : 'Edit Entry'
                     : language === 'MM'
-                      ? 'စာရင်းသွင်းလွှာ အသစ်'
-                      : 'Add Financial Ledger Record'}
+                      ? 'ဝင်ငွေ / ထွက်ငွေ အသစ်'
+                      : 'Add Income / Expense'}
                 </span>
               </h3>
               <button type="button" onClick={closeModal} className="p-1 rounded text-gray-400">
@@ -395,7 +358,7 @@ export const LedgerView: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setFormType('INCOME');
-                    setFormCategory('GOLD_SALE');
+                    setFormCategory('OTHER_INCOME');
                   }}
                   className={`py-2 rounded-xl font-bold border transition ${
                     formType === 'INCOME'
@@ -425,11 +388,10 @@ export const LedgerView: React.FC = () => {
                 <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
                   {language === 'MM' ? 'ရက်စွဲ:' : 'Date:'}
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   required
                   value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
+                  onChange={setFormDate}
                   className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white"
                 />
               </div>
@@ -446,7 +408,6 @@ export const LedgerView: React.FC = () => {
                   {formType === 'INCOME' ? (
                     <>
                       <option value="GOLD_SALE">ရွှေရောင်းရငွေ (Gold Sales)</option>
-                      <option value="PAWN_INTEREST">အပေါင်အတိုးရငွေ (Pawn Interest)</option>
                       <option value="CUSTOM_ORDER">အော်ဒါဝင်ငွေ (Custom Order Deposit)</option>
                       <option value="MELTING_PROFIT">ရွှေကျိုအမြတ် (Melting Profit)</option>
                       <option value="OTHER_INCOME">အခြားဝင်ငွေ (Other Income)</option>
@@ -459,6 +420,7 @@ export const LedgerView: React.FC = () => {
                       <option value="UTILITIES">မီတာခနှင့် အထွေထွေ (Utilities)</option>
                       <option value="EQUIPMENT_ACID">ပန်းထိမ်သုံးပစ္စည်း/အက်ဆစ် (Tools & Acid)</option>
                       <option value="TAX">အခွန်အခ (Taxes)</option>
+                      <option value="GOLDSMITH_FEE">ပန်းထိမ်လက်ခ (Goldsmith Fee)</option>
                       <option value="OTHER_EXPENSE">အခြားထွက်ငွေ (Other Expenses)</option>
                     </>
                   )}

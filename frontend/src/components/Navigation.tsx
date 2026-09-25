@@ -17,6 +17,10 @@ export type ActiveTab =
   | 'pos-exchange'
   | 'pos-history'
   | 'inventory'
+  | 'old-gold'
+  | 'goldsmith'
+  | 'goldsmith-handoff'
+  | 'order-handoff'
   | 'categories'
   | 'item-types'
   | 'orders'
@@ -29,7 +33,7 @@ export type ActiveTab =
   | 'pawn-redeem-new'
   | 'ledger'
   | 'customers'
-  | 'reports'
+  | 'financial-report'
   | 'users'
   | 'permissions'
   | 'unit-conversion';
@@ -48,7 +52,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab 
     { id: 'orders', label: 'Orders', icon: Clock },
     { id: 'pawn', label: 'Pawn', icon: HandCoins },
     { id: 'ledger', label: 'Ledger', icon: BookOpenCheck },
-    { id: 'reports', label: 'Reports', icon: FileBarChart2 },
+    { id: 'financial-report', label: 'Financial', icon: FileBarChart2 },
     { id: 'categories', label: 'Setup', icon: Settings2 },
   ];
 

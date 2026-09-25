@@ -1,24 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GoldShopProvider, useGoldShop } from './context/GoldShopContext';
+import { DialogProvider } from './context/DialogContext';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { ActiveTab } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
 import { InventoryView } from './components/InventoryView';
+import { OldGoldView } from './components/OldGoldView';
+import { GoldsmithView } from './components/GoldsmithView';
+import { GoldsmithHandoffView } from './components/GoldsmithHandoffView';
 import { PosView } from './components/PosView';
 import { PosHistoryView } from './components/PosHistoryView';
 import { OrdersView } from './components/OrdersView';
 import { PawnView } from './components/PawnView';
 import { LedgerView } from './components/LedgerView';
-import { ReportsView } from './components/ReportsView';
+import { FinancialReportView } from './components/FinancialReportView';
 import { SetupView } from './components/SetupView';
 import { VoucherModal } from './components/VoucherModal';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 import { softwareSystemName } from './branding';
+import { buildAppPath, parseAppPath, pushAppUrl, replaceAppUrl } from './utils/appRoutes';
 
 const ACTIVE_TAB_KEY = 'goldms_active_tab';
 const PAWN_EDIT_ID_KEY = 'goldms_pawn_edit_id';
+const GOLDSMITH_HANDOFF_KEY = 'goldms_goldsmith_handoff_id';
+const ORDER_HANDOFF_KEY = 'goldms_order_handoff_id';
 
 const ALL_TABS: ActiveTab[] = [
   'dashboard',
@@ -28,6 +35,10 @@ const ALL_TABS: ActiveTab[] = [
   'pos-exchange',
   'pos-history',
   'inventory',
+  'old-gold',
+  'goldsmith',
+  'goldsmith-handoff',
+  'order-handoff',
   'categories',
   'item-types',
   'orders',
@@ -39,37 +50,120 @@ const ALL_TABS: ActiveTab[] = [
   'pawn-interest-new',
   'pawn-redeem-new',
   'ledger',
-  'reports',
+  'financial-report',
   'customers',
   'users',
   'permissions',
   'unit-conversion',
 ];
 
-function readStoredTab(): ActiveTab {
+function readInitialRoute(): {
+  tab: ActiveTab;
+  pawnEditId: string | null;
+  goldsmithHandoffId: string | null;
+  orderHandoffId: string | null;
+} {
+  if (typeof window !== 'undefined') {
+    const fromUrl = parseAppPath(window.location.pathname);
+    if (fromUrl.tab && (ALL_TABS as string[]).includes(fromUrl.tab)) {
+      return {
+        tab:
+          fromUrl.tab === 'pos-sale' ||
+          fromUrl.tab === 'pos-purchase' ||
+          fromUrl.tab === 'pos-exchange'
+            ? 'pos'
+            : fromUrl.tab,
+        pawnEditId: fromUrl.pawnEditId,
+        goldsmithHandoffId: fromUrl.goldsmithHandoffId,
+        orderHandoffId: fromUrl.orderHandoffId,
+      };
+    }
+  }
+
+  let tab: ActiveTab = 'dashboard';
   try {
     const saved = sessionStorage.getItem(ACTIVE_TAB_KEY);
-    if (saved === 'pos-sale' || saved === 'pos-purchase' || saved === 'pos-exchange') return 'pos';
-    if (saved && (ALL_TABS as string[]).includes(saved)) return saved as ActiveTab;
+    if (saved === 'pos-sale' || saved === 'pos-purchase' || saved === 'pos-exchange') tab = 'pos';
+    else if (saved === 'reports') tab = 'financial-report';
+    else if (saved && (ALL_TABS as string[]).includes(saved)) tab = saved as ActiveTab;
   } catch {
     /* ignore */
   }
-  return 'dashboard';
-}
 
-function readStoredPawnEditId(): string | null {
-  try {
-    return sessionStorage.getItem(PAWN_EDIT_ID_KEY);
-  } catch {
-    return null;
-  }
+  const read = (key: string) => {
+    try {
+      return sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  return {
+    tab,
+    pawnEditId: read(PAWN_EDIT_ID_KEY),
+    goldsmithHandoffId: read(GOLDSMITH_HANDOFF_KEY),
+    orderHandoffId: read(ORDER_HANDOFF_KEY),
+  };
 }
 
 const MainLayout: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ActiveTab>(readStoredTab);
+  const initial = useRef(readInitialRoute()).current;
+  const [activeTab, setActiveTabState] = useState<ActiveTab>(initial.tab);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [pawnEditId, setPawnEditId] = useState<string | null>(readStoredPawnEditId);
+  const [pawnEditId, setPawnEditId] = useState<string | null>(initial.pawnEditId);
+  const [goldsmithHandoffId, setGoldsmithHandoffId] = useState<string | null>(
+    initial.goldsmithHandoffId
+  );
+  const [orderHandoffId, setOrderHandoffId] = useState<string | null>(initial.orderHandoffId);
   const { language, currentUser, loading, apiError, refreshData, can } = useGoldShop();
+  const skipPushRef = useRef(false);
+
+  const applyRoute = useCallback((route: ReturnType<typeof parseAppPath>) => {
+    let tab = route.tab;
+    if (tab === 'pos-sale' || tab === 'pos-purchase' || tab === 'pos-exchange') tab = 'pos';
+    if (!(ALL_TABS as string[]).includes(tab)) tab = 'dashboard';
+
+    skipPushRef.current = true;
+    setActiveTabState(tab);
+    setGoldsmithHandoffId(route.goldsmithHandoffId);
+    setOrderHandoffId(route.orderHandoffId);
+    setPawnEditId(route.pawnEditId);
+  }, []);
+
+  const setActiveTab = useCallback((tab: ActiveTab) => {
+    setActiveTabState(tab);
+    if (tab !== 'goldsmith-handoff') setGoldsmithHandoffId(null);
+    if (tab !== 'order-handoff') setOrderHandoffId(null);
+    if (tab !== 'pawn-new') setPawnEditId(null);
+  }, []);
+
+  // Sync browser URL ↔ active page
+  useEffect(() => {
+    if (!currentUser) {
+      replaceAppUrl('/login');
+      return;
+    }
+    const path = buildAppPath({
+      tab: activeTab,
+      goldsmithHandoffId,
+      orderHandoffId,
+      pawnEditId,
+    });
+    if (skipPushRef.current) {
+      replaceAppUrl(path);
+      skipPushRef.current = false;
+    } else {
+      pushAppUrl(path);
+    }
+  }, [activeTab, goldsmithHandoffId, orderHandoffId, pawnEditId, currentUser]);
+
+  useEffect(() => {
+    const onPop = () => {
+      applyRoute(parseAppPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [applyRoute]);
 
   useEffect(() => {
     try {
@@ -88,16 +182,56 @@ const MainLayout: React.FC = () => {
     }
   }, [pawnEditId]);
 
+  useEffect(() => {
+    try {
+      if (goldsmithHandoffId) sessionStorage.setItem(GOLDSMITH_HANDOFF_KEY, goldsmithHandoffId);
+      else sessionStorage.removeItem(GOLDSMITH_HANDOFF_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [goldsmithHandoffId]);
+
+  useEffect(() => {
+    try {
+      if (orderHandoffId) sessionStorage.setItem(ORDER_HANDOFF_KEY, orderHandoffId);
+      else sessionStorage.removeItem(ORDER_HANDOFF_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [orderHandoffId]);
+
   const openPawnEdit = (id: string) => {
     setPawnEditId(id);
-    setActiveTab('pawn-new');
+    setActiveTabState('pawn-new');
   };
 
   const clearPawnEdit = () => setPawnEditId(null);
 
+  const openGoldsmithHandoff = (id: string) => {
+    setOrderHandoffId(null);
+    setGoldsmithHandoffId(id);
+    setActiveTabState('goldsmith-handoff');
+  };
+
+  const clearGoldsmithHandoff = () => {
+    setGoldsmithHandoffId(null);
+    setActiveTabState('goldsmith');
+  };
+
+  const openOrderHandoff = (id: string) => {
+    setGoldsmithHandoffId(null);
+    setOrderHandoffId(id);
+    setActiveTabState('order-handoff');
+  };
+
+  const clearOrderHandoff = () => {
+    setOrderHandoffId(null);
+    setActiveTabState('orders');
+  };
+
   const pawnNavigate = (tab: ActiveTab) => {
     if (tab !== 'pawn-new') setPawnEditId(null);
-    setActiveTab(tab);
+    setActiveTabState(tab);
   };
 
   if (loading) {
@@ -153,13 +287,25 @@ const MainLayout: React.FC = () => {
           {(can('pos_history', 'read') || can('pos', 'read')) &&
             activeTab === 'pos-history' && <PosHistoryView />}
           {activeTab === 'inventory' && can('inventory', 'read') && <InventoryView />}
+          {activeTab === 'old-gold' && can('inventory', 'read') && <OldGoldView />}
+          {activeTab === 'goldsmith' && can('goldsmith', 'read') && <GoldsmithView />}
+          {activeTab === 'goldsmith-handoff' &&
+            can('goldsmith', 'read') &&
+            goldsmithHandoffId && (
+              <GoldsmithHandoffView jobId={goldsmithHandoffId} onBack={clearGoldsmithHandoff} />
+            )}
+          {activeTab === 'order-handoff' && can('orders', 'read') && orderHandoffId && (
+            <GoldsmithHandoffView orderId={orderHandoffId} onBack={clearOrderHandoff} />
+          )}
           {activeTab === 'categories' && can('master', 'read') && (
             <SetupView section="categories" />
           )}
           {activeTab === 'item-types' && can('master', 'read') && (
             <SetupView section="item-types" />
           )}
-          {activeTab === 'orders' && can('orders', 'read') && <OrdersView />}
+          {activeTab === 'orders' && can('orders', 'read') && (
+            <OrdersView onHandoffOrder={openOrderHandoff} />
+          )}
           {can('pawn', 'read') && activeTab === 'pawn' && (
             <PawnView
               section="list"
@@ -192,7 +338,7 @@ const MainLayout: React.FC = () => {
             <PawnView section="form-redeem" onNavigate={pawnNavigate} onClearEdit={clearPawnEdit} />
           )}
           {activeTab === 'ledger' && can('ledger', 'read') && <LedgerView />}
-          {activeTab === 'reports' && can('reports', 'read') && <ReportsView />}
+          {activeTab === 'financial-report' && can('reports', 'read') && <FinancialReportView />}
           {activeTab === 'customers' && can('customers', 'read') && (
             <SetupView section="settings" initialTab="customers" />
           )}
@@ -201,8 +347,8 @@ const MainLayout: React.FC = () => {
           )}
           {activeTab === 'unit-conversion' &&
             (can('unit_conversion', 'read') || can('master', 'read')) && (
-            <SetupView section="settings" initialTab="unit-conversion" />
-          )}
+              <SetupView section="settings" initialTab="unit-conversion" />
+            )}
           {activeTab === 'permissions' && can('permissions', 'read') && (
             <SetupView section="settings" initialTab="permissions" />
           )}
@@ -229,7 +375,9 @@ const MainLayout: React.FC = () => {
 export default function App() {
   return (
     <GoldShopProvider>
-      <MainLayout />
+      <DialogProvider>
+        <MainLayout />
+      </DialogProvider>
     </GoldShopProvider>
   );
 }

@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import { api } from '../services/api';
-import { formatMMK } from '../utils/goldCalculations';
+import {
+  formatMMK,
+  meelinMmkToBaht,
+  mmkToThaiBaht,
+  thaiBahtToMmk,
+} from '../utils/goldCalculations';
 import {
   Sun,
   Moon,
@@ -18,9 +23,15 @@ interface HeaderProps {
   onOpenMobileSidebar?: () => void;
 }
 
+const fmtBaht = (n: number) =>
+  Number.isFinite(n)
+    ? n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    : '—';
+
 export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
   const {
     goldPrices,
+    shopSettings,
     darkMode,
     toggleDarkMode,
     language,
@@ -29,54 +40,76 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
     currentUser,
     logout,
     can,
+    updateShopSettings,
   } = useGoldShop();
 
   const [isEditingPrices, setIsEditingPrices] = useState(false);
-  const [edited16Price, setEdited16Price] = useState('');
-  const [editedThaiPrice, setEditedThaiPrice] = useState('');
+  const [editedMeelin, setEditedMeelin] = useState('');
+  const [editedThaiBaht, setEditedThaiBaht] = useState('');
+  const [editedBuy, setEditedBuy] = useState('');
+  const [editedSell, setEditedSell] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const pure16 = goldPrices.find((p) => p.gold_type === 'MEELIN');
   const thaiGold = goldPrices.find((p) => p.gold_type === 'THAI_GOLD');
-  const pe15 = goldPrices.find((p) => p.gold_type === 'PE15A');
+  const buyRate = shopSettings.baht_to_mmk_buy || 755;
+  const sellRate = shopSettings.baht_to_mmk_sell || 765;
+  const thaiBahtStored =
+    shopSettings.thai_gold_baht ||
+    mmkToThaiBaht(thaiGold?.price_per_kyat || 0, buyRate) ||
+    65000;
 
   const startEditPrices = () => {
-    setEdited16Price(pure16 ? String(pure16.price_per_kyat) : '5750000');
-    setEditedThaiPrice(thaiGold ? String(thaiGold.price_per_kyat) : '5520000');
+    setEditedMeelin(pure16 ? String(pure16.price_per_kyat) : '9000000');
+    setEditedThaiBaht(String(Math.round(thaiBahtStored) || 65000));
+    setEditedBuy(String(buyRate));
+    setEditedSell(String(sellRate));
     setIsEditingPrices(true);
   };
 
   const saveQuickPrices = async () => {
-    const updates: Array<{
-      gold_type: 'MEELIN' | 'THAI_GOLD';
-      sellPrice: number;
-      buyPrice?: number;
-    }> = [];
-    if (edited16Price && !isNaN(Number(edited16Price))) {
-      const sellMeelin = Number(edited16Price);
-      // Backend cascades K24 + grade prices from မီးလင်း (same formulas)
-      updates.push({
-        gold_type: 'MEELIN',
-        sellPrice: sellMeelin,
-        buyPrice: sellMeelin - 50000,
+    const meelin = Number(editedMeelin);
+    const thaiBaht = Number(editedThaiBaht);
+    const buy = Number(editedBuy);
+    const sell = Number(editedSell);
+    if (![meelin, thaiBaht, buy, sell].every((n) => Number.isFinite(n) && n > 0)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateShopSettings({
+        baht_to_mmk_buy: buy,
+        baht_to_mmk_sell: sell,
+        thai_gold_baht: thaiBaht,
       });
-    }
-    if (editedThaiPrice && !isNaN(Number(editedThaiPrice))) {
-      const sellThai = Number(editedThaiPrice);
-      updates.push({ gold_type: 'THAI_GOLD', sellPrice: sellThai, buyPrice: sellThai - 60000 });
-    }
-    if (updates.length) {
-      await api.updateGoldPricesBulk(updates);
+      const thaiMmk = Math.round(thaiBahtToMmk(thaiBaht, sell));
+      await api.updateGoldPricesBulk([
+        {
+          gold_type: 'MEELIN',
+          sellPrice: meelin,
+          buyPrice: meelin - 50000,
+        },
+        {
+          gold_type: 'THAI_GOLD',
+          sellPrice: thaiMmk,
+          buyPrice: Math.max(0, thaiMmk - 60000),
+        },
+      ]);
       await refreshData();
+      setIsEditingPrices(false);
+    } finally {
+      setSaving(false);
     }
-    setIsEditingPrices(false);
   };
+
+  const meelinBahtDisplay = pure16
+    ? meelinMmkToBaht(pure16.price_per_kyat, buyRate)
+    : 0;
 
   return (
     <header className="sticky top-0 z-30 bg-panel/95 dark:bg-[#161616]/95 backdrop-blur border-b border-line dark:border-[#D4AF37]/20 shadow-xs transition-colors">
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-18">
-          
-          {/* Left: Mobile hamburger only */}
           <div className="flex items-center space-x-3">
             <button
               id="sidebar-mobile-toggle-btn"
@@ -89,42 +122,72 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
             </button>
           </div>
 
-          {/* Center: Live Gold Price Ticker */}
-          <div className="hidden md:flex items-center space-x-3 bg-[#FAF8F2]/80 dark:bg-[#1E1E1E] px-3 py-1.5 rounded-xl border border-[#D4AF37]/20">
-            <div className="flex items-center space-x-1.5 text-xs font-semibold text-[#B8860B] dark:text-[#E5C158]">
+          <div className="hidden md:flex items-center space-x-2 lg:space-x-3 bg-[#FAF8F2]/80 dark:bg-[#1E1E1E] px-3 py-1.5 rounded-xl border border-[#D4AF37]/20 max-w-[min(100%,52rem)] overflow-x-auto">
+            <div className="flex items-center space-x-1.5 text-xs font-semibold text-[#B8860B] dark:text-[#E5C158] shrink-0">
               <TrendingUp className="w-3.5 h-3.5 text-[#D4AF37]" />
               <span>{language === 'MM' ? 'ပေါက်ဈေး' : 'Rates'}</span>
             </div>
 
             {isEditingPrices ? (
-              <div className="flex items-center space-x-2 text-xs">
+              <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-xs">
                 <div className="flex items-center space-x-1">
-                  <span className="text-gray-600 dark:text-gray-300 font-medium">၁၆ ပဲ:</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
+                    မီးလင်း:
+                  </span>
                   <input
                     type="number"
-                    value={edited16Price}
-                    onChange={(e) => setEdited16Price(e.target.value)}
-                    className="w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden"
+                    value={editedMeelin}
+                    onChange={(e) => setEditedMeelin(e.target.value)}
+                    className="w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
+                    title="MMK"
                   />
                 </div>
                 <div className="flex items-center space-x-1">
-                  <span className="text-gray-600 dark:text-gray-300 font-medium">ထိုင်းရွှေ:</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
+                    ထိုင်းရွှေ:
+                  </span>
                   <input
                     type="number"
-                    value={editedThaiPrice}
-                    onChange={(e) => setEditedThaiPrice(e.target.value)}
-                    className="w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden"
+                    value={editedThaiBaht}
+                    onChange={(e) => setEditedThaiBaht(e.target.value)}
+                    className="w-20 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
+                    title="Baht"
+                  />
+                  <span className="text-[10px] text-gray-400">฿</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
+                    {language === 'MM' ? 'ဝယ်ဈေး:' : 'Buy:'}
+                  </span>
+                  <input
+                    type="number"
+                    value={editedBuy}
+                    onChange={(e) => setEditedBuy(e.target.value)}
+                    className="w-16 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
+                  />
+                </div>
+                <div className="flex items-center space-x-1">
+                  <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
+                    {language === 'MM' ? 'ရောင်းဈေး:' : 'Sell:'}
+                  </span>
+                  <input
+                    type="number"
+                    value={editedSell}
+                    onChange={(e) => setEditedSell(e.target.value)}
+                    className="w-16 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
                   />
                 </div>
                 <button
                   onClick={saveQuickPrices}
-                  className="p-1 rounded bg-[#D4AF37] text-white hover:bg-[#C5A059] transition"
+                  disabled={saving}
+                  className="p-1 rounded bg-[#D4AF37] text-white hover:bg-[#C5A059] transition disabled:opacity-50"
                   title="သိမ်းမည်"
                 >
                   <Check className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setIsEditingPrices(false)}
+                  disabled={saving}
                   className="p-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 transition"
                   title="ပယ်ဖျက်"
                 >
@@ -132,38 +195,52 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                 </button>
               </div>
             ) : (
-              <div className="flex items-center space-x-3 text-xs font-medium">
+              <div className="flex items-center space-x-2 lg:space-x-3 text-xs font-medium">
                 {pure16 && (
-                  <div className="flex items-center space-x-1">
+                  <div className="flex items-center space-x-1 whitespace-nowrap">
                     <span className="text-gray-500 dark:text-gray-400">မီးလင်း:</span>
                     <span className="font-bold text-gray-900 dark:text-amber-300">
                       {formatMMK(pure16.price_per_kyat)}
                     </span>
-                  </div>
-                )}
-                <span className="text-gray-300 dark:text-gray-700">|</span>
-                {pe15 && (
-                  <div className="flex items-center space-x-1">
-                    <span className="text-gray-500 dark:text-gray-400">15A:</span>
-                    <span className="font-bold text-gray-900 dark:text-amber-300">
-                      {formatMMK(pe15.price_per_kyat)}
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+                      (~{fmtBaht(meelinBahtDisplay)} ฿)
                     </span>
                   </div>
                 )}
                 <span className="text-gray-300 dark:text-gray-700">|</span>
-                {thaiGold && (
-                  <div className="flex items-center space-x-1">
-                    <span className="text-gray-500 dark:text-gray-400">ထိုင်းရွှေ:</span>
-                    <span className="font-bold text-gray-900 dark:text-amber-300">
-                      {formatMMK(thaiGold.price_per_kyat)}
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center space-x-1 whitespace-nowrap">
+                  <span className="text-gray-500 dark:text-gray-400">ထိုင်းရွှေ:</span>
+                  <span className="font-bold text-gray-900 dark:text-amber-300 font-mono">
+                    {fmtBaht(thaiBahtStored)} ฿
+                  </span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                    (~
+                    {formatMMK(
+                      Math.round(thaiBahtToMmk(thaiBahtStored, sellRate))
+                    )}
+                    )
+                  </span>
+                </div>
+                <span className="text-gray-300 dark:text-gray-700">|</span>
+                <div className="flex items-center space-x-2 whitespace-nowrap">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {language === 'MM' ? 'ဝယ်:' : 'Buy:'}
+                  </span>
+                  <span className="font-bold text-gray-900 dark:text-amber-300 font-mono">
+                    {buyRate}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {language === 'MM' ? 'ရောင်း:' : 'Sell:'}
+                  </span>
+                  <span className="font-bold text-gray-900 dark:text-amber-300 font-mono">
+                    {sellRate}
+                  </span>
+                </div>
                 {can('prices', 'update') && (
                   <button
                     onClick={startEditPrices}
-                    className="ml-1 p-1 text-gray-400 hover:text-[#D4AF37] dark:hover:text-[#FFD700] transition"
-                    title="ရွှေဈေး ပြင်ဆင်ရန်"
+                    className="ml-1 p-1 text-gray-400 hover:text-[#D4AF37] dark:hover:text-[#FFD700] transition shrink-0"
+                    title="ရွှေဈေး / ဘတ်ဈေး ပြင်ဆင်ရန်"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                   </button>
@@ -172,13 +249,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
             )}
           </div>
 
-          {/* Right Controls: Staff user card + Language + Dark Mode + Logout */}
           <div className="flex items-center space-x-2 sm:space-x-3">
-            
-            {/* Staff Pill (desktop) */}
             {currentUser && (
               <div className="hidden sm:flex items-center space-x-2 px-2.5 py-1 rounded-xl bg-gray-50 dark:bg-[#1E1E1E] border border-gray-200 dark:border-gray-800 text-xs">
-                <div className={`w-6 h-6 rounded-md bg-gradient-to-br ${currentUser.avatarColor || 'from-amber-500 to-yellow-600'} text-white font-bold flex items-center justify-center text-[10px]`}>
+                <div
+                  className={`w-6 h-6 rounded-md bg-gradient-to-br ${currentUser.avatarColor || 'from-amber-500 to-yellow-600'} text-white font-bold flex items-center justify-center text-[10px]`}
+                >
                   {currentUser.name.charAt(0)}
                 </div>
                 <div className="text-left">
@@ -192,7 +268,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
               </div>
             )}
 
-            {/* Language Switcher */}
             <button
               id="lang-toggle-btn"
               onClick={toggleLanguage}
@@ -203,7 +278,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
               <span>{language === 'MM' ? 'မြန်မာ' : 'EN'}</span>
             </button>
 
-            {/* Dark Mode Toggle */}
             <button
               id="theme-toggle-btn"
               onClick={toggleDarkMode}
@@ -217,7 +291,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
               )}
             </button>
 
-            {/* Logout Button */}
             <button
               id="header-logout-btn"
               onClick={logout}
@@ -225,11 +298,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
               title="Logout / Switch User"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{language === 'MM' ? 'ထွက်မည်' : 'Logout'}</span>
+              <span className="hidden sm:inline">
+                {language === 'MM' ? 'ထွက်မည်' : 'Logout'}
+              </span>
             </button>
-
           </div>
-
         </div>
       </div>
     </header>

@@ -46,8 +46,26 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
-          target: `http://localhost:${backendPort}`,
+          target: `http://127.0.0.1:${backendPort}`,
           changeOrigin: true,
+          timeout: 60_000,
+          configure: (proxy) => {
+            // Avoid noisy stack traces while backend is still starting
+            proxy.on('error', (err, _req, res) => {
+              const code = (err as NodeJS.ErrnoException)?.code;
+              if (code === 'ECONNREFUSED' && res && !res.headersSent) {
+                (res as import('http').ServerResponse).writeHead(503, {
+                  'Content-Type': 'application/json',
+                });
+                (res as import('http').ServerResponse).end(
+                  JSON.stringify({
+                    success: false,
+                    message: 'API starting — retry shortly',
+                  })
+                );
+              }
+            });
+          },
         },
       },
     },

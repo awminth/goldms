@@ -145,7 +145,7 @@ export function calculateNetFromParts(
   const grossY = kpyToYway(gross.kyat, gross.pae, gross.yway);
   const gemY = kpyToYway(gemstone.kyat, gemstone.pae, gemstone.yway);
   const wasteY = Number(wastagePae || 0) * PAE_TO_YWAY + Number(wastageYway || 0);
-  return ywayToKpy(Math.max(0, grossY - gemY - wasteY));
+  return ywayToKpy(Math.max(0, grossY - gemY + wasteY));
 }
 
 export function calculateGoldValuation(

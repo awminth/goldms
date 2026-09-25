@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
+import { useDialog } from '../context/DialogContext';
 import {
   MasterCategory,
   CategoryGroup,
@@ -275,24 +276,16 @@ function UnitConversionPanel({
   onSave,
 }: {
   language: 'MM' | 'EN';
-  settings: { kyat_to_grams: number; baht_to_mmk_buy: number; baht_to_mmk_sell: number };
+  settings: { kyat_to_grams: number };
   canUpdate: boolean;
-  onSave: (data: {
-    kyat_to_grams: number;
-    baht_to_mmk_buy: number;
-    baht_to_mmk_sell: number;
-  }) => Promise<void>;
+  onSave: (data: { kyat_to_grams: number }) => Promise<void>;
 }) {
   const [kyatG, setKyatG] = useState(String(settings.kyat_to_grams || KYAT_TO_GRAMS));
-  const [bahtBuy, setBahtBuy] = useState(String(settings.baht_to_mmk_buy || 85));
-  const [bahtSell, setBahtSell] = useState(String(settings.baht_to_mmk_sell || 88));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setKyatG(String(settings.kyat_to_grams || KYAT_TO_GRAMS));
-    setBahtBuy(String(settings.baht_to_mmk_buy || 85));
-    setBahtSell(String(settings.baht_to_mmk_sell || 88));
   }, [settings]);
 
   const exampleGrams = Number(kyatG) || KYAT_TO_GRAMS;
@@ -300,16 +293,14 @@ function UnitConversionPanel({
 
   const handleSave = async () => {
     const g = Number(kyatG);
-    const buy = Number(bahtBuy);
-    const sell = Number(bahtSell);
-    if (![g, buy, sell].every((n) => Number.isFinite(n) && n > 0)) {
-      setMsg(language === 'MM' ? 'တန်ဖိုးအားလုံး မှန်ကန်စွာ ထည့်ပါ' : 'Enter valid positive values');
+    if (!Number.isFinite(g) || g <= 0) {
+      setMsg(language === 'MM' ? 'တန်ဖိုးမှန်ကန်စွာ ထည့်ပါ' : 'Enter a valid positive value');
       return;
     }
     setSaving(true);
     setMsg(null);
     try {
-      await onSave({ kyat_to_grams: g, baht_to_mmk_buy: buy, baht_to_mmk_sell: sell });
+      await onSave({ kyat_to_grams: g });
       setMsg(language === 'MM' ? 'သိမ်းဆည်းပြီးပါပြီ' : 'Saved');
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Save failed');
@@ -356,47 +347,11 @@ function UnitConversionPanel({
             {exampleGrams} g = {exampleKpy.kyat} ကျပ် {exampleKpy.pae} ပဲ {exampleKpy.yway} ရွေး
           </span>
         </div>
-      </div>
-
-      <div className="space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
-        <h4 className="text-xs font-bold text-gray-700 dark:text-gray-200">
-          {language === 'MM' ? 'Baht ↔ MMK' : 'Baht ↔ MMK'}
-        </h4>
-        <p className="text-xs text-gray-500">
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
           {language === 'MM'
-            ? '၁ ဘတ် = ဘယ်နှစ်ကျပ် (ဝယ်ဈေး / ရောင်းဈေး)။ ထိုင်းရွှေ ငွေလဲနှုန်းအတွက်။'
-            : '1 Baht in MMK — buy and sell FX rates for Thai gold.'}
+            ? 'ဘတ်ဈေး (ဝယ်/ရောင်း) နှင့် ထိုင်းရွှေ ဘတ်တန်ဖိုးကို Header ပေါက်ဈေးတွင် ပြင်ပါ။'
+            : 'Baht buy/sell rates and Thai gold Baht price are edited in the Header rates bar.'}
         </p>
-        <div className="grid grid-cols-2 gap-3 max-w-md">
-          <div>
-            <label className="text-[11px] text-gray-500 mb-1 block font-semibold">
-              {language === 'MM' ? 'ဝယ်ဈေး (Buy)' : 'Buy rate'}
-            </label>
-            <input
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={bahtBuy}
-              disabled={!canUpdate}
-              onChange={(e) => setBahtBuy(e.target.value)}
-              className="w-full px-3 py-2 text-sm font-bold rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-gray-500 mb-1 block font-semibold">
-              {language === 'MM' ? 'ရောင်းဈေး (Sell)' : 'Sell rate'}
-            </label>
-            <input
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={bahtSell}
-              disabled={!canUpdate}
-              onChange={(e) => setBahtSell(e.target.value)}
-              className="w-full px-3 py-2 text-sm font-bold rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono"
-            />
-          </div>
-        </div>
       </div>
 
       {canUpdate && (
@@ -444,6 +399,7 @@ function CategoriesPanel({
   addLabelMM: string;
   addLabelEN: string;
 }) {
+  const dialog = useDialog();
   const blank = {
     code: '',
     name_mm: '',
@@ -546,11 +502,17 @@ function CategoriesPanel({
   };
 
   const handleDelete = async (c: MasterCategory) => {
-    const msg =
-      language === 'MM'
-        ? `"${c.code}" ကို ဖျက်မလား? အသုံးပြုနေပါက ပိတ် (deactivate) လုပ်ပါမည်။`
-        : `Delete "${c.code}"? If in use it will be deactivated instead.`;
-    if (!confirm(msg)) return;
+    const ok = await dialog.confirm({
+      title: language === 'MM' ? 'Category ဖျက်မည်' : 'Delete category',
+      message:
+        language === 'MM'
+          ? `"${c.code}" ကို ဖျက်မလား? အသုံးပြုနေပါက ပိတ် (deactivate) လုပ်ပါမည်။`
+          : `Delete "${c.code}"? If in use it will be deactivated instead.`,
+      confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
+      cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await onDelete(c.id);
@@ -776,26 +738,23 @@ function CategoriesPanel({
               <th className="font-semibold">{language === 'MM' ? 'အမည်' : 'Name'}</th>
               <th className="font-semibold">{language === 'MM' ? 'အမျိုးအစား' : 'Type'}</th>
               <th className="font-semibold text-right">{language === 'MM' ? 'အစဉ်' : 'Sort'}</th>
-              <th className="font-semibold text-right">
-                {language === 'MM' ? 'အသုံး' : 'Used'}
-              </th>
+              <th className="font-semibold text-right">{language === 'MM' ? 'အသုံး' : 'Used'}</th>
               <th className="font-semibold">{language === 'MM' ? 'အခြေအနေ' : 'Status'}</th>
+              <th className="font-semibold">{language === 'MM' ? 'ဖော်ပြချက်' : 'Description'}</th>
               <th className="font-semibold text-right" />
             </tr>
           </thead>
           <tbody>
             {pager.pageItems.length === 0 && (
               <tr>
-                <td colSpan={7} className="!bg-transparent py-8 text-center text-gray-400">
+                <td colSpan={8} className="!bg-transparent py-8 text-center text-gray-400">
                   {language === 'MM' ? 'စာရင်းမရှိသေးပါ' : 'No records found'}
                 </td>
               </tr>
             )}
             {pager.pageItems.map((c) => (
               <tr key={c.id}>
-                <td className="font-mono font-bold text-gray-900 dark:text-white">
-                  {c.code}
-                </td>
+                <td className="font-mono font-bold text-gray-900 dark:text-white">{c.code}</td>
                 <td>
                   <div className="font-semibold text-gray-900 dark:text-white">
                     {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
@@ -803,11 +762,6 @@ function CategoriesPanel({
                   <div className="text-[10px] text-gray-500">
                     {language === 'MM' ? c.name_en : c.name_mm}
                   </div>
-                  {c.description ? (
-                    <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[220px]">
-                      {c.description}
-                    </div>
-                  ) : null}
                 </td>
                 <td>
                   <span
@@ -823,9 +777,7 @@ function CategoriesPanel({
                   </span>
                 </td>
                 <td className="text-right font-mono">{c.sort_order}</td>
-                <td className="text-right font-mono text-gray-600 dark:text-gray-300">
-                  {c.usage_count ?? 0}
-                </td>
+                <td className="text-right font-mono text-gray-600 dark:text-gray-300">{c.usage_count ?? 0}</td>
                 <td>
                   <span
                     className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -843,6 +795,7 @@ function CategoriesPanel({
                         : 'OFF'}
                   </span>
                 </td>
+                <td className="text-gray-500 max-w-[200px] truncate">{c.description || '—'}</td>
                 <td className="text-right whitespace-nowrap space-x-0.5">
                   {canUpdate && (
                     <button
@@ -924,6 +877,7 @@ function CustomersPanel({
   onUpdate: (id: string, updates: Partial<Customer>) => Promise<Customer>;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const dialog = useDialog();
   const blank = { name: '', phone: '', address: '' };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1006,69 +960,75 @@ function CustomersPanel({
       </div>
 
       <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-50 dark:bg-[#141414] text-gray-500">
-            <tr>
-              <th className="text-left px-4 py-3">{language === 'MM' ? 'အမည်' : 'Name'}</th>
-              <th className="text-left px-4 py-3">{language === 'MM' ? 'ဖုန်း' : 'Phone'}</th>
-              <th className="text-left px-4 py-3">{language === 'MM' ? 'လိပ်စာ' : 'Address'}</th>
-              <th className="text-right px-4 py-3">{language === 'MM' ? 'လက်ကျန်' : 'Balance'}</th>
-              <th className="text-center px-4 py-3 w-28">{language === 'MM' ? 'လုပ်ဆောင်ချက်' : 'Actions'}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pager.pageItems.length === 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 dark:bg-[#141414] text-gray-500">
               <tr>
-                <td colSpan={5} className="text-center py-10 text-gray-400">
-                  {language === 'MM' ? 'ဖောက်သည်မရှိပါ' : 'No customers'}
-                </td>
+                <th className="text-left px-4 py-3">{language === 'MM' ? 'အမည်' : 'Name'}</th>
+                <th className="text-left px-4 py-3">{language === 'MM' ? 'ဖုန်း' : 'Phone'}</th>
+                <th className="text-left px-4 py-3">{language === 'MM' ? 'လိပ်စာ' : 'Address'}</th>
+                <th className="text-right px-4 py-3">{language === 'MM' ? 'လက်ကျန်' : 'Balance'}</th>
+                <th className="text-center px-4 py-3 w-28">{language === 'MM' ? 'လုပ်ဆောင်ချက်' : 'Actions'}</th>
               </tr>
-            ) : (
-              pager.pageItems.map((c) => (
-                <tr key={c.id} className="border-t border-gray-100 dark:border-gray-900">
-                  <td className="px-4 py-2.5 font-semibold text-gray-900 dark:text-white">{c.name}</td>
-                  <td className="px-4 py-2.5 font-mono">{c.phone}</td>
-                  <td className="px-4 py-2.5 text-gray-500 max-w-[220px] truncate">{c.address}</td>
-                  <td className="px-4 py-2.5 text-right font-mono font-bold text-[#996515]">
-                    {formatMMK(c.outstanding_balance || 0)}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center justify-center gap-1">
-                      {canUpdate && (
-                        <button
-                          type="button"
-                          onClick={() => openEdit(c)}
-                          className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {canDelete && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (
-                              confirm(
-                                language === 'MM'
-                                  ? `${c.name} ကို ဖျက်မလား?`
-                                  : `Delete ${c.name}?`
-                              )
-                            ) {
-                              void onDelete(c.id);
-                            }
-                          }}
-                          className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+            </thead>
+            <tbody>
+              {pager.pageItems.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-10 text-gray-400">
+                    {language === 'MM' ? 'ဖောက်သည်မရှိပါ' : 'No customers'}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                pager.pageItems.map((c) => (
+                  <tr key={c.id} className="border-t border-gray-100 dark:border-gray-900">
+                    <td className="px-4 py-2.5 font-semibold text-gray-900 dark:text-white">{c.name}</td>
+                    <td className="px-4 py-2.5 font-mono">{c.phone}</td>
+                    <td className="px-4 py-2.5 text-gray-500 max-w-[220px] truncate">{c.address}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-bold text-[#996515]">
+                      {formatMMK(c.outstanding_balance || 0)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center justify-center gap-1">
+                        {canUpdate && (
+                          <button
+                            type="button"
+                            onClick={() => openEdit(c)}
+                            className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void (async () => {
+                                const ok = await dialog.confirm({
+                                  title: language === 'MM' ? 'ဖောက်သည် ဖျက်မည်' : 'Delete customer',
+                                  message:
+                                    language === 'MM'
+                                      ? `${c.name} ကို ဖျက်မလား?`
+                                      : `Delete ${c.name}?`,
+                                  confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
+                                  cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
+                                  danger: true,
+                                });
+                                if (ok) await onDelete(c.id);
+                              })();
+                            }}
+                            className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
         <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-900">
           <PaginationBar
             language={language === 'MM' ? 'MM' : 'EN'}
@@ -1172,6 +1132,7 @@ function UsersPanel({
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const dialog = useDialog();
   const blank = {
     username: '',
     name: '',
@@ -1238,23 +1199,34 @@ function UsersPanel({
 
   const handleDelete = async (u: StaffUser) => {
     if (u.id === currentUserId) {
-      window.alert(language === 'MM' ? 'လက်ရှိ login အကောင့်ကို ဖျက်မရပါ' : 'Cannot delete the logged-in account');
+      await dialog.alert({
+        title: language === 'MM' ? 'မရပါ' : 'Not allowed',
+        message:
+          language === 'MM'
+            ? 'လက်ရှိ login အကောင့်ကို ဖျက်မရပါ'
+            : 'Cannot delete the logged-in account',
+      });
       return;
     }
-    if (
-      !window.confirm(
+    const ok = await dialog.confirm({
+      title: language === 'MM' ? 'အကောင့် ဖျက်မည်' : 'Delete account',
+      message:
         language === 'MM'
           ? `${u.username} အကောင့်ကို ဖျက်မလား?`
-          : `Delete account ${u.username}?`
-      )
-    ) {
-      return;
-    }
+          : `Delete account ${u.username}?`,
+      confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
+      cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await onDelete(u.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Delete failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Delete failed',
+      });
     } finally {
       setBusy(false);
     }
@@ -1413,7 +1385,7 @@ function UsersPanel({
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-gray-500 border-b border-gray-200 dark:border-gray-800">
-              <th className="py-2">{language === 'MM' ? 'Username' : 'Username'}</th>
+              <th className="py-2">Username</th>
               <th className="py-2">{language === 'MM' ? 'အမည်' : 'Name'}</th>
               <th className="py-2">{language === 'MM' ? 'ရာထူး' : 'Role'}</th>
               <th className="py-2">{language === 'MM' ? 'ဖုန်း' : 'Phone'}</th>
@@ -1594,13 +1566,13 @@ function PermissionsPanel({
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+      <div className="overflow-x-hidden">
+        <table className="w-full text-xs table-fixed">
           <thead>
             <tr className="text-left text-gray-500 border-b border-gray-200 dark:border-gray-800">
-              <th className="py-2 pr-3">{language === 'MM' ? 'Function / Module' : 'Function'}</th>
+              <th className="py-2 pr-3 w-[40%]">{language === 'MM' ? 'Function / Module' : 'Function'}</th>
               {(['can_create', 'can_read', 'can_update', 'can_delete'] as const).map((a) => (
-                <th key={a} className="py-2 text-center w-20">
+                <th key={a} className="py-2 text-center w-[15%]">
                   {a.replace('can_', '').toUpperCase()}
                 </th>
               ))}

@@ -219,8 +219,17 @@ export const shopController = {
     res.status(201).json({ success: true, data });
   }),
 
+  updateOrder: asyncHandler(async (req, res) => {
+    const data = await shopService.updateOrder(req.params.id, req.body);
+    res.json({ success: true, data });
+  }),
+
   updateOrderStatus: asyncHandler(async (req, res) => {
-    const { status, remainingPaid } = req.body as { status?: string; remainingPaid?: number };
+    const { status, remainingPaid, via_sale } = req.body as {
+      status?: string;
+      remainingPaid?: number;
+      via_sale?: boolean;
+    };
     if (!status) {
       res.status(400).json({ success: false, message: 'status required' });
       return;
@@ -228,9 +237,42 @@ export const shopController = {
     const data = await shopService.updateOrderStatus(
       req.params.id,
       status,
-      remainingPaid !== undefined ? Number(remainingPaid) : undefined
+      remainingPaid !== undefined ? Number(remainingPaid) : undefined,
+      { via_sale: Boolean(via_sale) }
     );
     res.json({ success: true, data });
+  }),
+
+  listGoldsmithJobs: asyncHandler(async (req, res) => {
+    const items = await shopService.listGoldsmithJobs();
+    res.json({ success: true, data: maybePaginate(req, items) });
+  }),
+
+  createGoldsmithJob: asyncHandler(async (req, res) => {
+    const data = await shopService.createGoldsmithJob(req.body);
+    res.status(201).json({ success: true, data });
+  }),
+
+  returnGoldsmithJob: asyncHandler(async (req, res) => {
+    const data = await shopService.returnGoldsmithJob(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  cancelGoldsmithJob: asyncHandler(async (req, res) => {
+    await shopService.cancelGoldsmithJob(req.params.id);
+    res.json({ success: true, data: null });
+  }),
+
+  handoffGoldsmithJob: asyncHandler(async (req, res) => {
+    const data = await shopService.handoffGoldsmithJob(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  oldGoldAvailable: asyncHandler(async (req, res) => {
+    const purity = typeof req.query.purity === 'string' ? req.query.purity : undefined;
+    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const available = await shopService.oldGoldAvailableGrams(purity, category);
+    res.json({ success: true, data: { available } });
   }),
 
   listPawns: asyncHandler(async (req, res) => {
@@ -258,6 +300,11 @@ export const shopController = {
     res.json({ success: true, data });
   }),
 
+  deletePawnInterestPayment: asyncHandler(async (req, res) => {
+    const data = await shopService.deletePawnInterestPayment(req.params.id);
+    res.json({ success: true, data });
+  }),
+
   payPawnInterest: asyncHandler(async (req, res) => {
     const data = await shopService.payPawnInterest(req.params.id, req.body);
     res.status(201).json({ success: true, data });
@@ -278,6 +325,11 @@ export const shopController = {
       return;
     }
     const data = await shopService.redeemPawn(req.params.id, settlement, body);
+    res.json({ success: true, data });
+  }),
+
+  deletePawnRedeem: asyncHandler(async (req, res) => {
+    const data = await shopService.deletePawnRedeem(req.params.id);
     res.json({ success: true, data });
   }),
 
@@ -326,6 +378,12 @@ export const shopController = {
 
   reportSummary: asyncHandler(async (_req, res) => {
     res.json({ success: true, data: await shopService.reportSummary() });
+  }),
+
+  reportFinancial: asyncHandler(async (req, res) => {
+    const from = req.query.from != null ? String(req.query.from) : undefined;
+    const to = req.query.to != null ? String(req.query.to) : undefined;
+    res.json({ success: true, data: await shopService.reportFinancial(from, to) });
   }),
 
   getSettings: asyncHandler(async (_req, res) => {

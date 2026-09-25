@@ -64,9 +64,11 @@ export const TABLE_STATEMENTS: string[] = [
     item_type ENUM('MYANMAR_GOLD', 'THAI_GOLD', 'WHITE_GOLD', 'GEMS_JEWELRY') NOT NULL DEFAULT 'MYANMAR_GOLD',
     thai_weight_unit DECIMAL(8,2) NULL,
     craftsmanship_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    craftsmanship_profit_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    stone_profit_price DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     selling_price_estimated DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-    status ENUM('IN_STOCK', 'SOLD', 'RESERVED', 'UNDER_PAWN') NOT NULL DEFAULT 'IN_STOCK',
+    status ENUM('IN_STOCK', 'SOLD', 'RESERVED', 'UNDER_PAWN', 'SHOP_OUT', 'WITH_GOLDSMITH') NOT NULL DEFAULT 'IN_STOCK',
     image_url VARCHAR(500) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -81,7 +83,7 @@ export const TABLE_STATEMENTS: string[] = [
     customer_id INT UNSIGNED NULL,
     customer_name VARCHAR(150) NOT NULL,
     customer_phone VARCHAR(50) NULL,
-    transaction_type ENUM('SALE', 'PURCHASE', 'ORDER', 'EXCHANGE', 'PAWN') NOT NULL,
+    transaction_type ENUM('SALE', 'PURCHASE', 'ORDER', 'EXCHANGE', 'PAWN', 'SHOP_OUT') NOT NULL,
     gold_price_snapshot DECIMAL(15,2) NOT NULL,
     craftsmanship_total DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     stone_total DECIMAL(15,2) NOT NULL DEFAULT 0.00,
@@ -125,6 +127,8 @@ export const TABLE_STATEMENTS: string[] = [
     stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     subtotal DECIMAL(15,2) NOT NULL,
     item_type VARCHAR(50) NOT NULL DEFAULT 'MYANMAR_GOLD',
+    thai_weight_unit DECIMAL(8,2) NULL,
+    line_role VARCHAR(255) NULL,
     PRIMARY KEY (id),
     KEY idx_items_transaction (transaction_id),
     CONSTRAINT fk_items_transaction FOREIGN KEY (transaction_id) REFERENCES transactions (id) ON DELETE CASCADE,
@@ -158,6 +162,46 @@ export const TABLE_STATEMENTS: string[] = [
     CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  `CREATE TABLE IF NOT EXISTS goldsmith_jobs (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    job_no VARCHAR(100) NOT NULL,
+    source_type ENUM('INVENTORY', 'ORDER', 'OLD_GOLD') NOT NULL,
+    status ENUM('SENT', 'RETURNED', 'HANDED_OVER') NOT NULL DEFAULT 'SENT',
+    inventory_item_id INT UNSIGNED NULL,
+    order_id INT UNSIGNED NULL,
+    sale_transaction_id INT UNSIGNED NULL,
+    returned_inventory_id INT UNSIGNED NULL,
+    item_name VARCHAR(200) NOT NULL,
+    category VARCHAR(50) NOT NULL DEFAULT '',
+    purity VARCHAR(50) NOT NULL,
+    item_type VARCHAR(50) NOT NULL DEFAULT 'MYANMAR_GOLD',
+    weight_kyat DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    thai_weight_unit DECIMAL(8,3) NULL,
+    source_grams DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+    source_purity VARCHAR(50) NULL,
+    source_category VARCHAR(50) NULL,
+    craft_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    fee_paid TINYINT(1) NOT NULL DEFAULT 0,
+    fee_paid_at DATETIME NULL,
+    return_due_date DATE NULL,
+    notes TEXT NULL,
+    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    returned_at DATETIME NULL,
+    handed_over_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_goldsmith_job_no (job_no),
+    KEY idx_goldsmith_status (status),
+    KEY idx_goldsmith_source (source_type),
+    KEY idx_goldsmith_return_due (return_due_date),
+    CONSTRAINT fk_goldsmith_inventory FOREIGN KEY (inventory_item_id) REFERENCES inventory_items (id) ON DELETE SET NULL,
+    CONSTRAINT fk_goldsmith_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE SET NULL,
+    CONSTRAINT fk_goldsmith_sale FOREIGN KEY (sale_transaction_id) REFERENCES transactions (id) ON DELETE SET NULL,
+    CONSTRAINT fk_goldsmith_returned_inv FOREIGN KEY (returned_inventory_id) REFERENCES inventory_items (id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS pawn_records (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     pawn_ticket_no VARCHAR(100) NOT NULL,
@@ -188,6 +232,7 @@ export const TABLE_STATEMENTS: string[] = [
     interest_paid_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     redeem_date DATE NULL,
     redeem_months INT NULL,
+    redeem_days INT NULL,
     redeem_interest_kyat DECIMAL(15,2) NULL,
     redeem_interest_baht DECIMAL(15,2) NULL,
     discount_kyat DECIMAL(15,2) NULL,
@@ -210,6 +255,7 @@ export const TABLE_STATEMENTS: string[] = [
     voucher_no VARCHAR(50) NOT NULL,
     payment_date DATE NOT NULL,
     months_paid INT NOT NULL DEFAULT 1,
+    days_paid INT NOT NULL DEFAULT 30,
     interest_kyat DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     interest_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     interest_rate DECIMAL(8,2) NOT NULL DEFAULT 5.00,
@@ -306,84 +352,59 @@ export const TABLE_STATEMENTS: string[] = [
 
 export async function runColumnMigrations(pool: Pool): Promise<void> {
   const [cols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'staff_users'`
+    `SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()`
   );
-  const names = new Set(cols.map((c) => String(c.name)));
-
-  // Migrate legacy pin_hash (SHA) → plain-text password column
-  if (names.has('pin_hash') && !names.has('password')) {
-    await pool.query(
-      `ALTER TABLE staff_users ADD COLUMN password VARCHAR(100) NOT NULL DEFAULT '1234'`
-    );
-    await pool.query(`UPDATE staff_users SET password = '1234'`);
-    await pool.query(`ALTER TABLE staff_users DROP COLUMN pin_hash`);
-  } else if (names.has('pin_hash') && names.has('password')) {
-    await pool.query(`UPDATE staff_users SET password = '1234'`);
-    await pool.query(`ALTER TABLE staff_users DROP COLUMN pin_hash`);
-  } else if (!names.has('password') && names.size > 0) {
-    await pool.query(
-      `ALTER TABLE staff_users ADD COLUMN password VARCHAR(100) NOT NULL DEFAULT '1234'`
-    );
+  
+  const tableCols = new Map<string, Set<string>>();
+  for (const row of cols) {
+    const table = String(row.TABLE_NAME);
+    const col = String(row.COLUMN_NAME);
+    if (!tableCols.has(table)) tableCols.set(table, new Set());
+    tableCols.get(table)!.add(col);
   }
 
-  // master_categories — full structure for existing databases
-  const [catCols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'master_categories'`
-  );
-  if (catCols.length > 0) {
-    const catNames = new Set(catCols.map((c) => String(c.name)));
+  const getCols = (table: string) => tableCols.get(table) || new Set<string>();
+
+  // 1. staff_users
+  const staffNames = getCols('staff_users');
+  if (staffNames.has('pin_hash') && !staffNames.has('password')) {
+    await pool.query(`ALTER TABLE staff_users ADD COLUMN password VARCHAR(100) NOT NULL DEFAULT '1234'`);
+    await pool.query(`UPDATE staff_users SET password = '1234'`);
+    await pool.query(`ALTER TABLE staff_users DROP COLUMN pin_hash`);
+  } else if (staffNames.has('pin_hash') && staffNames.has('password')) {
+    await pool.query(`UPDATE staff_users SET password = '1234'`);
+    await pool.query(`ALTER TABLE staff_users DROP COLUMN pin_hash`);
+  } else if (!staffNames.has('password') && staffNames.size > 0) {
+    await pool.query(`ALTER TABLE staff_users ADD COLUMN password VARCHAR(100) NOT NULL DEFAULT '1234'`);
+  }
+
+  // 2. master_categories
+  const catNames = getCols('master_categories');
+  if (catNames.size > 0) {
     if (!catNames.has('category_group')) {
-      await pool.query(
-        `ALTER TABLE master_categories
-         ADD COLUMN category_group ENUM('PRODUCT', 'GOLD_CLASS', 'OTHER') NOT NULL DEFAULT 'PRODUCT'
-         AFTER name_en`
-      );
+      await pool.query(`ALTER TABLE master_categories ADD COLUMN category_group ENUM('PRODUCT', 'GOLD_CLASS', 'OTHER') NOT NULL DEFAULT 'PRODUCT' AFTER name_en`);
     }
     if (!catNames.has('description')) {
-      await pool.query(
-        `ALTER TABLE master_categories
-         ADD COLUMN description VARCHAR(500) NULL AFTER category_group`
-      );
+      await pool.query(`ALTER TABLE master_categories ADD COLUMN description VARCHAR(500) NULL AFTER category_group`);
     }
     if (!catNames.has('updated_at')) {
-      await pool.query(
-        `ALTER TABLE master_categories
-         ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-         AFTER created_at`
-      );
+      await pool.query(`ALTER TABLE master_categories ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
     }
-    // Ensure indexes exist (ignore duplicate errors)
-    try {
-      await pool.query(
-        `ALTER TABLE master_categories ADD KEY idx_master_category_group (category_group)`
-      );
-    } catch {
-      /* already exists */
-    }
-    try {
-      await pool.query(
-        `ALTER TABLE master_categories ADD KEY idx_master_category_active (is_active)`
-      );
-    } catch {
-      /* already exists */
-    }
+    try { await pool.query(`ALTER TABLE master_categories ADD KEY idx_master_category_group (category_group)`); } catch {}
+    try { await pool.query(`ALTER TABLE master_categories ADD KEY idx_master_category_active (is_active)`); } catch {}
   }
 
-  // Auto-mark overdue pawn tickets
+  // Auto-mark overdue / restore still-within-contract pawns
   await pool.query(
-    `UPDATE pawn_records SET status = 'OVERDUE'
-     WHERE status = 'ACTIVE' AND due_date < CURDATE()`
+    `UPDATE pawn_records SET status = 'OVERDUE' WHERE status = 'ACTIVE' AND due_date < CURDATE()`
+  );
+  await pool.query(
+    `UPDATE pawn_records SET status = 'ACTIVE' WHERE status = 'OVERDUE' AND (due_date IS NULL OR due_date >= CURDATE())`
   );
 
-  // pawn_records extra columns
-  const [pawnCols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pawn_records'`
-  );
-  if (pawnCols.length > 0) {
-    const pawnNames = new Set(pawnCols.map((c) => String(c.name)));
+  // 3. pawn_records extra columns
+  const pawnNames = getCols('pawn_records');
+  if (pawnNames.size > 0) {
     const addPawnCol = async (col: string, ddl: string) => {
       if (!pawnNames.has(col)) await pool.query(`ALTER TABLE pawn_records ADD COLUMN ${ddl}`);
     };
@@ -400,7 +421,8 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addPawnCol('interest_paid_baht', 'interest_paid_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER interest_paid_kyat');
     await addPawnCol('redeem_date', 'redeem_date DATE NULL AFTER interest_paid_baht');
     await addPawnCol('redeem_months', 'redeem_months INT NULL AFTER redeem_date');
-    await addPawnCol('redeem_interest_kyat', 'redeem_interest_kyat DECIMAL(15,2) NULL AFTER redeem_months');
+    await addPawnCol('redeem_days', 'redeem_days INT NULL AFTER redeem_months');
+    await addPawnCol('redeem_interest_kyat', 'redeem_interest_kyat DECIMAL(15,2) NULL AFTER redeem_days');
     await addPawnCol('redeem_interest_baht', 'redeem_interest_baht DECIMAL(15,2) NULL AFTER redeem_interest_kyat');
     await addPawnCol('discount_kyat', 'discount_kyat DECIMAL(15,2) NULL AFTER redeem_interest_baht');
     await addPawnCol('discount_baht', 'discount_baht DECIMAL(15,2) NULL AFTER discount_kyat');
@@ -410,29 +432,24 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addPawnCol('owner_signature', 'owner_signature VARCHAR(255) NULL AFTER customer_signature');
   }
 
+  // pawn_interest_payments — days covered by a payment
+  const pipNames = getCols('pawn_interest_payments');
+  if (pipNames.size > 0 && !pipNames.has('days_paid')) {
+    await pool.query(
+      `ALTER TABLE pawn_interest_payments ADD COLUMN days_paid INT NOT NULL DEFAULT 30 AFTER months_paid`
+    );
+    await pool.query(
+      `UPDATE pawn_interest_payments SET days_paid = GREATEST(1, COALESCE(months_paid, 1) * 30)`
+    );
+  }
+
   // Refresh overdue day counters on open tracking rows
-  await pool.query(
-    `UPDATE customer_tracking
-     SET days_overdue = GREATEST(0, DATEDIFF(CURDATE(), due_date))
-     WHERE status <> 'SETTLED'`
-  );
+  await pool.query(`UPDATE customer_tracking SET days_overdue = GREATEST(0, DATEDIFF(CURDATE(), due_date)) WHERE status <> 'SETTLED'`);
+  await pool.query(`UPDATE customer_tracking SET tracking_type = 'DELAYED_PAYMENT' WHERE status <> 'SETTLED' AND tracking_type = 'OUTSTANDING_CREDIT' AND due_date < CURDATE()`);
 
-  // Promote overdue outstanding credit → delayed payment list
-  await pool.query(
-    `UPDATE customer_tracking
-     SET tracking_type = 'DELAYED_PAYMENT'
-     WHERE status <> 'SETTLED'
-       AND tracking_type = 'OUTSTANDING_CREDIT'
-       AND due_date < CURDATE()`
-  );
-
-  // inventory_items: gemstone + stone_price
-  const [invCols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_items'`
-  );
-  if (invCols.length > 0) {
-    const invNames = new Set(invCols.map((c) => String(c.name)));
+  // 4. inventory_items
+  const invNames = getCols('inventory_items');
+  if (invNames.size > 0) {
     const addInv = async (col: string, ddl: string) => {
       if (!invNames.has(col)) await pool.query(`ALTER TABLE inventory_items ADD COLUMN ${ddl}`);
     };
@@ -444,24 +461,13 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addInv('profit_deduction_pae', 'profit_deduction_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER craft_deduction_yway');
     await addInv('profit_deduction_yway', 'profit_deduction_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00 AFTER profit_deduction_pae');
     await addInv('stone_price', 'stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee');
-
-    // Migrate legacy single wastage → craft_deduction when craft columns empty
-    await pool.query(
-      `UPDATE inventory_items
-       SET craft_deduction_pae = deduction_pae,
-           craft_deduction_yway = deduction_yway
-       WHERE craft_deduction_pae = 0 AND craft_deduction_yway = 0
-         AND (deduction_pae <> 0 OR deduction_yway <> 0)`
-    );
+    await addInv('craftsmanship_profit_fee', 'craftsmanship_profit_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee');
+    await addInv('stone_profit_price', 'stone_profit_price DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER stone_price');
   }
 
-  // transactions: installment / credit fields
-  const [txnCols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions'`
-  );
-  if (txnCols.length > 0) {
-    const txnNames = new Set(txnCols.map((c) => String(c.name)));
+  // 5. transactions
+  const txnNames = getCols('transactions');
+  if (txnNames.size > 0) {
     const addTxn = async (col: string, ddl: string) => {
       if (!txnNames.has(col)) await pool.query(`ALTER TABLE transactions ADD COLUMN ${ddl}`);
     };
@@ -471,13 +477,9 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addTxn('is_installment', 'is_installment TINYINT(1) NOT NULL DEFAULT 0 AFTER credit_due_date');
   }
 
-  // transaction_items: gemstone / gold_amount / stone_price
-  const [tiCols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transaction_items'`
-  );
-  if (tiCols.length > 0) {
-    const tiNames = new Set(tiCols.map((c) => String(c.name)));
+  // 6. transaction_items
+  const tiNames = getCols('transaction_items');
+  if (tiNames.size > 0) {
     const addTi = async (col: string, ddl: string) => {
       if (!tiNames.has(col)) await pool.query(`ALTER TABLE transaction_items ADD COLUMN ${ddl}`);
     };
@@ -486,24 +488,26 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addTi('gemstone_weight_yway', 'gemstone_weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00 AFTER gemstone_weight_pae');
     await addTi('gold_amount', 'gold_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER gold_price_snapshot');
     await addTi('stone_price', 'stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee');
+    await addTi('thai_weight_unit', 'thai_weight_unit DECIMAL(8,2) NULL AFTER item_type');
+    await addTi('line_role', 'line_role VARCHAR(255) NULL AFTER thai_weight_unit');
   }
 
-  // customer_tracking: interest fields
-  const [trCols] = await pool.query<RowDataPacket[]>(
-    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customer_tracking'`
-  );
-  if (trCols.length > 0) {
-    const trNames = new Set(trCols.map((c) => String(c.name)));
+  // 7. customer_tracking
+  const trNames = getCols('customer_tracking');
+  if (trNames.size > 0) {
     if (!trNames.has('interest_rate')) {
-      await pool.query(
-        `ALTER TABLE customer_tracking ADD COLUMN interest_rate DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER days_overdue`
-      );
+      await pool.query(`ALTER TABLE customer_tracking ADD COLUMN interest_rate DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER days_overdue`);
     }
     if (!trNames.has('monthly_interest')) {
-      await pool.query(
-        `ALTER TABLE customer_tracking ADD COLUMN monthly_interest DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER interest_rate`
-      );
+      await pool.query(`ALTER TABLE customer_tracking ADD COLUMN monthly_interest DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER interest_rate`);
+    }
+  }
+
+  // 8. goldsmith_jobs
+  const gsNames = getCols('goldsmith_jobs');
+  if (gsNames.size > 0) {
+    if (!gsNames.has('return_due_date')) {
+      await pool.query(`ALTER TABLE goldsmith_jobs ADD COLUMN return_due_date DATE NULL AFTER fee_paid_at`);
     }
   }
 }

@@ -62,9 +62,13 @@ export interface InventoryItem {
   purity: GoldPurity;
   item_type: ItemType;
   craftsmanship_fee: number;
+  /** အမြတ်လက်ခ (Thai / Myanmar; stored MMK) */
+  craftsmanship_profit_fee?: number;
   stone_price?: number;
+  /** ကျောက်ဖိုးအမြတ် (stored MMK) */
+  stone_profit_price?: number;
   selling_price_estimated: number;
-  status: 'IN_STOCK' | 'SOLD' | 'RESERVED' | 'UNDER_PAWN';
+  status: 'IN_STOCK' | 'SOLD' | 'RESERVED' | 'UNDER_PAWN' | 'SHOP_OUT' | 'WITH_GOLDSMITH';
   thai_weight_unit?: number;
   created_at: string;
   image_url?: string;
@@ -79,7 +83,7 @@ export interface Customer {
   outstanding_balance: number;
 }
 
-export type TransactionType = 'SALE' | 'PURCHASE' | 'ORDER' | 'EXCHANGE' | 'PAWN';
+export type TransactionType = 'SALE' | 'PURCHASE' | 'ORDER' | 'EXCHANGE' | 'PAWN' | 'SHOP_OUT';
 
 export interface TransactionItem {
   id: string;
@@ -148,6 +152,43 @@ export interface CustomOrder {
   created_at: string;
 }
 
+export type GoldsmithSourceType = 'INVENTORY' | 'ORDER' | 'OLD_GOLD';
+export type GoldsmithJobStatus = 'SENT' | 'RETURNED' | 'HANDED_OVER';
+
+export interface GoldsmithJob {
+  id: string;
+  job_no: string;
+  source_type: GoldsmithSourceType;
+  status: GoldsmithJobStatus;
+  inventory_item_id?: string;
+  order_id?: string;
+  sale_transaction_id?: string;
+  returned_inventory_id?: string;
+  item_name: string;
+  category: string;
+  purity: GoldPurity | string;
+  item_type: ItemType | string;
+  weight: WeightKPY;
+  thai_weight_unit?: number;
+  source_grams: number;
+  source_purity?: string;
+  source_category?: string;
+  craft_fee: number;
+  fee_paid: boolean;
+  fee_paid_at?: string;
+  /** Expected date goldsmith should return the piece */
+  return_due_date?: string;
+  notes?: string;
+  sent_at: string;
+  returned_at?: string;
+  handed_over_at?: string;
+  created_at: string;
+  /** Joined labels for UI */
+  order_no?: string;
+  customer_name?: string;
+  inventory_barcode?: string;
+}
+
 export interface PawnRecord {
   id: string;
   pawn_ticket_no: string;
@@ -176,6 +217,7 @@ export interface PawnRecord {
   interest_paid_baht?: number;
   redeem_date?: string;
   redeem_months?: number;
+  redeem_days?: number;
   redeem_interest_kyat?: number;
   redeem_interest_baht?: number;
   discount_kyat?: number;
@@ -193,6 +235,7 @@ export interface PawnInterestPayment {
   voucher_no: string;
   payment_date: string;
   months_paid: number;
+  days_paid?: number;
   interest_kyat: number;
   interest_baht: number;
   interest_rate: number;
@@ -207,6 +250,9 @@ export interface PawnInterestPayment {
   weight_grams?: number;
   loan_amount?: number;
   loan_amount_baht?: number;
+  vno?: string;
+  pawn_ticket_no?: string;
+  due_date?: string;
   last_interest_date?: string;
   next_interest_date?: string;
   created_at?: string;
@@ -239,10 +285,18 @@ export type CategoryGroup = 'PRODUCT' | 'GOLD_CLASS' | 'OTHER';
 export interface ShopSettings {
   /** 1 ကျပ် = N grams (Myanmar) */
   kyat_to_grams: number;
-  /** 1 Baht → MMK (buy rate) */
+  /**
+   * Header Baht FX “buy” rate (scale /100000).
+   * Used for: item MMK→Baht, Thai gold Baht→MMK.
+   */
   baht_to_mmk_buy: number;
-  /** 1 Baht → MMK (sell rate) */
+  /**
+   * Header Baht FX “sell” rate (scale /100000).
+   * Used for: item Baht→MMK, Meelin MMK→Baht display.
+   */
   baht_to_mmk_sell: number;
+  /** ထိုင်းရွှေ price entered in Baht (Header); MMK derived via buy rate */
+  thai_gold_baht: number;
 }
 
 export interface MasterCategory {
