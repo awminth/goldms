@@ -299,13 +299,15 @@
 
   #printable-voucher,
   #printable-voucher *,
+  #printable-barcode-tag,
+  #printable-barcode-tag *,
   .printable-doc,
   .printable-doc * {
     visibility: visible !important;
   }
 
   #printable-voucher,
-  .printable-doc {
+  .printable-doc:not(.barcode-tag) {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
@@ -327,6 +329,28 @@
     print-color-adjust: exact;
     font-size: 10pt;
     line-height: 1.35;
+  }
+
+  /* 75mm × 15mm jewelry barcode sticker */
+  #printable-barcode-tag.barcode-tag {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: auto !important;
+    width: 75mm !important;
+    height: 15mm !important;
+    max-width: 75mm !important;
+    min-width: 75mm !important;
+    margin: 0 !important;
+    padding: 0.4mm 0.6mm !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: hidden !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   #printable-voucher *,
@@ -419,5 +443,119 @@
     .printable-doc .voucher-print-split {
       grid-template-columns: minmax(0, 1fr) !important;
     }
+  }
+}
+
+/* —— Inventory barcode sticker (75mm × 15mm) —— */
+.barcode-tag {
+  width: 75mm;
+  height: 15mm;
+  max-width: 75mm;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.8mm;
+  padding: 0.5mm 0.7mm;
+  background: #ffffff;
+  color: #111111;
+  border: 1px solid #d4c4a0;
+  overflow: hidden;
+  font-family: 'Noto Sans Myanmar', 'Myanmar Text', system-ui, sans-serif;
+}
+
+.barcode-tag-left {
+  flex: 0 0 28mm;
+  width: 28mm;
+  max-width: 28mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3mm;
+  min-width: 0;
+  border-right: 0.3mm solid #c5a059;
+  padding-right: 0.6mm;
+}
+
+.barcode-tag-barcode {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.barcode-tag-svg {
+  width: 100% !important;
+  max-width: 27mm !important;
+  height: auto !important;
+  max-height: 9.5mm;
+}
+
+.barcode-tag-code {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 5.5pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-align: center;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.barcode-tag-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.15mm;
+  padding-left: 0.4mm;
+  text-align: center;
+}
+
+.barcode-tag-purity {
+  font-size: 6.5pt;
+  font-weight: 800;
+  line-height: 1.05;
+  color: #7a5210;
+  letter-spacing: 0.02em;
+  width: 100%;
+  text-align: center;
+}
+
+.barcode-tag-row-value {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 5.4pt;
+  font-weight: 700;
+  color: #111;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  line-height: 1.08;
+}
+
+/* Named page for sticker printers (Chrome/Edge print) */
+@page barcode-label {
+  size: 75mm 15mm;
+  margin: 0;
+}
+
+@media print {
+  #printable-barcode-tag.barcode-tag {
+    page: barcode-label;
+  }
+
+  html.print-barcode-tag,
+  html.print-barcode-tag body {
+    width: 75mm !important;
+    height: 15mm !important;
   }
 }

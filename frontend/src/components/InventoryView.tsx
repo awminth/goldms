@@ -44,7 +44,7 @@ import { DataTable, type DataTableColumn } from './DataTable';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import { ModalOverlay } from './ModalOverlay';
-import { BarcodeLabel } from './BarcodeLabel';
+import { InventoryBarcodeTag } from './InventoryBarcodeTag';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { useDialog } from '../context/DialogContext';
@@ -1486,14 +1486,16 @@ export const InventoryView: React.FC = () => {
         </ModalOverlay>
       )}
 
-      {/* Barcode Tag Print Preview Modal */}
+      {/* Barcode Tag Print Preview Modal — 75mm × 15mm */}
       {tagItem && (
         <ModalOverlay>
-          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-[#D4AF37]/30 print:max-w-none print:w-full print:p-0 print:shadow-none print:border-0 print:rounded-none">
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-md w-full p-5 shadow-2xl border border-[#D4AF37]/30 print:max-w-none print:w-full print:p-0 print:shadow-none print:border-0 print:rounded-none">
             <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 print:hidden">
               <h3 className="font-bold text-gray-900 dark:text-white text-sm flex items-center space-x-2">
                 <Printer className="w-4 h-4 text-[#D4AF37]" />
-                <span>{language === 'MM' ? 'ရွှေပြည့်လှိုင် ရွှေထည်ကတ်ပြား (Tag)' : 'Shwe Pyae Hlaing Jewelry Tag'}</span>
+                <span>
+                  {language === 'MM' ? 'ဘားကုဒ်ကတ်ပြား (75×15 mm)' : 'Barcode Tag (75×15 mm)'}
+                </span>
               </h3>
               <button
                 onClick={() => setTagItem(null)}
@@ -1503,43 +1505,18 @@ export const InventoryView: React.FC = () => {
               </button>
             </div>
 
-              {/* Realistic Jewelry Price Tag */}
-            <div
-              id="printable-voucher"
-              className="printable-doc mt-4 p-4 rounded-xl bg-[#FAF8F2] border-2 border-dashed border-[#D4AF37] text-center text-gray-900 print:mt-0 print:rounded-none"
-            >
-              <div className="text-[11px] font-extrabold tracking-widest text-[#996515] uppercase font-serif">
-                SHWE PYAE HLAING GOLD
-              </div>
-              <div className="text-xs font-bold text-gray-800 mt-1">
-                {tagItem.name_mm}
-              </div>
-
-              <div className="my-3 p-2 bg-white rounded border border-gray-300">
-                <BarcodeLabel value={tagItem.barcode} height={52} fontSize={11} />
-              </div>
-
-              <div className="text-xs space-y-1 text-left border-t border-gray-200 pt-2 text-gray-700">
-                <div className="flex justify-between">
-                  <span>ရွှေရည် (Purity):</span>
-                  <span className="font-bold">{PURITY_LABELS[tagItem.purity]?.mm || tagItem.purity}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>အထည်ချိန် (Gross):</span>
-                  <span className="font-bold">
-                    {formatKPYMyanmar({ kyat: tagItem.weight_kyat, pae: tagItem.weight_pae, yway: tagItem.weight_yway })}
-                  </span>
-                </div>
-                <div className="flex justify-between text-emerald-800 font-bold">
-                  <span>ရွှေချိန်စင် (Net):</span>
-                  <span>
-                    {formatKPYMyanmar({ kyat: tagItem.net_weight_kyat, pae: tagItem.net_weight_pae, yway: tagItem.net_weight_yway })}
-                  </span>
-                </div>
-                <div className="flex justify-between text-[#996515] font-extrabold pt-1 border-t border-gray-200">
-                  <span>ခန့်မှန်းတန်ဖိုး:</span>
-                  <span>{formatMMK(displayEstimatedValue(tagItem))}</span>
-                </div>
+            <div className="mt-4 flex flex-col items-center gap-3 print:mt-0 print:block">
+              <p className="text-[10px] text-gray-500 print:hidden">
+                {language === 'MM'
+                  ? 'ပရင့်ထုတ်ချိန်တွင် စက္ကူအရွယ် 75mm × 15mm ရွေးပါ'
+                  : 'Select 75mm × 15mm paper size when printing'}
+              </p>
+              <div className="scale-[1.35] origin-top print:scale-100 print:origin-top-left">
+                <InventoryBarcodeTag
+                  item={tagItem}
+                  kyatToGrams={kyatToGrams}
+                  bahtBuyRate={shopSettings?.baht_to_mmk_buy || 755}
+                />
               </div>
             </div>
 
@@ -1552,7 +1529,15 @@ export const InventoryView: React.FC = () => {
               </button>
               <button
                 onClick={() => {
+                  document.documentElement.classList.add('print-barcode-tag');
+                  const cleanup = () => {
+                    document.documentElement.classList.remove('print-barcode-tag');
+                    window.removeEventListener('afterprint', cleanup);
+                  };
+                  window.addEventListener('afterprint', cleanup);
                   window.print();
+                  // Fallback if afterprint is skipped
+                  window.setTimeout(cleanup, 2000);
                 }}
                 className="px-4 py-1.5 rounded-lg bg-[#D4AF37] text-white text-xs font-bold hover:bg-[#C5A059] flex items-center space-x-1"
               >
