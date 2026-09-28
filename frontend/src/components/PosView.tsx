@@ -37,7 +37,6 @@ import {
   Printer,
   PackageMinus,
   CheckCircle,
-  User,
   Sparkles,
   Barcode,
   X,
@@ -47,6 +46,7 @@ import {
 } from 'lucide-react';
 import { ModalOverlay } from './ModalOverlay';
 import { NumberInput } from './NumberInput';
+import { CustomerSearchSelect } from './CustomerSearchSelect';
 
 type PosMode = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT';
 
@@ -198,26 +198,38 @@ export const PosView: React.FC<Props> = ({ mode }) => {
 
   const showModeTabs = !mode;
 
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(customers[0] || null);
-  const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [draftCustomerName, setDraftCustomerName] = useState('');
+  const [draftCustomerNrc, setDraftCustomerNrc] = useState('');
   const [draftCustomerPhone, setDraftCustomerPhone] = useState('');
+  const [draftCustomerAddress, setDraftCustomerAddress] = useState('');
   const [savingCustomer, setSavingCustomer] = useState(false);
 
-  // Keep selected customer in sync after list refresh / new save
+  // Keep selected customer in sync after list refresh
   useEffect(() => {
-    if (!customers.length) {
-      setSelectedCustomer(null);
-      return;
-    }
     setSelectedCustomer((prev) => {
-      if (prev) {
-        const still = customers.find((c) => c.id === prev.id);
-        if (still) return still;
-      }
-      return customers[0];
+      if (!prev) return null;
+      return customers.find((c) => c.id === prev.id) || null;
     });
   }, [customers]);
+
+  // When picking existing customer, fill draft fields for display
+  useEffect(() => {
+    if (selectedCustomer) {
+      setDraftCustomerName(selectedCustomer.name);
+      setDraftCustomerNrc(selectedCustomer.nrc || '');
+      setDraftCustomerPhone(selectedCustomer.phone || '');
+      setDraftCustomerAddress(selectedCustomer.address || '');
+    }
+  }, [selectedCustomer]);
+
+  const clearCustomerDraft = () => {
+    setSelectedCustomer(null);
+    setDraftCustomerName('');
+    setDraftCustomerNrc('');
+    setDraftCustomerPhone('');
+    setDraftCustomerAddress('');
+  };
 
   const [cartItems, setCartItems] = useState<TransactionItem[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -381,6 +393,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         id: `item-${Date.now()}-${Math.random()}`,
         transaction_id: '',
         item_id: inv.id,
+        barcode: inv.barcode,
         item_name: inv.name_mm || inv.name,
         category: inv.category,
         weight: { kyat: inv.weight_kyat, pae: inv.weight_pae, yway: inv.weight_yway },
@@ -532,9 +545,46 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       );
       return;
     }
-    const customerId = selectedCustomer?.id || '';
-    const customerName = selectedCustomer?.name || 'ဧည့်သည်';
-    const customerPhone = selectedCustomer?.phone || '';
+
+    let customerId = selectedCustomer?.id || '';
+    let customerName = selectedCustomer?.name || '';
+    let customerPhone = selectedCustomer?.phone || '';
+
+    if (!customerId) {
+      const name = draftCustomerName.trim();
+      if (!name) {
+        void dialog.alert(
+          language === 'MM'
+            ? 'ဖောက်သည် ရွေးပါ သို့မဟုတ် အမည် ထည့်ပါ'
+            : 'Select a customer or enter a name'
+        );
+        return;
+      }
+      const phone = draftCustomerPhone.trim() || 'N/A';
+      setSavingCustomer(true);
+      try {
+        const created = await addCustomer(
+          name,
+          phone,
+          draftCustomerAddress.trim() || '',
+          draftCustomerNrc.trim()
+        );
+        setSelectedCustomer(created);
+        customerId = created.id;
+        customerName = created.name;
+        customerPhone = created.phone;
+      } catch (err) {
+        void dialog.alert(
+          language === 'MM'
+            ? `ဖောက်သည် သိမ်းမရပါ: ${err instanceof Error ? err.message : String(err)}`
+            : `Could not save customer: ${err instanceof Error ? err.message : String(err)}`
+        );
+        setSavingCustomer(false);
+        return;
+      } finally {
+        setSavingCustomer(false);
+      }
+    }
 
     // Persist sale in MMK (convert Baht cart via Header FX formula)
     const itemsForApi =
@@ -795,6 +845,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           id: `exc-new-${Date.now()}`,
           transaction_id: '',
           item_id: excNewItem.id,
+          barcode: excNewItem.barcode,
           item_name: excNewItem.name_mm || excNewItem.name,
           category: excNewItem.category,
           weight: {
@@ -903,6 +954,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           id: `out-${inv.id}-${Date.now()}`,
           transaction_id: '',
           item_id: inv.id,
+          barcode: inv.barcode,
           item_name: inv.name_mm || inv.name,
           category: inv.category,
           weight: {
@@ -1342,37 +1394,73 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                   <span className="font-semibold text-gray-700 dark:text-gray-300">
                     {language === 'MM' ? 'ဖောက်သည်' : 'Customer'}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraftCustomerName('');
-                      setDraftCustomerPhone('');
-                      setShowNewCustomerModal(true);
-                    }}
-                    className="text-[11px] text-[#B8860B] dark:text-[#FFD700] underline font-semibold"
-                  >
-                    {language === 'MM' ? '+ အသစ်' : '+ New'}
-                  </button>
-                </div>
-                <select
-                  value={selectedCustomer?.id || ''}
-                  onChange={(e) => {
-                    const c = customers.find((cust) => cust.id === e.target.value);
-                    if (c) setSelectedCustomer(c);
-                  }}
-                  className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] font-medium"
-                >
-                  {customers.length === 0 && (
-                    <option value="">
-                      {language === 'MM' ? 'ဖောက်သည် မရှိသေးပါ' : 'No customers yet'}
-                    </option>
+                  {(selectedCustomer || draftCustomerName) && (
+                    <button
+                      type="button"
+                      onClick={clearCustomerDraft}
+                      className="text-[11px] text-gray-500 underline font-semibold"
+                    >
+                      {language === 'MM' ? 'ရှင်းမည်' : 'Clear'}
+                    </button>
                   )}
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.phone})
-                    </option>
-                  ))}
-                </select>
+                </div>
+                <CustomerSearchSelect
+                  customers={customers}
+                  value={selectedCustomer}
+                  onChange={(c) => {
+                    if (c) setSelectedCustomer(c);
+                    else clearCustomerDraft();
+                  }}
+                  language={language}
+                />
+                <p className="text-[10px] text-gray-500">
+                  {language === 'MM'
+                    ? 'ရှိပြီးသားကို ရှာရွေးပါ — သို့မဟုတ် အောက်က အကွက်များဖြင့် အသစ်ထည့်ပါ'
+                    : 'Search existing, or fill fields below for a new customer'}
+                </p>
+                <div className="grid grid-cols-1 gap-1.5">
+                  <input
+                    value={draftCustomerName}
+                    onChange={(e) => {
+                      setDraftCustomerName(e.target.value);
+                      if (selectedCustomer) setSelectedCustomer(null);
+                    }}
+                    placeholder={language === 'MM' ? 'အမည် *' : 'Name *'}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+                  />
+                  <input
+                    value={draftCustomerNrc}
+                    onChange={(e) => {
+                      setDraftCustomerNrc(e.target.value);
+                      if (selectedCustomer) setSelectedCustomer(null);
+                    }}
+                    placeholder={language === 'MM' ? 'NRC / မှတ်ပုံတင်' : 'NRC'}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] font-mono"
+                  />
+                  <input
+                    value={draftCustomerPhone}
+                    onChange={(e) => {
+                      setDraftCustomerPhone(e.target.value);
+                      if (selectedCustomer) setSelectedCustomer(null);
+                    }}
+                    placeholder={language === 'MM' ? 'ဖုန်း' : 'Phone'}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A] font-mono"
+                  />
+                  <input
+                    value={draftCustomerAddress}
+                    onChange={(e) => {
+                      setDraftCustomerAddress(e.target.value);
+                      if (selectedCustomer) setSelectedCustomer(null);
+                    }}
+                    placeholder={language === 'MM' ? 'နေရပ်လိပ်စာ' : 'Address'}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
+                  />
+                </div>
+                {savingCustomer && (
+                  <p className="text-[10px] text-[#996515]">
+                    {language === 'MM' ? 'ဖောက်သည် သိမ်းနေသည်…' : 'Saving customer…'}
+                  </p>
+                )}
               </div>
 
               {showThaiCurrencyToggle && (
@@ -2477,97 +2565,6 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             </div>
           </section>
         </div>
-      )}
-
-      {showNewCustomerModal && (
-        <ModalOverlay>
-          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800">
-              <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <User className="w-4 h-4 text-[#D4AF37]" />
-                {language === 'MM' ? 'ဖောက်သည်အသစ် ထည့်ရန်' : 'Add New Customer'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowNewCustomerModal(false)}
-                className="p-1 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">
-                  {language === 'MM' ? 'အမည် *' : 'Name *'}
-                </label>
-                <input
-                  value={draftCustomerName}
-                  onChange={(e) => setDraftCustomerName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">
-                  {language === 'MM' ? 'ဖုန်း' : 'Phone'}
-                </label>
-                <input
-                  value={draftCustomerPhone}
-                  onChange={(e) => setDraftCustomerPhone(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono"
-                />
-              </div>
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowNewCustomerModal(false)}
-                className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-semibold"
-              >
-                {language === 'MM' ? 'ပယ်ဖျက်' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                disabled={savingCustomer}
-                onClick={() => {
-                  void (async () => {
-                    const name = draftCustomerName.trim();
-                    if (!name) return;
-                    setSavingCustomer(true);
-                    try {
-                      const created = await addCustomer(
-                        name,
-                        draftCustomerPhone.trim() || 'N/A',
-                        'Walk-in'
-                      );
-                      setSelectedCustomer(created);
-                      setDraftCustomerName('');
-                      setDraftCustomerPhone('');
-                      setShowNewCustomerModal(false);
-                    } catch (err) {
-                      void dialog.alert(
-                        language === 'MM'
-                          ? `ဖောက်သည် သိမ်းမရပါ: ${err instanceof Error ? err.message : String(err)}`
-                          : `Could not save customer: ${err instanceof Error ? err.message : String(err)}`
-                      );
-                    } finally {
-                      setSavingCustomer(false);
-                    }
-                  })();
-                }}
-                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-white text-xs font-bold disabled:opacity-50"
-              >
-                {savingCustomer
-                  ? language === 'MM'
-                    ? 'သိမ်းနေသည်…'
-                    : 'Saving…'
-                  : language === 'MM'
-                    ? 'သိမ်းမည်'
-                    : 'Save'}
-              </button>
-            </div>
-          </div>
-        </ModalOverlay>
       )}
 
     </div>

@@ -47,6 +47,7 @@ import { ModalOverlay } from './ModalOverlay';
 import { BarcodeLabel } from './BarcodeLabel';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
+import { useDialog } from '../context/DialogContext';
 
 /** Full-row text color by inventory status (like pawn lists). */
 function inventoryStatusRowClass(status: string | undefined | null): string {
@@ -83,6 +84,7 @@ export const InventoryView: React.FC = () => {
     createGoldsmithJob,
     can,
   } = useGoldShop();
+  const dialog = useDialog();
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
 
@@ -792,7 +794,22 @@ export const InventoryView: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => void deleteInventoryItem(item.id)}
+              onClick={() => {
+                void (async () => {
+                  const ok = await dialog.confirm({
+                    title: language === 'MM' ? 'ပစ္စည်း ဖျက်မည်' : 'Delete item',
+                    message:
+                      language === 'MM'
+                        ? `"${item.name_mm || item.name}" ကို စာရင်းမှ ဖျက်မလား?`
+                        : `Delete "${item.name_mm || item.name}" from inventory?`,
+                    confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
+                    cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
+                    danger: true,
+                  });
+                  if (!ok) return;
+                  await deleteInventoryItem(item.id);
+                })();
+              }}
               className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600"
               title={language === 'MM' ? 'ဖျက်မည်' : 'Delete'}
             >
@@ -802,7 +819,7 @@ export const InventoryView: React.FC = () => {
         ),
       },
     ],
-    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, can]
+    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, can, dialog]
   );
 
   return (

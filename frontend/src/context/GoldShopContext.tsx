@@ -106,7 +106,7 @@ interface GoldShopContextType {
   addLedgerEntry: (entry: Omit<FinancialLedger, 'id'>) => Promise<FinancialLedger>;
   updateLedgerEntry: (id: string, entry: Partial<FinancialLedger>) => Promise<FinancialLedger>;
   deleteLedgerEntry: (id: string) => Promise<void>;
-  addCustomer: (name: string, phone: string, address: string) => Promise<Customer>;
+  addCustomer: (name: string, phone: string, address: string, nrc?: string) => Promise<Customer>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<Customer>;
   deleteCustomer: (id: string) => Promise<void>;
   getLivePriceForPurity: (purity: GoldPurity) => number;
@@ -414,8 +414,8 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await invalidateAndRefresh();
   };
 
-  const addCustomer = async (name: string, phone: string, address: string) => {
-    const customer = await api.addCustomer(name, phone, address);
+  const addCustomer = async (name: string, phone: string, address: string, nrc?: string) => {
+    const customer = await api.addCustomer(name, phone, address, nrc);
     await invalidateAndRefresh();
     return customer;
   };

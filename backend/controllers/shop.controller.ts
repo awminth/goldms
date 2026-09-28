@@ -155,12 +155,17 @@ export const shopController = {
   }),
 
   addCustomer: asyncHandler(async (req, res) => {
-    const { name, phone, address } = req.body as { name?: string; phone?: string; address?: string };
+    const { name, phone, address, nrc } = req.body as {
+      name?: string;
+      phone?: string;
+      address?: string;
+      nrc?: string;
+    };
     if (!name || !phone) {
       res.status(400).json({ success: false, message: 'name and phone required' });
       return;
     }
-    const data = await shopService.addCustomer(name, phone, address ?? '');
+    const data = await shopService.addCustomer(name, phone, address ?? '', nrc ?? '');
     res.status(201).json({ success: true, data });
   }),
 

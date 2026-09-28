@@ -32,6 +32,7 @@ export const TABLE_STATEMENTS: string[] = [
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     name VARCHAR(150) NOT NULL,
     phone VARCHAR(50) NOT NULL,
+    nrc VARCHAR(100) NULL,
     address TEXT NULL,
     outstanding_balance DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -110,6 +111,7 @@ export const TABLE_STATEMENTS: string[] = [
     transaction_id INT UNSIGNED NOT NULL,
     item_id INT UNSIGNED NULL,
     item_name VARCHAR(200) NOT NULL,
+    item_barcode VARCHAR(100) NULL,
     category VARCHAR(50) NOT NULL,
     weight_kyat DECIMAL(8,2) NOT NULL,
     weight_pae DECIMAL(8,2) NOT NULL,
@@ -125,6 +127,7 @@ export const TABLE_STATEMENTS: string[] = [
     gold_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     craftsmanship_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    wastage_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     subtotal DECIMAL(15,2) NOT NULL,
     item_type VARCHAR(50) NOT NULL DEFAULT 'MYANMAR_GOLD',
     thai_weight_unit DECIMAL(8,2) NULL,
@@ -490,6 +493,8 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addTi('stone_price', 'stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee');
     await addTi('thai_weight_unit', 'thai_weight_unit DECIMAL(8,2) NULL AFTER item_type');
     await addTi('line_role', 'line_role VARCHAR(255) NULL AFTER thai_weight_unit');
+    await addTi('item_barcode', 'item_barcode VARCHAR(100) NULL AFTER item_name');
+    await addTi('wastage_amount', 'wastage_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER stone_price');
   }
 
   // 7. customer_tracking
@@ -509,6 +514,12 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     if (!gsNames.has('return_due_date')) {
       await pool.query(`ALTER TABLE goldsmith_jobs ADD COLUMN return_due_date DATE NULL AFTER fee_paid_at`);
     }
+  }
+
+  // 9. customers.nrc
+  const custNames = getCols('customers');
+  if (custNames.size > 0 && !custNames.has('nrc')) {
+    await pool.query(`ALTER TABLE customers ADD COLUMN nrc VARCHAR(100) NULL AFTER phone`);
   }
 }
 

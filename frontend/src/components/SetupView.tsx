@@ -223,8 +223,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
           canCreate={can('customers', 'create')}
           canUpdate={can('customers', 'update')}
           canDelete={can('customers', 'delete')}
-          onCreate={async (name, phone, address) => {
-            await addCustomer(name, phone, address);
+          onCreate={async (name, phone, address, nrc) => {
+            await addCustomer(name, phone, address, nrc);
           }}
           onUpdate={updateCustomer}
           onDelete={deleteCustomer}
@@ -873,12 +873,12 @@ function CustomersPanel({
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
-  onCreate: (name: string, phone: string, address: string) => Promise<void>;
+  onCreate: (name: string, phone: string, address: string, nrc?: string) => Promise<void>;
   onUpdate: (id: string, updates: Partial<Customer>) => Promise<Customer>;
   onDelete: (id: string) => Promise<void>;
 }) {
   const dialog = useDialog();
-  const blank = { name: '', phone: '', address: '' };
+  const blank = { name: '', phone: '', nrc: '', address: '' };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -892,6 +892,7 @@ function CustomersPanel({
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.phone.toLowerCase().includes(q) ||
+        (c.nrc || '').toLowerCase().includes(q) ||
         (c.address || '').toLowerCase().includes(q)
     );
   }, [customers, query]);
@@ -906,7 +907,7 @@ function CustomersPanel({
 
   const openEdit = (c: Customer) => {
     setEditingId(c.id);
-    setForm({ name: c.name, phone: c.phone, address: c.address || '' });
+    setForm({ name: c.name, phone: c.phone, nrc: c.nrc || '', address: c.address || '' });
     setShowForm(true);
   };
 
@@ -924,10 +925,16 @@ function CustomersPanel({
         await onUpdate(editingId, {
           name: form.name.trim(),
           phone: form.phone.trim(),
+          nrc: form.nrc.trim(),
           address: form.address.trim(),
         });
       } else {
-        await onCreate(form.name.trim(), form.phone.trim(), form.address.trim());
+        await onCreate(
+          form.name.trim(),
+          form.phone.trim() || 'N/A',
+          form.address.trim(),
+          form.nrc.trim()
+        );
       }
       closeForm();
     } finally {
@@ -966,6 +973,7 @@ function CustomersPanel({
               <tr>
                 <th className="text-left px-4 py-3">{language === 'MM' ? 'အမည်' : 'Name'}</th>
                 <th className="text-left px-4 py-3">{language === 'MM' ? 'ဖုန်း' : 'Phone'}</th>
+                <th className="text-left px-4 py-3">NRC</th>
                 <th className="text-left px-4 py-3">{language === 'MM' ? 'လိပ်စာ' : 'Address'}</th>
                 <th className="text-right px-4 py-3">{language === 'MM' ? 'လက်ကျန်' : 'Balance'}</th>
                 <th className="text-center px-4 py-3 w-28">{language === 'MM' ? 'လုပ်ဆောင်ချက်' : 'Actions'}</th>
@@ -974,7 +982,7 @@ function CustomersPanel({
             <tbody>
               {pager.pageItems.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-10 text-gray-400">
+                  <td colSpan={6} className="text-center py-10 text-gray-400">
                     {language === 'MM' ? 'ဖောက်သည်မရှိပါ' : 'No customers'}
                   </td>
                 </tr>
@@ -983,6 +991,7 @@ function CustomersPanel({
                   <tr key={c.id} className="border-t border-gray-100 dark:border-gray-900">
                     <td className="px-4 py-2.5 font-semibold text-gray-900 dark:text-white">{c.name}</td>
                     <td className="px-4 py-2.5 font-mono">{c.phone}</td>
+                    <td className="px-4 py-2.5 font-mono text-gray-600">{c.nrc || '—'}</td>
                     <td className="px-4 py-2.5 text-gray-500 max-w-[220px] truncate">{c.address}</td>
                     <td className="px-4 py-2.5 text-right font-mono font-bold text-[#996515]">
                       {formatMMK(c.outstanding_balance || 0)}
@@ -1075,6 +1084,14 @@ function CustomersPanel({
                 value={form.phone}
                 onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
                 className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-sm"
+              />
+            </label>
+            <label className="block text-[11px] font-bold text-gray-500">
+              NRC / မှတ်ပုံတင်
+              <input
+                value={form.nrc}
+                onChange={(e) => setForm((f) => ({ ...f, nrc: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-sm font-mono"
               />
             </label>
             <label className="block text-[11px] font-bold text-gray-500">

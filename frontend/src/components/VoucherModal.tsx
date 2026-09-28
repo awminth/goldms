@@ -7,9 +7,10 @@ import {
   ywayToKpy,
   KYAT_TO_GRAMS,
   PURITY_LABELS,
+  calculateGoldValuation,
 } from '../utils/goldCalculations';
 import { formatDate } from '../utils/dateFormat';
-import type { TransactionItem, WeightKPY } from '../types/gold';
+import type { GoldPurity, TransactionItem, WeightKPY } from '../types/gold';
 import { Printer, X, FileCheck } from 'lucide-react';
 import { ModalOverlay } from './ModalOverlay';
 
@@ -58,14 +59,28 @@ function WeightCells({
   );
 }
 
+function mmGoldComponentAmounts(item: TransactionItem, goldPure: WeightKPY, waste: WeightKPY) {
+  const price = Number(item.gold_price_snapshot || 0);
+  const purity = item.purity as GoldPurity;
+  const goldPureAmount = calculateGoldValuation(goldPure, purity, price, price).goldAmount;
+  const wasteYway = kpyToYway(waste.kyat, waste.pae, waste.yway);
+  const wastageValue =
+    wasteYway > 0
+      ? calculateGoldValuation(waste, purity, price, price).goldAmount
+      : 0;
+  return { goldPureAmount, wastageValue };
+}
+
 function ItemWeightBlock({
   item,
   index,
   kyatToGrams,
+  itemCode,
 }: {
   item: TransactionItem;
   index: number;
   kyatToGrams: number;
+  itemCode?: string;
 }) {
   const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
   const gross = kpyOrEmpty(item.weight);
@@ -89,16 +104,44 @@ function ItemWeightBlock({
       ? Number(item.thai_weight_unit)
       : goldPureG || totalG;
 
-  // ထိုင်းရွှေ: ရွှေချိန် တစ်ခုသာ
-  const rows: { label: string; grams: number; kpy: WeightKPY }[] = isThai
-    ? [{ label: 'ရွှေချိန်', grams: thaiG, kpy: goldPure }]
+  const { goldPureAmount, wastageValue } = isThai
+    ? { goldPureAmount: 0, wastageValue: 0 }
+    : mmGoldComponentAmounts(item, goldPure, waste);
+
+  type RowKind = 'gross' | 'gem' | 'gold' | 'waste' | 'total' | 'thai';
+  const rows: { kind: RowKind; label: string; grams: number; kpy: WeightKPY }[] = isThai
+    ? [{ kind: 'thai', label: 'ရွှေချိန်', grams: thaiG, kpy: goldPure }]
     : [
-        { label: 'အလေးချိန်', grams: grossG, kpy: gross },
-        { label: 'ကျောက်ချိန်', grams: gemG, kpy: gem },
-        { label: 'ရွှေချိန်', grams: goldPureG, kpy: goldPure },
-        { label: 'အလျော့တွက်', grams: wasteG, kpy: waste },
-        { label: 'စုစုပေါင်းအလေးချိန်', grams: totalG, kpy: totalWeight },
+        { kind: 'gross', label: 'အလေးချိန်', grams: grossG, kpy: gross },
+        { kind: 'gem', label: 'ကျောက်ချိန်', grams: gemG, kpy: gem },
+        { kind: 'gold', label: 'ရွှေချိန်', grams: goldPureG, kpy: goldPure },
+        { kind: 'waste', label: 'အလျော့တွက်', grams: wasteG, kpy: waste },
+        { kind: 'total', label: 'စုစုပေါင်းအလေးချိန်', grams: totalG, kpy: totalWeight },
       ];
+
+  const code = (itemCode || item.barcode || '').trim();
+
+  const amountForRow = (kind: RowKind) => {
+    if (isThai && kind === 'thai') {
+      return (
+        <div className="font-bold text-[12px] font-mono">{formatMMK(item.subtotal)}</div>
+      );
+    }
+    if (kind === 'gold') {
+      return <div className="font-mono font-semibold text-[11px]">{formatMMK(goldPureAmount)}</div>;
+    }
+    if (kind === 'waste') {
+      return <div className="font-mono font-semibold text-[11px]">{formatMMK(wastageValue)}</div>;
+    }
+    if (kind === 'total') {
+      return (
+        <div className="font-bold text-[12px] font-mono text-gray-900">
+          {formatMMK(item.subtotal)}
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
     <>
@@ -111,6 +154,12 @@ function ItemWeightBlock({
                 className="voucher-cell text-center font-mono font-bold align-middle"
               >
                 {index + 1}
+              </td>
+              <td
+                rowSpan={rows.length}
+                className="voucher-cell text-center font-mono text-[10px] text-[#996515] align-middle px-1.5 whitespace-nowrap"
+              >
+                {code || '—'}
               </td>
               <td rowSpan={rows.length} className="voucher-cell align-middle px-2">
                 <div className="font-bold text-[12px] leading-snug text-gray-900">
@@ -132,14 +181,9 @@ function ItemWeightBlock({
             {row.label}
           </td>
           <WeightCells grams={row.grams} kpy={row.kpy} />
-          {ri === 0 && (
-            <td
-              rowSpan={rows.length}
-              className="voucher-cell text-right font-mono font-bold align-middle text-[12px] text-gray-900"
-            >
-              {formatMMK(item.subtotal)}
-            </td>
-          )}
+          <td className="voucher-cell text-right align-middle px-1.5 py-1">
+            {amountForRow(row.kind)}
+          </td>
         </tr>
       ))}
     </>
@@ -153,16 +197,10 @@ export const VoucherModal: React.FC = () => {
     language,
     goldPrices,
     shopSettings,
+    inventory,
   } = useGoldShop();
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
-
-  const pe15Price = useMemo(() => {
-    const pe15 =
-      goldPrices.find((p) => p.gold_type === 'PE15A') ||
-      goldPrices.find((p) => p.gold_type === 'PE15B');
-    return pe15?.price_per_kyat || selectedVoucher?.gold_price_snapshot || 0;
-  }, [goldPrices, selectedVoucher]);
 
   const purityDisplay = useMemo(() => {
     if (!selectedVoucher?.items?.length) return '—';
@@ -175,6 +213,39 @@ export const VoucherModal: React.FC = () => {
     );
     return labels.join('၊ ');
   }, [selectedVoucher]);
+
+  /** Sold item(s) purity price — not PE15A default */
+  const soldGoldPrice = useMemo(() => {
+    if (!selectedVoucher?.items?.length) {
+      return Number(selectedVoucher?.gold_price_snapshot || 0);
+    }
+    const snapshots = selectedVoucher.items
+      .map((i) => Number(i.gold_price_snapshot || 0))
+      .filter((n) => n > 0);
+    if (snapshots.length > 0) return snapshots[0];
+    const firstPurity = selectedVoucher.items[0]?.purity;
+    const live = goldPrices.find((p) => p.gold_type === firstPurity)?.price_per_kyat;
+    return live || Number(selectedVoucher.gold_price_snapshot || 0);
+  }, [selectedVoucher, goldPrices]);
+
+  const goldPriceLabel = useMemo(() => {
+    if (!selectedVoucher?.items?.length) return 'ရွှေဈေး';
+    const labels = Array.from(
+      new Set(
+        selectedVoucher.items.map((i) => PURITY_LABELS[i.purity]?.mm || i.purity)
+      )
+    );
+    if (labels.length === 1) return `${labels[0]} ရွှေဈေး`;
+    return 'ရွှေဈေး';
+  }, [selectedVoucher]);
+
+  const resolveItemCode = (item: TransactionItem): string => {
+    const fromItem = (item.barcode || '').trim();
+    if (fromItem) return fromItem;
+    if (!item.item_id) return '';
+    const inv = inventory.find((i) => i.id === item.item_id);
+    return (inv?.barcode || '').trim();
+  };
 
   if (!selectedVoucher) return null;
 
@@ -428,10 +499,10 @@ export const VoucherModal: React.FC = () => {
                   </tr>
                   <tr>
                     <td className="border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
-                      ၁၅ ပဲရည်ရွှေဈေး
+                      {goldPriceLabel}
                     </td>
                     <td className="border border-[#D4AF37]/40 px-2 py-1.5 font-mono font-bold text-right">
-                      {formatMMK(pe15Price || selectedVoucher.gold_price_snapshot)}
+                      {formatMMK(soldGoldPrice)}
                     </td>
                   </tr>
                 </tbody>
@@ -444,7 +515,10 @@ export const VoucherModal: React.FC = () => {
                 <thead>
                   <tr className="bg-[#1A1208] text-[#F5E6C8]">
                     <th className="voucher-th w-8">No.</th>
-                    <th className="voucher-th text-left min-w-[120px] print:min-w-0">ပစ္စည်းအမျိုးအစား</th>
+                    <th className="voucher-th text-center whitespace-nowrap min-w-[72px] print:min-w-0">
+                      Item Code
+                    </th>
+                    <th className="voucher-th text-left min-w-[100px] print:min-w-0">ပစ္စည်းအမျိုးအစား</th>
                     <th className="voucher-th text-left whitespace-nowrap">အကြောင်းအရာ</th>
                     <th className="voucher-th w-14">ဂရမ်</th>
                     <th className="voucher-th w-12">ကျပ်</th>
@@ -460,12 +534,13 @@ export const VoucherModal: React.FC = () => {
                       item={item}
                       index={idx}
                       kyatToGrams={kyatToGrams}
+                      itemCode={resolveItemCode(item)}
                     />
                   ))}
                   {/* pad empty look if few items */}
                   {selectedVoucher.items.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="voucher-cell text-center text-gray-400 py-6">
+                      <td colSpan={9} className="voucher-cell text-center text-gray-400 py-6">
                         ပစ္စည်းမရှိပါ
                       </td>
                     </tr>

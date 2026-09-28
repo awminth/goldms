@@ -156,10 +156,10 @@ export const api = {
       body: JSON.stringify({ updates }),
     }),
 
-  addCustomer: (name: string, phone: string, address: string) =>
+  addCustomer: (name: string, phone: string, address: string, nrc?: string) =>
     request<Customer>('/customers', {
       method: 'POST',
-      body: JSON.stringify({ name, phone, address }),
+      body: JSON.stringify({ name, phone, address, nrc: nrc || '' }),
     }),
 
   updateCustomer: (id: string, updates: Partial<Customer>) =>

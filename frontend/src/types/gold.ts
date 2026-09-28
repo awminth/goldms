@@ -78,6 +78,7 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
+  nrc?: string;
   address: string;
   created_at: string;
   outstanding_balance: number;
@@ -89,6 +90,8 @@ export interface TransactionItem {
   id: string;
   transaction_id: string;
   item_id?: string;
+  /** Inventory barcode / item code shown on voucher */
+  barcode?: string;
   item_name: string;
   category: string;
   weight: WeightKPY;

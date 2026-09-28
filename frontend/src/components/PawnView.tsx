@@ -114,6 +114,16 @@ function fmtPawnInterestAmount(r: {
   return formatMMK(Number(r.interest_kyat || 0));
 }
 
+function fmtPeriodMonthsDays(months?: number | null, days?: number | null): string {
+  const m = Math.max(0, Number(months || 0));
+  const d = Math.max(0, Number(days || 0));
+  if (m <= 0 && d <= 0) return '—';
+  const parts: string[] = [];
+  if (m > 0) parts.push(`${m} လ`);
+  if (d > 0) parts.push(`${d} ရက်`);
+  return parts.join(' ');
+}
+
 function isOverduePawn(
   r: PawnRecord,
   today = (() => {
@@ -330,11 +340,18 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   };
 
   const calcInterest = (principal: number, rate: number, months: number) =>
-    Math.round((principal * rate * Math.max(1, months)) / 100);
+    Math.round((principal * rate * Math.max(0, months)) / 100);
 
   /** Monthly rate applied pro-rata over days (30-day month). */
   const calcInterestByDays = (principal: number, rate: number, days: number) =>
-    Math.round((principal * rate * Math.max(1, days)) / 30 / 100);
+    Math.round((principal * rate * Math.max(0, days)) / 30 / 100);
+
+  const calcInterestParts = (principal: number, rate: number, months: number, days: number) => {
+    const m = Math.max(0, months);
+    const d = Math.max(0, days);
+    if (m <= 0 && d <= 0) return calcInterest(principal, rate, 1);
+    return calcInterest(principal, rate, m) + calcInterestByDays(principal, rate, d);
+  };
 
   const syncInterestFromLoan = (
     kyat: number,
@@ -344,26 +361,27 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     currency: 'MMK' | 'BAHT' = formLoanCurrency
   ) => {
     if (currency === 'BAHT') {
-      setFormInterestBaht(calcInterest(baht, rate, months));
+      setFormInterestBaht(calcInterest(baht, rate, Math.max(1, months)));
       setFormInterestKyat(0);
     } else {
-      setFormInterestKyat(calcInterest(kyat, rate, months));
+      setFormInterestKyat(calcInterest(kyat, rate, Math.max(1, months)));
       setFormInterestBaht(0);
     }
   };
 
-  const syncInterestFromDays = (
+  const syncInterestFromParts = (
     kyat: number,
     baht: number,
     rate: number,
+    months: number,
     days: number,
     currency: 'MMK' | 'BAHT' = formLoanCurrency
   ) => {
     if (currency === 'BAHT') {
-      setFormInterestBaht(calcInterestByDays(baht, rate, days));
+      setFormInterestBaht(calcInterestParts(baht, rate, months, days));
       setFormInterestKyat(0);
     } else {
-      setFormInterestKyat(calcInterestByDays(kyat, rate, days));
+      setFormInterestKyat(calcInterestParts(kyat, rate, months, days));
       setFormInterestBaht(0);
     }
   };
@@ -431,7 +449,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         setFormInterestKyat(calcInterest(loanKyat, rate, Number(r.loss_months)));
         setFormInterestBaht(0);
       }
-    } else if (section === 'form-interest' || section === 'form-redeem') {
+    } else if (section === 'form-interest') {
       const prevPays = pawnInterestPayments
         .filter((p) => String(p.pawn_id) === String(r.id))
         .sort((a, b) => {
@@ -443,10 +461,29 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       setFormLastInterestPaid(lastPaid);
       const periodBase = lastPaid || r.start_date;
       const days = daysBetween(periodBase, today);
-      setFormDaysPaid(days);
-      setFormMonths(Math.max(1, Math.round(days / 30) || 1));
+      const months = Math.max(1, Math.round(days / 30) || 1);
+      setFormMonths(months);
+      setFormDaysPaid(0);
       setFormStart(today);
-      syncInterestFromDays(loanKyat, loanBaht, rate, days, currency);
+      syncInterestFromLoan(loanKyat, loanBaht, rate, months, currency);
+    } else if (section === 'form-redeem') {
+      const prevPays = pawnInterestPayments
+        .filter((p) => String(p.pawn_id) === String(r.id))
+        .sort((a, b) => {
+          const byDate = String(b.payment_date).localeCompare(String(a.payment_date));
+          if (byDate !== 0) return byDate;
+          return Number(b.id) - Number(a.id);
+        });
+      const lastPaid = prevPays[0]?.payment_date || '';
+      setFormLastInterestPaid(lastPaid);
+      const periodBase = lastPaid || r.start_date;
+      const daysTotal = daysBetween(periodBase, today);
+      const months = Math.floor(daysTotal / 30);
+      const days = daysTotal % 30;
+      setFormMonths(months);
+      setFormDaysPaid(days);
+      setFormStart(today);
+      syncInterestFromParts(loanKyat, loanBaht, rate, months, days, currency);
     } else {
       const m = monthsBetween(base, today);
       setFormMonths(m);
@@ -547,7 +584,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   );
 
   const listPawnRows = filterBySearch(
-    pawnRecords as unknown as Record<string, unknown>[]
+    activePawns as unknown as Record<string, unknown>[]
   ) as unknown as PawnRecord[];
   const listInterestRows = filterBySearch(
     interestRowsWithStatus as unknown as Record<string, unknown>[]
@@ -713,7 +750,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           { header: 'Item', value: (r) => r.item_name, width: 22 },
           { header: 'Loan', value: (r) => fmtPawnLoan(r), width: 14 },
           { header: 'Rate%', value: (r) => r.interest_rate, width: 8 },
-          { header: 'Days', value: (r) => r.days_paid ?? (r.months_paid || 0) * 30, width: 8 },
+          { header: 'Months', value: (r) => r.months_paid || 0, width: 8 },
           { header: 'Interest', value: (r) => fmtPawnInterestAmount(r), width: 14 },
           { header: dueHeader, value: (r) => formatDate(r.due_date), width: 12 },
           {
@@ -743,9 +780,9 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           { header: 'Loan', value: (r) => fmtPawnLoan(r), width: 14 },
           { header: 'Rate%', value: (r) => r.monthly_interest_rate, width: 8 },
           {
-            header: 'Days',
-            value: (r) => r.redeem_days ?? (r.redeem_months != null ? r.redeem_months * 30 : ''),
-            width: 8,
+            header: 'Period',
+            value: (r) => fmtPeriodMonthsDays(r.redeem_months, r.redeem_days),
+            width: 12,
           },
           {
             header: 'Interest',
@@ -911,7 +948,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     try {
       await payPawnInterest(selectedId, {
         payment_date: formStart,
-        days_paid: Number(formDaysPaid || 1),
+        months_paid: Number(formMonths || 1),
+        days_paid: Number(formMonths || 1) * 30,
         interest_kyat: loanIsBaht ? 0 : Number(formInterestKyat || 0),
         interest_baht: loanIsBaht ? Number(formInterestBaht || 0) : 0,
         interest_rate: Number(formRate || 5),
@@ -936,8 +974,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     try {
       await redeemPawnRecord(selectedId, loanIsBaht ? redeemTotalBaht : redeemTotalKyat, {
         redeem_date: formStart,
-        redeem_days: Number(formDaysPaid || 1),
-        redeem_months: Math.max(1, Math.round(Number(formDaysPaid || 1) / 30) || 1),
+        redeem_months: Number(formMonths || 0),
+        redeem_days: Number(formDaysPaid || 0),
         redeem_interest_kyat: loanIsBaht ? 0 : Number(formInterestKyat || 0),
         redeem_interest_baht: loanIsBaht ? Number(formInterestBaht || 0) : 0,
         discount_kyat: loanIsBaht ? 0 : Number(discountKyat || 0),
@@ -1047,8 +1085,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         { label: language === 'MM' ? 'ယူငွေ' : 'Loan', value: fmtPawnLoan(r) },
         { label: language === 'MM' ? 'အတိုး%' : 'Rate%', value: r.interest_rate },
         {
-          label: language === 'MM' ? 'သွင်းရက်စာ' : 'Days',
-          value: r.days_paid ?? (r.months_paid || 0) * 30,
+          label: language === 'MM' ? 'သွင်းရက်စာ' : 'Period',
+          value: `${r.months_paid || 0} လ`,
         },
         { label: language === 'MM' ? 'အတိုး' : 'Interest', value: fmtPawnInterestAmount(r) },
         { label: dueHeader, value: formatDate(r.due_date || '') },
@@ -1073,8 +1111,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       { label: language === 'MM' ? 'ယူငွေ' : 'Loan', value: fmtPawnLoan(r) },
       { label: language === 'MM' ? 'အတိုး%' : 'Rate%', value: r.monthly_interest_rate },
       {
-        label: language === 'MM' ? 'သွင်းရက်စာ' : 'Days',
-        value: r.redeem_days ?? (r.redeem_months != null ? r.redeem_months * 30 : '—'),
+        label: language === 'MM' ? 'သွင်းရက်စာ' : 'Period',
+        value: fmtPeriodMonthsDays(r.redeem_months, r.redeem_days),
       },
       {
         label: language === 'MM' ? 'အတိုး' : 'Interest',
@@ -1334,10 +1372,10 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       },
       {
         id: 'days',
-        header: language === 'MM' ? 'သွင်းရက်စာ' : 'Days',
+        header: language === 'MM' ? 'သွင်းရက်စာ' : 'Months',
         slot: 'detail',
-        accessor: (r) => r.days_paid ?? (r.months_paid || 0) * 30,
-        cell: (r) => r.days_paid ?? (r.months_paid || 0) * 30,
+        accessor: (r) => r.months_paid || 0,
+        cell: (r) => `${r.months_paid || 0} လ`,
       },
       {
         id: 'due',
@@ -1465,11 +1503,11 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       },
       {
         id: 'days',
-        header: language === 'MM' ? 'သွင်းရက်စာ' : 'Days',
+        header: language === 'MM' ? 'သွင်းရက်စာ' : 'Period',
         slot: 'detail',
-        accessor: (r) => r.redeem_days ?? (r.redeem_months != null ? r.redeem_months * 30 : 0),
-        cell: (r) =>
-          r.redeem_days ?? (r.redeem_months != null ? r.redeem_months * 30 : '—'),
+        accessor: (r) =>
+          `${Number(r.redeem_months || 0)}-${Number(r.redeem_days || 0)}`,
+        cell: (r) => fmtPeriodMonthsDays(r.redeem_months, r.redeem_days),
       },
       {
         id: 'interest',
@@ -1804,48 +1842,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         </div>
       )}
 
-      {section === 'form-create' ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full">
-          <div className="min-w-0 w-full">
-            <label className={labelCls}>ပေါင်ရက်</label>
-            <DateInput
-              className={inputCls}
-              value={formStart}
-              onChange={(start) => {
-                setFormStart(start);
-                if (!start) return;
-                const d = new Date(start);
-                d.setMonth(d.getMonth() + Number(formMonths || 3));
-                setFormDue(d.toISOString().slice(0, 10));
-              }}
-            />
-          </div>
-          <div className="min-w-0 w-full">
-            <label className={labelCls}>အရှုံးလ</label>
-            <NumberInput
-              min={1}
-              className={inputCls}
-              value={formMonths}
-              onChange={(v) => {
-                const months = Math.max(1, v || 1);
-                setFormMonths(months);
-                syncInterestFromLoan(formLoanKyat, formLoanBaht, formRate, months);
-                const d = new Date(formStart);
-                d.setMonth(d.getMonth() + months);
-                setFormDue(d.toISOString().slice(0, 10));
-              }}
-            />
-          </div>
-          <div className="min-w-0 w-full">
-            <label className={labelCls}>နောက်ဆုံးရက် / Due</label>
-            <DateInput
-              className={inputCls}
-              value={formDue || duePreview}
-              onChange={setFormDue}
-            />
-          </div>
-        </div>
-      ) : section === 'form-interest' || section === 'form-redeem' ? (
+      {section === 'form-interest' || section === 'form-redeem' ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full">
           <div className="min-w-0 w-full">
             <label className={labelCls}>
@@ -2054,27 +2051,84 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       </div>
 
       {(section === 'form-interest' || section === 'form-redeem') && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full">
-          <div className="min-w-0 w-full">
-            <label className={labelCls}>
-              {language === 'MM' ? 'သွင်းရက်စာ (ရက်)' : 'Days covered'}
-            </label>
-            <NumberInput
-              min={1}
-              className={inputCls}
-              value={formDaysPaid}
-              onChange={(v) => {
-                const days = Math.max(1, v || 1);
-                setFormDaysPaid(days);
-                syncInterestFromDays(formLoanKyat, formLoanBaht, formRate, days);
-              }}
-            />
-            <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
-              {language === 'MM'
-                ? 'နောက်ဆုံးအတိုးပေးရက်မှ ယခုအထိ ရက်စာ (လစဉ်နှုန်း ÷ ၃၀)'
-                : 'Days from last interest paid (monthly rate ÷ 30)'}
-            </p>
-          </div>
+        <div
+          className={`grid grid-cols-1 gap-2 w-full ${
+            section === 'form-redeem' ? 'md:grid-cols-3' : 'md:grid-cols-2'
+          }`}
+        >
+          {section === 'form-interest' ? (
+            <div className="min-w-0 w-full">
+              <label className={labelCls}>
+                {language === 'MM' ? 'သွင်းရက်စာ (လ)' : 'Months covered'}
+              </label>
+              <NumberInput
+                min={1}
+                className={inputCls}
+                value={formMonths}
+                onChange={(v) => {
+                  const months = Math.max(1, v || 1);
+                  setFormMonths(months);
+                  setFormDaysPaid(0);
+                  syncInterestFromLoan(formLoanKyat, formLoanBaht, formRate, months);
+                }}
+              />
+              <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                {language === 'MM'
+                  ? 'နောက်ဆုံးအတိုးပေးရက်မှ ယခုအထိ လစာ (လစဉ်နှုန်း)'
+                  : 'Months from last interest paid (monthly rate)'}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="min-w-0 w-full">
+                <label className={labelCls}>
+                  {language === 'MM' ? 'သွင်းရက်စာ (လ)' : 'Months'}
+                </label>
+                <NumberInput
+                  min={0}
+                  className={inputCls}
+                  value={formMonths}
+                  onChange={(v) => {
+                    const months = Math.max(0, v || 0);
+                    setFormMonths(months);
+                    syncInterestFromParts(
+                      formLoanKyat,
+                      formLoanBaht,
+                      formRate,
+                      months,
+                      formDaysPaid
+                    );
+                  }}
+                />
+              </div>
+              <div className="min-w-0 w-full">
+                <label className={labelCls}>
+                  {language === 'MM' ? 'သွင်းရက်စာ (ရက်)' : 'Days'}
+                </label>
+                <NumberInput
+                  min={0}
+                  className={inputCls}
+                  value={formDaysPaid}
+                  onChange={(v) => {
+                    const days = Math.max(0, v || 0);
+                    setFormDaysPaid(days);
+                    syncInterestFromParts(
+                      formLoanKyat,
+                      formLoanBaht,
+                      formRate,
+                      formMonths,
+                      days
+                    );
+                  }}
+                />
+                <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                  {language === 'MM'
+                    ? 'လ နှင့် ရက် သီးခြားထည့်ပါ (ရက်ပြောင်းလဲခြင်းဖြင့် လ မပြောင်းပါ)'
+                    : 'Months and days are separate (changing days does not alter months)'}
+                </p>
+              </div>
+            </>
+          )}
           <div className="min-w-0 w-full">
             <label className={labelCls}>{loanIsBaht ? 'အတိုး (ဘတ်)' : 'အတိုး (ကျပ်)'}</label>
             <NumberInput
@@ -2122,6 +2176,49 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               className={`${inputCls} font-bold`}
               readOnly
               value={loanIsBaht ? redeemTotalBaht : redeemTotalKyat}
+            />
+          </div>
+        </div>
+      )}
+
+      {section === 'form-create' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full">
+          <div className="min-w-0 w-full">
+            <label className={labelCls}>ပေါင်ရက်</label>
+            <DateInput
+              className={inputCls}
+              value={formStart}
+              onChange={(start) => {
+                setFormStart(start);
+                if (!start) return;
+                const d = new Date(start);
+                d.setMonth(d.getMonth() + Number(formMonths || 3));
+                setFormDue(d.toISOString().slice(0, 10));
+              }}
+            />
+          </div>
+          <div className="min-w-0 w-full">
+            <label className={labelCls}>အရှုံးလ</label>
+            <NumberInput
+              min={1}
+              className={inputCls}
+              value={formMonths}
+              onChange={(v) => {
+                const months = Math.max(1, v || 1);
+                setFormMonths(months);
+                syncInterestFromLoan(formLoanKyat, formLoanBaht, formRate, months);
+                const d = new Date(formStart);
+                d.setMonth(d.getMonth() + months);
+                setFormDue(d.toISOString().slice(0, 10));
+              }}
+            />
+          </div>
+          <div className="min-w-0 w-full">
+            <label className={labelCls}>နောက်ဆုံးရက် / Due</label>
+            <DateInput
+              className={inputCls}
+              value={formDue || duePreview}
+              onChange={setFormDue}
             />
           </div>
         </div>

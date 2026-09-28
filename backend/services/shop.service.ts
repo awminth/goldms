@@ -103,6 +103,7 @@ function mapCustomer(row: RowDataPacket) {
     id: strId(row.id),
     name: row.name,
     phone: row.phone,
+    nrc: row.nrc != null ? String(row.nrc) : '',
     address: row.address ?? '',
     created_at: toIso(row.created_at),
     outstanding_balance: num(row.outstanding_balance),
@@ -151,6 +152,7 @@ function mapTxnItem(row: RowDataPacket) {
     transaction_id: strId(row.transaction_id),
     item_id: optionalStrId(row.item_id),
     item_name: row.item_name,
+    barcode: row.item_barcode != null ? String(row.item_barcode) : undefined,
     category: row.category,
     weight: {
       kyat: num(row.weight_kyat),
@@ -172,6 +174,7 @@ function mapTxnItem(row: RowDataPacket) {
     gold_amount: num(row.gold_amount),
     craftsmanship_fee: num(row.craftsmanship_fee),
     stone_price: num(row.stone_price),
+    wastage_amount: num(row.wastage_amount),
     subtotal: num(row.subtotal),
     item_type: row.item_type,
     thai_weight_unit: row.thai_weight_unit != null ? num(row.thai_weight_unit) : undefined,
@@ -1095,11 +1098,11 @@ export const shopService = {
     return rows.map(mapCustomer);
   },
 
-  async addCustomer(name: string, phone: string, address: string) {
+  async addCustomer(name: string, phone: string, address: string, nrc = '') {
     const [result] = await getPool().query<ResultSetHeader>(
-      `INSERT INTO customers (name, phone, address, outstanding_balance)
-       VALUES (:name, :phone, :address, 0)`,
-      { name, phone, address }
+      `INSERT INTO customers (name, phone, nrc, address, outstanding_balance)
+       VALUES (:name, :phone, :nrc, :address, 0)`,
+      { name, phone, nrc: nrc || null, address }
     );
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM customers WHERE id = :id`,
@@ -1110,7 +1113,7 @@ export const shopService = {
 
   async updateCustomer(id: string, data: Record<string, unknown>) {
     const customerId = parseId(id);
-    const allowed = ['name', 'phone', 'address', 'outstanding_balance'] as const;
+    const allowed = ['name', 'phone', 'nrc', 'address', 'outstanding_balance'] as const;
     const sets: string[] = [];
     const params: Record<string, unknown> = { id: customerId };
     for (const key of allowed) {
@@ -1511,26 +1514,38 @@ export const shopService = {
         const gemstone = (raw.gemstone_weight as WeightKPY) || { kyat: 0, pae: 0, yway: 0 };
         const net = (raw.net_weight as WeightKPY) || weight;
         const itemId = parseOptionalId(raw.item_id);
+        let itemBarcode =
+          raw.barcode != null && String(raw.barcode).trim()
+            ? String(raw.barcode).trim()
+            : null;
+        if (!itemBarcode && itemId) {
+          const [invRows] = await conn.query<RowDataPacket[]>(
+            `SELECT barcode FROM inventory_items WHERE id = :id LIMIT 1`,
+            { id: itemId }
+          );
+          if (invRows[0]?.barcode) itemBarcode = String(invRows[0].barcode);
+        }
         await conn.query(
           `INSERT INTO transaction_items (
-            transaction_id, item_id, item_name, category,
+            transaction_id, item_id, item_name, item_barcode, category,
             weight_kyat, weight_pae, weight_yway,
             gemstone_weight_kyat, gemstone_weight_pae, gemstone_weight_yway,
             net_weight_kyat, net_weight_pae, net_weight_yway,
-            purity, gold_price_snapshot, gold_amount, craftsmanship_fee, stone_price, subtotal, item_type,
+            purity, gold_price_snapshot, gold_amount, craftsmanship_fee, stone_price, wastage_amount, subtotal, item_type,
             thai_weight_unit, line_role
           ) VALUES (
-            :transaction_id, :item_id, :item_name, :category,
+            :transaction_id, :item_id, :item_name, :item_barcode, :category,
             :weight_kyat, :weight_pae, :weight_yway,
             :gemstone_weight_kyat, :gemstone_weight_pae, :gemstone_weight_yway,
             :net_weight_kyat, :net_weight_pae, :net_weight_yway,
-            :purity, :gold_price_snapshot, :gold_amount, :craftsmanship_fee, :stone_price, :subtotal, :item_type,
+            :purity, :gold_price_snapshot, :gold_amount, :craftsmanship_fee, :stone_price, :wastage_amount, :subtotal, :item_type,
             :thai_weight_unit, :line_role
           )`,
           {
             transaction_id: txnId,
             item_id: itemId,
             item_name: raw.item_name,
+            item_barcode: itemBarcode,
             category: raw.category,
             weight_kyat: num(weight.kyat),
             weight_pae: num(weight.pae),
@@ -1546,6 +1561,7 @@ export const shopService = {
             gold_amount: num(raw.gold_amount),
             craftsmanship_fee: num(raw.craftsmanship_fee),
             stone_price: num(raw.stone_price),
+            wastage_amount: num(raw.wastage_amount),
             subtotal: num(raw.subtotal),
             item_type: raw.item_type ?? 'MYANMAR_GOLD',
             thai_weight_unit:
@@ -2896,8 +2912,8 @@ export const shopService = {
       }
 
       const paymentDate = String(data.payment_date || new Date().toISOString().slice(0, 10));
-      const daysPaid = Math.max(1, num(data.days_paid, num(data.months_paid, 1) * 30));
-      const monthsPaid = Math.max(1, Math.round(daysPaid / 30) || 1);
+      const monthsPaid = Math.max(1, num(data.months_paid, Math.round(num(data.days_paid, 30) / 30) || 1));
+      const daysPaid = Math.max(1, num(data.days_paid, monthsPaid * 30));
       const interestKyat = num(data.interest_kyat);
       const interestBaht = num(data.interest_baht);
       const rate = num(data.interest_rate, num(rows[0].monthly_interest_rate, 5));
@@ -2908,7 +2924,7 @@ export const shopService = {
 
       const nextDate = (() => {
         const base = new Date(paymentDate);
-        base.setDate(base.getDate() + daysPaid);
+        base.setMonth(base.getMonth() + monthsPaid);
         return base.toISOString().slice(0, 10);
       })();
 
@@ -3005,8 +3021,17 @@ export const shopService = {
       const redeemDate = String(extra.redeem_date || new Date().toISOString().slice(0, 10));
       const totalKyat = num(extra.redeem_total_kyat, settlementAmount);
       const totalBaht = num(extra.redeem_total_baht);
-      const redeemDays = Math.max(1, num(extra.redeem_days, num(extra.redeem_months, 1) * 30));
-      const redeemMonths = Math.max(1, Math.round(redeemDays / 30) || 1);
+      // Store months + leftover days separately (not derived by converting days↔months)
+      const redeemMonths = Math.max(0, num(extra.redeem_months));
+      const redeemDays = Math.max(0, num(extra.redeem_days));
+      const monthsFinal =
+        redeemMonths > 0 || redeemDays > 0
+          ? redeemMonths
+          : Math.max(1, num(extra.redeem_months, 1));
+      const daysFinal =
+        redeemMonths > 0 || redeemDays > 0
+          ? redeemDays
+          : Math.max(1, num(extra.redeem_days, 30));
 
       await conn.query(
         `UPDATE pawn_records SET
@@ -3026,8 +3051,8 @@ export const shopService = {
         {
           id: pawnId,
           redeem_date: redeemDate,
-          redeem_months: redeemMonths,
-          redeem_days: redeemDays,
+          redeem_months: monthsFinal,
+          redeem_days: daysFinal,
           redeem_interest_kyat: num(extra.redeem_interest_kyat),
           redeem_interest_baht: num(extra.redeem_interest_baht),
           discount_kyat: num(extra.discount_kyat),
