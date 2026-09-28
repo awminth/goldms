@@ -299,15 +299,13 @@
 
   #printable-voucher,
   #printable-voucher *,
-  #printable-barcode-tag,
-  #printable-barcode-tag *,
   .printable-doc,
   .printable-doc * {
     visibility: visible !important;
   }
 
   #printable-voucher,
-  .printable-doc:not(.barcode-tag) {
+  .printable-doc {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
@@ -329,28 +327,6 @@
     print-color-adjust: exact;
     font-size: 10pt;
     line-height: 1.35;
-  }
-
-  /* 75mm × 15mm jewelry barcode sticker */
-  #printable-barcode-tag.barcode-tag {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    right: auto !important;
-    width: 75mm !important;
-    height: 15mm !important;
-    max-width: 75mm !important;
-    min-width: 75mm !important;
-    margin: 0 !important;
-    padding: 0.4mm 0.6mm !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    background: #ffffff !important;
-    color: #000000 !important;
-    overflow: hidden !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
   }
 
   #printable-voucher *,
@@ -540,22 +516,4 @@
   text-overflow: ellipsis;
   width: 100%;
   line-height: 1.08;
-}
-
-/* Named page for sticker printers (Chrome/Edge print) */
-@page barcode-label {
-  size: 75mm 15mm;
-  margin: 0;
-}
-
-@media print {
-  #printable-barcode-tag.barcode-tag {
-    page: barcode-label;
-  }
-
-  html.print-barcode-tag,
-  html.print-barcode-tag body {
-    width: 75mm !important;
-    height: 15mm !important;
-  }
 }

@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { useGoldShop } from '../context/GoldShopContext';
 import {
   InventoryItem,
@@ -44,7 +45,7 @@ import { DataTable, type DataTableColumn } from './DataTable';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import { ModalOverlay } from './ModalOverlay';
-import { InventoryBarcodeTag } from './InventoryBarcodeTag';
+import { InventoryBarcodeTag, BARCODE_TAG_PAGE_STYLE } from './InventoryBarcodeTag';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { useDialog } from '../context/DialogContext';
@@ -85,6 +86,19 @@ export const InventoryView: React.FC = () => {
     can,
   } = useGoldShop();
   const dialog = useDialog();
+  const barcodePrintRef = useRef<HTMLDivElement>(null);
+  const handlePrintBarcodeTag = useReactToPrint({
+    contentRef: barcodePrintRef,
+    documentTitle: 'barcode-tag-75x15',
+    pageStyle: BARCODE_TAG_PAGE_STYLE,
+    // Avoid global voucher @media print rules (visibility/absolute) breaking sticker layout
+    ignoreGlobalStyles: true,
+    onBeforePrint: async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+    },
+  });
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
 
@@ -1486,11 +1500,11 @@ export const InventoryView: React.FC = () => {
         </ModalOverlay>
       )}
 
-      {/* Barcode Tag Print Preview Modal — 75mm × 15mm */}
+      {/* Barcode Tag Print Preview Modal — 75mm × 15mm via react-to-print */}
       {tagItem && (
         <ModalOverlay>
-          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-md w-full p-5 shadow-2xl border border-[#D4AF37]/30 print:max-w-none print:w-full print:p-0 print:shadow-none print:border-0 print:rounded-none">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 print:hidden">
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-md w-full p-5 shadow-2xl border border-[#D4AF37]/30">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800">
               <h3 className="font-bold text-gray-900 dark:text-white text-sm flex items-center space-x-2">
                 <Printer className="w-4 h-4 text-[#D4AF37]" />
                 <span>
@@ -1505,14 +1519,16 @@ export const InventoryView: React.FC = () => {
               </button>
             </div>
 
-            <div className="mt-4 flex flex-col items-center gap-3 print:mt-0 print:block">
-              <p className="text-[10px] text-gray-500 print:hidden">
+            <div className="mt-4 flex flex-col items-center gap-3">
+              <p className="text-[10px] text-gray-500 text-center px-2">
                 {language === 'MM'
-                  ? 'ပရင့်ထုတ်ချိန်တွင် စက္ကူအရွယ် 75mm × 15mm ရွေးပါ'
-                  : 'Select 75mm × 15mm paper size when printing'}
+                  ? 'ပရင့်ထုတ်ရင် အရွယ် 75×15 mm အတိုင်း ပုံမပျက် ထွက်ပါမည် (printer အမျိုးမျိုး OK)'
+                  : 'Print keeps a fixed 75×15 mm layout on any printer'}
               </p>
-              <div className="scale-[1.35] origin-top print:scale-100 print:origin-top-left">
+              {/* Preview (screen) — same node is cloned by react-to-print */}
+              <div className="w-full flex justify-center overflow-x-auto py-2">
                 <InventoryBarcodeTag
+                  ref={barcodePrintRef}
                   item={tagItem}
                   kyatToGrams={kyatToGrams}
                   bahtBuyRate={shopSettings?.baht_to_mmk_buy || 755}
@@ -1520,7 +1536,7 @@ export const InventoryView: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-5 flex justify-end space-x-2 print:hidden">
+            <div className="mt-5 flex justify-end space-x-2">
               <button
                 onClick={() => setTagItem(null)}
                 className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 dark:text-gray-300"
@@ -1528,17 +1544,8 @@ export const InventoryView: React.FC = () => {
                 Close
               </button>
               <button
-                onClick={() => {
-                  document.documentElement.classList.add('print-barcode-tag');
-                  const cleanup = () => {
-                    document.documentElement.classList.remove('print-barcode-tag');
-                    window.removeEventListener('afterprint', cleanup);
-                  };
-                  window.addEventListener('afterprint', cleanup);
-                  window.print();
-                  // Fallback if afterprint is skipped
-                  window.setTimeout(cleanup, 2000);
-                }}
+                type="button"
+                onClick={() => handlePrintBarcodeTag()}
                 className="px-4 py-1.5 rounded-lg bg-[#D4AF37] text-white text-xs font-bold hover:bg-[#C5A059] flex items-center space-x-1"
               >
                 <Printer className="w-3.5 h-3.5" />
