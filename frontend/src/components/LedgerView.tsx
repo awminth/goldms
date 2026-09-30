@@ -3,8 +3,9 @@ import { useGoldShop } from '../context/GoldShopContext';
 import { useDialog } from '../context/DialogContext';
 import { FinancialLedger } from '../types/gold';
 import { formatMMK } from '../utils/goldCalculations';
-import { formatDate } from '../utils/dateFormat';
+import { formatDate, inDateRange, todayISO } from '../utils/dateFormat';
 import { DateInput } from './DateInput';
+import { DateRangeFilter } from './DateRangeFilter';
 import {
   Wallet,
   Plus,
@@ -42,6 +43,8 @@ export const LedgerView: React.FC = () => {
 
   const [filterType, setFilterType] = useState<string>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
+  const [dateFrom, setDateFrom] = useState(() => todayISO());
+  const [dateTo, setDateTo] = useState(() => todayISO());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -100,10 +103,23 @@ export const LedgerView: React.FC = () => {
       if (editingId) await updateLedgerEntry(editingId, payload);
       else await addLedgerEntry(payload);
       closeModal();
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message:
+          language === 'MM'
+            ? editingId
+              ? 'စာရင်း ပြင်ဆင်ပြီးပါပြီ'
+              : 'စာရင်း သိမ်းပြီးပါပြီ'
+            : editingId
+              ? 'Entry updated'
+              : 'Entry saved',
+        variant: 'success',
+      });
     } catch (err) {
       await dialog.alert({
         title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
         message: err instanceof Error ? err.message : 'Save failed',
+        variant: 'error',
       });
     } finally {
       setBusy(false);
@@ -123,10 +139,16 @@ export const LedgerView: React.FC = () => {
     setBusy(true);
     try {
       await deleteLedgerEntry(entry.id);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'စာရင်း ဖျက်ပြီးပါပြီ' : 'Entry deleted',
+        variant: 'success',
+      });
     } catch (err) {
       await dialog.alert({
         title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
         message: err instanceof Error ? err.message : 'Delete failed',
+        variant: 'error',
       });
     } finally {
       setBusy(false);
@@ -134,6 +156,8 @@ export const LedgerView: React.FC = () => {
   };
 
   const filteredLedger = ledger.filter((item) => {
+    if (String(item.entry_source || '').toUpperCase() !== 'MANUAL') return false;
+    if (!inDateRange(item.date, dateFrom, dateTo)) return false;
     const matchesType = filterType === 'ALL' || item.type === filterType;
     const matchesCat = filterCategory === 'ALL' || item.category === filterCategory;
     return matchesType && matchesCat;
@@ -141,9 +165,9 @@ export const LedgerView: React.FC = () => {
 
   const exportLedgerExcel = () => {
     exportToExcel({
-      filename: 'income_expense_entries',
-      sheetName: 'IncomeExpense',
-      title: language === 'MM' ? 'ဝင်ငွေ / ထွက်ငွေ စာရင်း' : 'Income & Expense Entries',
+      filename: 'other_income_expense_entries',
+      sheetName: 'OtherIncomeExpense',
+      title: language === 'MM' ? 'အခြားဝင်ငွေ / ထွက်ငွေ စာရင်း' : 'Other Income & Expense',
       columns: [
         { header: language === 'MM' ? 'ရက်စွဲ' : 'Date', value: (e) => e.date, width: 12 },
         { header: language === 'MM' ? 'အမျိုးအစား' : 'Type', value: (e) => e.type, width: 10 },
@@ -272,14 +296,14 @@ export const LedgerView: React.FC = () => {
             <Wallet className="w-5 h-5 text-[#D4AF37]" />
             <span>
               {language === 'MM'
-                ? 'ဝင်ငွေ / ထွက်ငွေ ထည့်သွင်းခြင်း'
-                : 'Record Income & Expenses'}
+                ? 'အခြားဝင်ငွေ / ထွက်ငွေ ထည့်သွင်းခြင်း'
+                : 'Other Income & Expenses'}
             </span>
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {language === 'MM'
-              ? 'ဆိုင်အသုံးစရိတ်၊ လစာ၊ အခြားဝင်ငွေ/ထွက်ငွေ ကိုယ်တိုင် ထည့်သွင်းရန်။ စုစုပေါင်းတွက်ချက်မှုကို ဘဏ္ဍာရေးအစီရင်ခံစာတွင် ကြည့်ပါ။'
-              : 'Manual income/expense entries only. See Financial Report for totals and cashflow detail.'}
+              ? 'ဤစာမျက်နှာမှ ထည့်သွင်းသော စာရင်းများကိုသာ ပြသည်။ ရောင်း/ဝယ်/အပေါင် အလိုအလျောက်စာရင်းများ မပါပါ။'
+              : 'Shows only entries recorded here. Auto postings from sales/buy/pawn are excluded.'}
           </p>
         </div>
 
@@ -303,18 +327,27 @@ export const LedgerView: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] dark:text-white"
-        >
-          <option value="ALL">{language === 'MM' ? 'အမျိုးအစားအားလုံး' : 'All Types'}</option>
-          <option value="INCOME">{language === 'MM' ? 'ဝင်ငွေ (Income)' : 'Income'}</option>
-          <option value="EXPENSE">{language === 'MM' ? 'ထွက်ငွေ (Expense)' : 'Expense'}</option>
-        </select>
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 text-xs">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeFilter
+            from={dateFrom}
+            to={dateTo}
+            onFromChange={setDateFrom}
+            onToChange={setDateTo}
+            language={language}
+          />
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="h-8 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] dark:text-white"
+          >
+            <option value="ALL">{language === 'MM' ? 'အမျိုးအစားအားလုံး' : 'All Types'}</option>
+            <option value="INCOME">{language === 'MM' ? 'အခြားဝင်ငွေ' : 'Other Income'}</option>
+            <option value="EXPENSE">{language === 'MM' ? 'အခြားထွက်ငွေ' : 'Other Expense'}</option>
+          </select>
+        </div>
 
-        <span className="text-gray-400 ml-auto">
+        <span className="text-gray-400 self-end pb-2">
           {filteredLedger.length} {language === 'MM' ? 'စောင် တွေ့ရှိ' : 'records'}
         </span>
       </div>
@@ -326,7 +359,7 @@ export const LedgerView: React.FC = () => {
         language={language}
         searchable
         searchPlaceholder={language === 'MM' ? 'ဖော်ပြချက် / ကိုးကား ရှာရန်…' : 'Search description / reference…'}
-        resetDeps={[filterType, filterCategory]}
+        resetDeps={[filterType, filterCategory, dateFrom, dateTo]}
         emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No ledger entries'}
         rowClassName={(e) => ledgerTypeRowClass(e.type)}
       />
@@ -343,8 +376,8 @@ export const LedgerView: React.FC = () => {
                       ? 'စာရင်း ပြင်ဆင်ရန်'
                       : 'Edit Entry'
                     : language === 'MM'
-                      ? 'ဝင်ငွေ / ထွက်ငွေ အသစ်'
-                      : 'Add Income / Expense'}
+                      ? 'အခြားဝင်ငွေ / ထွက်ငွေ အသစ်'
+                      : 'Add Other Income / Expense'}
                 </span>
               </h3>
               <button type="button" onClick={closeModal} className="p-1 rounded text-gray-400">
@@ -366,7 +399,7 @@ export const LedgerView: React.FC = () => {
                       : 'border-gray-300 text-gray-700 dark:text-gray-300'
                   }`}
                 >
-                  {language === 'MM' ? 'ဝင်ငွေ (Income)' : 'Income'}
+                  {language === 'MM' ? 'အခြားဝင်ငွေ' : 'Other Income'}
                 </button>
                 <button
                   type="button"
@@ -380,7 +413,7 @@ export const LedgerView: React.FC = () => {
                       : 'border-gray-300 text-gray-700 dark:text-gray-300'
                   }`}
                 >
-                  {language === 'MM' ? 'ထွက်ငွေ (Expense)' : 'Expense'}
+                  {language === 'MM' ? 'အခြားထွက်ငွေ' : 'Other Expense'}
                 </button>
               </div>
 

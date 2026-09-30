@@ -391,6 +391,11 @@ export const shopController = {
     res.json({ success: true, data: await shopService.reportFinancial(from, to) });
   }),
 
+  reportSalesPerformance: asyncHandler(async (req, res) => {
+    const month = req.query.month != null ? String(req.query.month) : undefined;
+    res.json({ success: true, data: await shopService.reportSalesPerformance(month) });
+  }),
+
   getSettings: asyncHandler(async (_req, res) => {
     res.json({ success: true, data: await shopService.getShopSettings() });
   }),

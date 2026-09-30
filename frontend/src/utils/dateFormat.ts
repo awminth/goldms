@@ -30,6 +30,37 @@ export function formatDateTime(value?: string | Date | null): string {
   return `${formatDate(d)} ${hh}:${mi}`;
 }
 
+/** Calendar-day difference: today − date (local). */
+export function calendarDaysSince(value?: string | Date | null): number | null {
+  if (value == null || value === '') return null;
+  let y: number;
+  let m: number;
+  let d: number;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    y = value.getFullYear();
+    m = value.getMonth() + 1;
+    d = value.getDate();
+  } else {
+    const s = String(value).trim();
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!iso) {
+      const parsed = new Date(s);
+      if (Number.isNaN(parsed.getTime())) return null;
+      y = parsed.getFullYear();
+      m = parsed.getMonth() + 1;
+      d = parsed.getDate();
+    } else {
+      y = Number(iso[1]);
+      m = Number(iso[2]);
+      d = Number(iso[3]);
+    }
+  }
+  const start = new Date(y, m - 1, d);
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
 /** Today as ISO yyyy-mm-dd for APIs / date inputs. */
 export function todayISO(): string {
   const d = new Date();
@@ -37,6 +68,27 @@ export function todayISO(): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Inclusive from/to filter on ISO or datetime strings (compares yyyy-mm-dd). */
+export function inDateRange(
+  value: string | Date | null | undefined,
+  from: string,
+  to: string
+): boolean {
+  let d = '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const yyyy = value.getFullYear();
+    const mm = String(value.getMonth() + 1).padStart(2, '0');
+    const dd = String(value.getDate()).padStart(2, '0');
+    d = `${yyyy}-${mm}-${dd}`;
+  } else if (typeof value === 'string') {
+    d = String(value).trim().slice(0, 10);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
 }
 
 /** Parse dd/mm/yyyy, dd-mm-yyyy, or yyyy-mm-dd → ISO yyyy-mm-dd (or '' if invalid). */

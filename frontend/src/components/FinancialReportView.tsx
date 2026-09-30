@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import { api, type FinancialReport } from '../services/api';
 import { formatMMK } from '../utils/goldCalculations';
-import { formatDate } from '../utils/dateFormat';
-import { DateInput } from './DateInput';
+import { formatDate, todayISO } from '../utils/dateFormat';
+import { DateRangeFilter } from './DateRangeFilter';
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -103,10 +103,6 @@ const CARD_DEFS: CardDef[] = [
   },
 ];
 
-function monthStart(iso = new Date().toISOString().slice(0, 10)) {
-  return `${iso.slice(0, 7)}-01`;
-}
-
 function ledgerTypeRowClass(type: string | undefined | null): string {
   switch (String(type || '').toUpperCase()) {
     case 'INCOME':
@@ -132,8 +128,8 @@ type SelectedCard = {
 
 export const FinancialReportView: React.FC = () => {
   const { language } = useGoldShop();
-  const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(monthStart(today));
+  const today = todayISO();
+  const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -337,30 +333,17 @@ export const FinancialReportView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-end gap-2">
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 mb-0.5">
-              {language === 'MM' ? 'မှ' : 'From'}
-            </label>
-            <DateInput
-              value={from}
-              onChange={setFrom}
-              className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 mb-0.5">
-              {language === 'MM' ? 'ထိ' : 'To'}
-            </label>
-            <DateInput
-              value={to}
-              onChange={setTo}
-              className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-            />
-          </div>
+          <DateRangeFilter
+            from={from}
+            to={to}
+            onFromChange={setFrom}
+            onToChange={setTo}
+            language={language}
+          />
           <button
             type="button"
             onClick={() => void load()}
-            className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-bold flex items-center gap-1.5"
+            className="h-8 px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-bold inline-flex items-center gap-1.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             {language === 'MM' ? 'ပြန်တင်' : 'Refresh'}
@@ -369,7 +352,7 @@ export const FinancialReportView: React.FC = () => {
             language={language}
             onClick={exportDetail}
             disabled={(selected ? detailRows : entries).length === 0}
-            className="!py-2 !rounded-xl"
+            className="!h-8 !py-0 !rounded-lg"
           />
         </div>
       </div>

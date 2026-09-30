@@ -94,7 +94,14 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
     const craftMmk =
       Number(item.craftsmanship_fee || 0) + Number(item.craftsmanship_profit_fee || 0);
     const stoneMmk = Number(item.stone_price || 0) + Number(item.stone_profit_price || 0);
-    const craftBaht = Math.round(mmkToBaht(craftMmk, bahtBuyRate) || 0);
+    const craftBahtStored =
+      Number(item.craftsmanship_fee_baht || 0) +
+      Number(item.craftsmanship_profit_fee_baht || 0);
+    const itemRate =
+      Number(item.baht_mmk_rate) > 0 ? Number(item.baht_mmk_rate) : bahtBuyRate;
+    const craftBaht = Math.round(
+      craftBahtStored > 0 ? craftBahtStored : mmkToBaht(craftMmk, itemRate) || 0
+    );
 
     const thaiG =
       Number(item.thai_weight_unit || 0) > 0

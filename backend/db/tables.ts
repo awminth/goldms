@@ -69,6 +69,11 @@ export const TABLE_STATEMENTS: string[] = [
     stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     stone_profit_price DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     selling_price_estimated DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    craftsmanship_fee_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    craftsmanship_profit_fee_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    selling_price_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    baht_mmk_rate DECIMAL(15,4) NULL,
+    thai_gold_baht_snapshot DECIMAL(15,2) NULL,
     status ENUM('IN_STOCK', 'SOLD', 'RESERVED', 'UNDER_PAWN', 'SHOP_OUT', 'WITH_GOLDSMITH') NOT NULL DEFAULT 'IN_STOCK',
     image_url VARCHAR(500) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -278,6 +283,7 @@ export const TABLE_STATEMENTS: string[] = [
     description TEXT NOT NULL,
     reference_no VARCHAR(100) NULL,
     date DATE NOT NULL,
+    entry_source VARCHAR(20) NOT NULL DEFAULT 'SYSTEM',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_ledger_type_date (type, date)
@@ -466,6 +472,11 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addInv('stone_price', 'stone_price DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee');
     await addInv('craftsmanship_profit_fee', 'craftsmanship_profit_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee');
     await addInv('stone_profit_price', 'stone_profit_price DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER stone_price');
+    await addInv('craftsmanship_fee_baht', 'craftsmanship_fee_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER selling_price_estimated');
+    await addInv('craftsmanship_profit_fee_baht', 'craftsmanship_profit_fee_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_fee_baht');
+    await addInv('selling_price_baht', 'selling_price_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER craftsmanship_profit_fee_baht');
+    await addInv('baht_mmk_rate', 'baht_mmk_rate DECIMAL(15,4) NULL AFTER selling_price_baht');
+    await addInv('thai_gold_baht_snapshot', 'thai_gold_baht_snapshot DECIMAL(15,2) NULL AFTER baht_mmk_rate');
   }
 
   // 5. transactions
@@ -520,6 +531,26 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
   const custNames = getCols('customers');
   if (custNames.size > 0 && !custNames.has('nrc')) {
     await pool.query(`ALTER TABLE customers ADD COLUMN nrc VARCHAR(100) NULL AFTER phone`);
+  }
+
+  // 10. financial_ledger.entry_source — MANUAL (Other Income/Expense UI) vs SYSTEM (auto)
+  const ledNames = getCols('financial_ledger');
+  if (ledNames.size > 0 && !ledNames.has('entry_source')) {
+    await pool.query(
+      `ALTER TABLE financial_ledger ADD COLUMN entry_source VARCHAR(20) NOT NULL DEFAULT 'SYSTEM' AFTER date`
+    );
+    // Heuristic: categories only used from the manual ledger form → MANUAL
+    await pool.query(
+      `UPDATE financial_ledger SET entry_source = 'MANUAL'
+       WHERE category IN (
+         'MELTING_PROFIT', 'OTHER_INCOME', 'STAFF_SALARY', 'SHOP_RENT', 'RENT',
+         'UTILITIES', 'EQUIPMENT_ACID', 'TAX', 'OTHER_EXPENSE'
+       )
+       AND NOT (
+         category = 'OTHER_EXPENSE'
+         AND description LIKE 'ပေါင်နှံပစ္စည်း ချေးငွေ%'
+       )`
+    );
   }
 }
 

@@ -14,7 +14,8 @@ import {
   THAI_GRAM_PRESETS,
   calculateThaiGoldPrice,
   bahtToMmk,
-  mmkToBaht,
+  mmkToBahtFromSell,
+  resolveBahtMmkRate,
 } from '../utils/goldCalculations';
 
 export type InventoryFormCategory = {
@@ -52,6 +53,11 @@ export type InventoryItemPayload = {
   stone_price: number;
   stone_profit_price: number;
   selling_price_estimated: number;
+  craftsmanship_fee_baht?: number;
+  craftsmanship_profit_fee_baht?: number;
+  selling_price_baht?: number;
+  baht_mmk_rate?: number;
+  thai_gold_baht_snapshot?: number;
   status: InventoryItem['status'];
 };
 
@@ -67,6 +73,7 @@ type GoldPrice = { gold_type: string; price_per_kyat: number };
 
 type ShopSettingsLike = {
   kyat_to_grams?: number;
+  baht_mmk_rate?: number;
   baht_to_mmk_buy?: number;
   baht_to_mmk_sell?: number;
   thai_gold_baht?: number;
@@ -86,7 +93,7 @@ export function useInventoryItemForm({
   shopSettings,
 }: UseInventoryItemFormOpts) {
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
-  const sellRate = shopSettings?.baht_to_mmk_sell || 765;
+  const bahtMmkRate = resolveBahtMmkRate(shopSettings);
   const thaiBahtRate = shopSettings?.thai_gold_baht || 65000;
 
   const [formBarcode, setFormBarcode] = useState('');
@@ -311,16 +318,30 @@ export function useInventoryItemForm({
     setShowCustomThaiGram(!THAI_GRAM_PRESETS.includes(thaiG as (typeof THAI_GRAM_PRESETS)[number]));
     const isThaiItem = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
     if (isThaiItem) {
-      const buy = shopSettings?.baht_to_mmk_buy || 755;
-      setFormCraftsmanship(Math.round(mmkToBaht(item.craftsmanship_fee || 0, buy)) || 0);
-      setFormCraftProfit(Math.round(mmkToBaht(item.craftsmanship_profit_fee || 0, buy)) || 0);
+      // Prefer frozen Baht fields from stock-in; else reverse with item/current rate
+      const rate =
+        Number(item.baht_mmk_rate) > 0
+          ? Number(item.baht_mmk_rate)
+          : bahtMmkRate;
+      const craftBaht = Number(item.craftsmanship_fee_baht);
+      const craftProfitBaht = Number(item.craftsmanship_profit_fee_baht);
+      setFormCraftsmanship(
+        craftBaht > 0
+          ? Math.round(craftBaht)
+          : Math.round(mmkToBahtFromSell(Number(item.craftsmanship_fee || 0), rate))
+      );
+      setFormCraftProfit(
+        craftProfitBaht > 0
+          ? Math.round(craftProfitBaht)
+          : Math.round(mmkToBahtFromSell(Number(item.craftsmanship_profit_fee || 0), rate))
+      );
       setFormStonePrice(0);
       setFormStoneProfit(0);
     } else {
-      setFormCraftsmanship(item.craftsmanship_fee);
-      setFormCraftProfit(item.craftsmanship_profit_fee || 0);
-      setFormStonePrice(item.stone_price || 0);
-      setFormStoneProfit(item.stone_profit_price || 0);
+      setFormCraftsmanship(Number(item.craftsmanship_fee || 0));
+      setFormCraftProfit(Number(item.craftsmanship_profit_fee || 0));
+      setFormStonePrice(Number(item.stone_price || 0));
+      setFormStoneProfit(Number(item.stone_profit_price || 0));
     }
   };
 
@@ -352,7 +373,7 @@ export function useInventoryItemForm({
     : null;
 
   const estimatedTotalSelling = isThaiEntry
-    ? Math.round(bahtToMmk(thaiBahtBreakdown!.totalPrice, sellRate))
+    ? Math.round(bahtToMmk(thaiBahtBreakdown!.totalPrice, bahtMmkRate))
     : estimateSellingPrice({
         purity: formPurity,
         itemType: formItemType,
@@ -377,14 +398,17 @@ export function useInventoryItemForm({
     `${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿`;
 
   const buildPayload = (status: InventoryItem['status'] = 'IN_STOCK'): InventoryItemPayload => {
+    const craftBaht = isThaiEntry ? Number(formCraftsmanship || 0) : 0;
+    const craftProfitBaht = isThaiEntry ? Number(formCraftProfit || 0) : 0;
+    const sellBaht = isThaiEntry ? Number(thaiBahtBreakdown!.totalPrice || 0) : 0;
     const craftMmk = isThaiEntry
-      ? Math.round(bahtToMmk(Number(formCraftsmanship || 0), sellRate))
+      ? Math.round(bahtToMmk(craftBaht, bahtMmkRate))
       : Number(formCraftsmanship || 0);
     const craftProfitMmk = isThaiEntry
-      ? Math.round(bahtToMmk(Number(formCraftProfit || 0), sellRate))
+      ? Math.round(bahtToMmk(craftProfitBaht, bahtMmkRate))
       : Number(formCraftProfit || 0);
     const sellMmk = isThaiEntry
-      ? Math.round(bahtToMmk(thaiBahtBreakdown!.totalPrice, sellRate))
+      ? Math.round(bahtToMmk(sellBaht, bahtMmkRate))
       : estimatedTotalSelling;
 
     return {
@@ -415,6 +439,11 @@ export function useInventoryItemForm({
       stone_price: isThaiEntry ? 0 : Number(formStonePrice || 0),
       stone_profit_price: isThaiEntry ? 0 : Number(formStoneProfit || 0),
       selling_price_estimated: sellMmk,
+      craftsmanship_fee_baht: isThaiEntry ? craftBaht : 0,
+      craftsmanship_profit_fee_baht: isThaiEntry ? craftProfitBaht : 0,
+      selling_price_baht: isThaiEntry ? sellBaht : 0,
+      baht_mmk_rate: isThaiEntry ? bahtMmkRate : undefined,
+      thai_gold_baht_snapshot: isThaiEntry ? thaiBahtRate : undefined,
       status,
     };
   };

@@ -16,6 +16,7 @@ import { OrdersView } from './components/OrdersView';
 import { PawnView } from './components/PawnView';
 import { LedgerView } from './components/LedgerView';
 import { FinancialReportView } from './components/FinancialReportView';
+import { SalesPerformanceReportView } from './components/SalesPerformanceReportView';
 import { SetupView } from './components/SetupView';
 import { VoucherModal } from './components/VoucherModal';
 import { ShieldCheck, Loader2 } from 'lucide-react';
@@ -51,6 +52,7 @@ const ALL_TABS: ActiveTab[] = [
   'pawn-redeem-new',
   'ledger',
   'financial-report',
+  'sales-performance',
   'customers',
   'users',
   'permissions',
@@ -339,6 +341,9 @@ const MainLayout: React.FC = () => {
           )}
           {activeTab === 'ledger' && can('ledger', 'read') && <LedgerView />}
           {activeTab === 'financial-report' && can('reports', 'read') && <FinancialReportView />}
+          {activeTab === 'sales-performance' && can('reports', 'read') && (
+            <SalesPerformanceReportView />
+          )}
           {activeTab === 'customers' && can('customers', 'read') && (
             <SetupView section="settings" initialTab="customers" />
           )}

@@ -459,7 +459,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         });
       const lastPaid = prevPays[0]?.payment_date || '';
       setFormLastInterestPaid(lastPaid);
-      const periodBase = lastPaid || r.start_date;
+      // Period starts from last interest covered date (or start), not payment-entry date
+      const periodBase = r.last_interest_date || r.start_date;
       const days = daysBetween(periodBase, today);
       const months = Math.max(1, Math.round(days / 30) || 1);
       setFormMonths(months);
@@ -476,7 +477,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         });
       const lastPaid = prevPays[0]?.payment_date || '';
       setFormLastInterestPaid(lastPaid);
-      const periodBase = lastPaid || r.start_date;
+      const periodBase = r.last_interest_date || r.start_date;
       const daysTotal = daysBetween(periodBase, today);
       const months = Math.floor(daysTotal / 30);
       const days = daysTotal % 30;
@@ -900,7 +901,11 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
 
       if (editId) {
         await updatePawnRecord(editId, payload);
-        setMsg(language === 'MM' ? 'ပြင်ဆင်ပြီးပါပြီ' : 'Updated');
+        await dialog.alert({
+          title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+          message: language === 'MM' ? 'ပြင်ဆင်ပြီးပါပြီ' : 'Updated',
+          variant: 'success',
+        });
       } else {
         const ticketNo = `PWN-${formStart.replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
         await addPawnRecord({
@@ -926,12 +931,21 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           accrued_interest: calcInterest(principal, formRate, 1),
           notes: formNotes,
         });
-        setMsg(language === 'MM' ? 'အပေါင် သိမ်းပြီးပါပြီ' : 'Pawn saved');
+        resetCreateForm();
+        await dialog.alert({
+          title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+          message: language === 'MM' ? 'အပေါင် သိမ်းပြီးပါပြီ' : 'Pawn saved',
+          variant: 'success',
+        });
       }
       onClearEdit?.();
       onNavigate('pawn');
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Save failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Save failed',
+        variant: 'error',
+      });
     } finally {
       setSaving(false);
     }
@@ -940,7 +954,10 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const handlePayInterest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedId) {
-      setMsg(language === 'MM' ? 'စာရင်းမှ တစ်ခုရွေးပါ' : 'Select a pawn first');
+      await dialog.alert({
+        title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
+        message: language === 'MM' ? 'စာရင်းမှ တစ်ခုရွေးပါ' : 'Select a pawn first',
+      });
       return;
     }
     setSaving(true);
@@ -955,9 +972,19 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         interest_rate: Number(formRate || 5),
         notes: formNotes,
       });
+      resetCreateForm();
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အတိုး သိမ်းပြီးပါပြီ' : 'Interest saved',
+        variant: 'success',
+      });
       onNavigate('pawn-interest');
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Failed',
+        variant: 'error',
+      });
     } finally {
       setSaving(false);
     }
@@ -966,7 +993,10 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const handleRedeem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedId) {
-      setMsg(language === 'MM' ? 'စာရင်းမှ တစ်ခုရွေးပါ' : 'Select a pawn first');
+      await dialog.alert({
+        title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
+        message: language === 'MM' ? 'စာရင်းမှ တစ်ခုရွေးပါ' : 'Select a pawn first',
+      });
       return;
     }
     setSaving(true);
@@ -984,9 +1014,19 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         redeem_total_baht: loanIsBaht ? redeemTotalBaht : 0,
         notes: formNotes,
       });
+      resetCreateForm();
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အရွေး သိမ်းပြီးပါပြီ' : 'Redeem saved',
+        variant: 'success',
+      });
       onNavigate('pawn-redeem');
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Failed',
+        variant: 'error',
+      });
     } finally {
       setSaving(false);
     }
@@ -1003,8 +1043,17 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     if (!ok) return;
     try {
       await deletePawnRecord(id);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အပေါင် ဖျက်ပြီးပါပြီ' : 'Pawn deleted',
+        variant: 'success',
+      });
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Delete failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Delete failed',
+        variant: 'error',
+      });
     }
   };
 
@@ -1022,8 +1071,17 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     if (!ok) return;
     try {
       await deletePawnInterestPayment(id);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အတိုးစာရင်း ဖျက်ပြီးပါပြီ' : 'Interest deleted',
+        variant: 'success',
+      });
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Delete failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Delete failed',
+        variant: 'error',
+      });
     }
   };
 
@@ -1042,9 +1100,17 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     try {
       await deletePawnRedeem(id);
       setDetailView(null);
-      setMsg(language === 'MM' ? 'အရွေးဖျက်ပြီးပါပြီ' : 'Redeem deleted');
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အရွေးဖျက်ပြီးပါပြီ' : 'Redeem deleted',
+        variant: 'success',
+      });
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Delete failed');
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Delete failed',
+        variant: 'error',
+      });
     }
   };
 

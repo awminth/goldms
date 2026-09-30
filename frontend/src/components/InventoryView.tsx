@@ -25,7 +25,8 @@ import {
   THAI_GRAM_PRESETS,
   calculateThaiGoldPrice,
   bahtToMmk,
-  mmkToBaht,
+  mmkToBahtFromSell,
+  resolveBahtMmkRate,
 } from '../utils/goldCalculations';
 import {
   Plus,
@@ -165,8 +166,8 @@ export const InventoryView: React.FC = () => {
 
 
   // Weight tracking: Gross / Gemstone / Wastage (Myanmar) or Thai grams
-  const [formGrossGrams, setFormGrossGrams] = useState<number>(KYAT_TO_GRAMS);
-  const [formGrossKyat, setFormGrossKyat] = useState<number>(1);
+  const [formGrossGrams, setFormGrossGrams] = useState<number>(0);
+  const [formGrossKyat, setFormGrossKyat] = useState<number>(0);
   const [formGrossPae, setFormGrossPae] = useState<number>(0);
   const [formGrossYway, setFormGrossYway] = useState<number>(0);
   const [formGemGrams, setFormGemGrams] = useState<number>(0);
@@ -179,9 +180,9 @@ export const InventoryView: React.FC = () => {
   const [formProfitDedGrams, setFormProfitDedGrams] = useState<number>(0);
   const [formProfitDedPae, setFormProfitDedPae] = useState<number>(0);
   const [formProfitDedYway, setFormProfitDedYway] = useState<number>(0);
-  const [formThaiGrams, setFormThaiGrams] = useState<number>(15.2);
+  const [formThaiGrams, setFormThaiGrams] = useState<number>(0);
   const [showCustomThaiGram, setShowCustomThaiGram] = useState(false);
-  const [formCraftsmanship, setFormCraftsmanship] = useState<number>(80000);
+  const [formCraftsmanship, setFormCraftsmanship] = useState<number>(0);
   const [formCraftProfit, setFormCraftProfit] = useState<number>(0);
   const [formStonePrice, setFormStonePrice] = useState<number>(0);
   const [formStoneProfit, setFormStoneProfit] = useState<number>(0);
@@ -210,8 +211,9 @@ export const InventoryView: React.FC = () => {
         ];
 
   const categoryGroups = ['PRODUCT', 'GOLD_CLASS', 'OTHER'] as const;
-  // Open modal for new item (Myanmar or Thai)
-  const openNewItemModal = (kind: 'MYANMAR' | 'THAI' = 'MYANMAR') => {
+
+  /** Empty defaults for new Myanmar / Thai item (no sample fees or weights). */
+  const resetNewItemForm = (kind: 'MYANMAR' | 'THAI' = 'MYANMAR') => {
     setEditingItemId(null);
     setFormBarcode(generateBarcode());
     setFormName('');
@@ -220,21 +222,19 @@ export const InventoryView: React.FC = () => {
     if (kind === 'THAI') {
       setFormItemType('THAI_GOLD');
       setFormPurity('THAI_GOLD');
-      setFormThaiGrams(15.2);
+      setFormThaiGrams(0);
       setShowCustomThaiGram(false);
-      const thai = calculateThaiGoldPrice(15.2, 1, 0);
-      setFormGrossKyat(thai.weightKpy.kyat);
-      setFormGrossPae(thai.weightKpy.pae);
-      setFormGrossYway(thai.weightKpy.yway);
-      setFormGrossGrams(15.2);
+      setFormGrossKyat(0);
+      setFormGrossPae(0);
+      setFormGrossYway(0);
+      setFormGrossGrams(0);
     } else {
       setFormItemType('MYANMAR_GOLD');
       setFormPurity('MEELIN');
-      setFormThaiGrams(15.2);
+      setFormThaiGrams(0);
       setShowCustomThaiGram(false);
-      const defaultGrams = kpyToGrams({ kyat: 1, pae: 0, yway: 0 }, kyatToGrams);
-      setFormGrossGrams(defaultGrams);
-      setFormGrossKyat(1);
+      setFormGrossGrams(0);
+      setFormGrossKyat(0);
       setFormGrossPae(0);
       setFormGrossYway(0);
     }
@@ -248,10 +248,15 @@ export const InventoryView: React.FC = () => {
     setFormProfitDedGrams(0);
     setFormProfitDedPae(0);
     setFormProfitDedYway(0);
-    setFormCraftsmanship(kind === 'THAI' ? 500 : 80000);
-    setFormCraftProfit(kind === 'THAI' ? 200 : 0);
+    setFormCraftsmanship(0);
+    setFormCraftProfit(0);
     setFormStonePrice(0);
     setFormStoneProfit(0);
+  };
+
+  // Open modal for new item (Myanmar or Thai)
+  const openNewItemModal = (kind: 'MYANMAR' | 'THAI' = 'MYANMAR') => {
+    resetNewItemForm(kind);
     setIsModalOpen(true);
   };
 
@@ -304,16 +309,29 @@ export const InventoryView: React.FC = () => {
     setShowCustomThaiGram(!THAI_GRAM_PRESETS.includes(thaiG as (typeof THAI_GRAM_PRESETS)[number]));
     const isThaiItem = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
     if (isThaiItem) {
-      const buy = shopSettings?.baht_to_mmk_buy || 755;
-      setFormCraftsmanship(Math.round(mmkToBaht(item.craftsmanship_fee || 0, buy)) || 0);
-      setFormCraftProfit(Math.round(mmkToBaht(item.craftsmanship_profit_fee || 0, buy)) || 0);
+      const rate =
+        Number(item.baht_mmk_rate) > 0
+          ? Number(item.baht_mmk_rate)
+          : resolveBahtMmkRate(shopSettings);
+      const craftBaht = Number(item.craftsmanship_fee_baht);
+      const craftProfitBaht = Number(item.craftsmanship_profit_fee_baht);
+      setFormCraftsmanship(
+        craftBaht > 0
+          ? Math.round(craftBaht)
+          : Math.round(mmkToBahtFromSell(Number(item.craftsmanship_fee || 0), rate))
+      );
+      setFormCraftProfit(
+        craftProfitBaht > 0
+          ? Math.round(craftProfitBaht)
+          : Math.round(mmkToBahtFromSell(Number(item.craftsmanship_profit_fee || 0), rate))
+      );
       setFormStonePrice(0);
       setFormStoneProfit(0);
     } else {
-      setFormCraftsmanship(item.craftsmanship_fee);
-      setFormCraftProfit(item.craftsmanship_profit_fee || 0);
-      setFormStonePrice(item.stone_price || 0);
-      setFormStoneProfit(item.stone_profit_price || 0);
+      setFormCraftsmanship(Number(item.craftsmanship_fee || 0));
+      setFormCraftProfit(Number(item.craftsmanship_profit_fee || 0));
+      setFormStonePrice(Number(item.stone_price || 0));
+      setFormStoneProfit(Number(item.stone_profit_price || 0));
     }
     setIsModalOpen(true);
   };
@@ -415,7 +433,7 @@ export const InventoryView: React.FC = () => {
   // Compute estimated selling price (Myanmar MMK; Thai entry uses Baht then converts on save)
   const pure16Price = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
   const specificPurityPrice = goldPrices.find((p) => p.gold_type === formPurity)?.price_per_kyat;
-  const sellRate = shopSettings?.baht_to_mmk_sell || 765;
+  const sellRate = resolveBahtMmkRate(shopSettings);
   const thaiBahtRate = shopSettings?.thai_gold_baht || 65000;
 
   const thaiCraftTotalBaht = Number(formCraftsmanship || 0) + Number(formCraftProfit || 0);
@@ -445,16 +463,27 @@ export const InventoryView: React.FC = () => {
   // Save item
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Flush NumberInput text → parent state before reading craft fees
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    await new Promise<void>((resolve) => {
+      window.setTimeout(() => resolve(), 0);
+    });
+
     if (!formName && !formNameMM) return;
 
+    const craftBaht = isThaiEntry ? Number(formCraftsmanship || 0) : 0;
+    const craftProfitBaht = isThaiEntry ? Number(formCraftProfit || 0) : 0;
+    const sellBaht = isThaiEntry ? Number(thaiBahtBreakdown!.totalPrice || 0) : 0;
     const craftMmk = isThaiEntry
-      ? Math.round(bahtToMmk(Number(formCraftsmanship || 0), sellRate))
-      : Number(formCraftsmanship || 0);
+      ? Math.round(bahtToMmk(craftBaht, sellRate))
+      : Math.round(Number(formCraftsmanship || 0));
     const craftProfitMmk = isThaiEntry
-      ? Math.round(bahtToMmk(Number(formCraftProfit || 0), sellRate))
-      : Number(formCraftProfit || 0);
+      ? Math.round(bahtToMmk(craftProfitBaht, sellRate))
+      : Math.round(Number(formCraftProfit || 0));
     const sellMmk = isThaiEntry
-      ? Math.round(bahtToMmk(thaiBahtBreakdown!.totalPrice, sellRate))
+      ? Math.round(bahtToMmk(sellBaht, sellRate))
       : estimatedTotalSelling;
 
     const itemPayload = {
@@ -485,18 +514,45 @@ export const InventoryView: React.FC = () => {
       stone_price: isThaiEntry ? 0 : Number(formStonePrice || 0),
       stone_profit_price: isThaiEntry ? 0 : Number(formStoneProfit || 0),
       selling_price_estimated: sellMmk,
+      craftsmanship_fee_baht: isThaiEntry ? craftBaht : 0,
+      craftsmanship_profit_fee_baht: isThaiEntry ? craftProfitBaht : 0,
+      selling_price_baht: isThaiEntry ? sellBaht : 0,
+      baht_mmk_rate: isThaiEntry ? sellRate : undefined,
+      thai_gold_baht_snapshot: isThaiEntry ? thaiBahtRate : undefined,
       status: (editingItemId
         ? inventory.find((i) => i.id === editingItemId)?.status || 'IN_STOCK'
         : 'IN_STOCK') as InventoryItem['status'],
     };
 
-    if (editingItemId) {
-      await updateInventoryItem(editingItemId, itemPayload);
-    } else {
-      await addInventoryItem(itemPayload);
+    const wasEdit = Boolean(editingItemId);
+    const savedId = editingItemId;
+    const entryKind: 'MYANMAR' | 'THAI' = isThaiEntry ? 'THAI' : 'MYANMAR';
+    try {
+      if (savedId) {
+        await updateInventoryItem(savedId, itemPayload);
+      } else {
+        await addInventoryItem(itemPayload);
+      }
+      setIsModalOpen(false);
+      resetNewItemForm(entryKind);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: wasEdit
+          ? language === 'MM'
+            ? 'ပစ္စည်း ပြင်ဆင်ပြီးပါပြီ'
+            : 'Item updated'
+          : language === 'MM'
+            ? 'ပစ္စည်း သိမ်းပြီးပါပြီ'
+            : 'Item saved',
+        variant: 'success',
+      });
+    } catch (err) {
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Save failed',
+        variant: 'error',
+      });
     }
-
-    setIsModalOpen(false);
   };
 
   // Filtered inventory list (units)
@@ -822,6 +878,11 @@ export const InventoryView: React.FC = () => {
                   });
                   if (!ok) return;
                   await deleteInventoryItem(item.id);
+                  await dialog.alert({
+                    title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+                    message: language === 'MM' ? 'ပစ္စည်း ဖျက်ပြီးပါပြီ' : 'Item deleted',
+                    variant: 'success',
+                  });
                 })();
               }}
               className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600"
@@ -1531,7 +1592,7 @@ export const InventoryView: React.FC = () => {
                   ref={barcodePrintRef}
                   item={tagItem}
                   kyatToGrams={kyatToGrams}
-                  bahtBuyRate={shopSettings?.baht_to_mmk_buy || 755}
+                  bahtBuyRate={resolveBahtMmkRate(shopSettings)}
                 />
               </div>
             </div>

@@ -128,6 +128,13 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
 
     if (editingOrderId) {
       await updateCustomOrder(editingOrderId, payload);
+      setIsModalOpen(false);
+      setEditingOrderId(null);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အော်ဒါ ပြင်ဆင်ပြီးပါပြီ' : 'Order updated',
+        variant: 'success',
+      });
     } else {
       const orderNo = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
       await addCustomOrder({
@@ -136,10 +143,14 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
         order_date: new Date().toISOString().slice(0, 10),
         status: 'PENDING',
       });
+      setIsModalOpen(false);
+      setEditingOrderId(null);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အော်ဒါ သိမ်းပြီးပါပြီ' : 'Order saved',
+        variant: 'success',
+      });
     }
-
-    setIsModalOpen(false);
-    setEditingOrderId(null);
   };
 
   const openCreateModal = () => {
@@ -192,10 +203,16 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
     if (!ok) return;
     try {
       await updateOrderStatus(order.id, 'CANCELLED');
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message: language === 'MM' ? 'အော်ဒါ ပယ်ဖျက်ပြီးပါပြီ' : 'Order cancelled',
+        variant: 'success',
+      });
     } catch (e) {
       await dialog.alert({
         title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
         message: e instanceof Error ? e.message : 'Cancel failed',
+        variant: 'error',
       });
     }
   };

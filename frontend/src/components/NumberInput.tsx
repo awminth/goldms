@@ -62,11 +62,12 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         const raw = e.target.value;
         if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) {
           setText(raw);
-          if (raw !== '' && raw !== '-' && raw !== '.' && raw !== '-.') {
+          if (raw === '' || raw === '-' || raw === '.' || raw === '-.') {
+            // Keep parent in sync as 0 while clearing so Save never reads a stale fee
+            onChange(0);
+          } else {
             const n = Number(raw);
             if (Number.isFinite(n)) onChange(n);
-          } else if (!allowEmptyWhileTyping) {
-            onChange(0);
           }
         }
       }}

@@ -175,8 +175,11 @@ function applyBootstrap(
   setters.setRolePermissions(data.rolePermissions || []);
   setters.setShopSettings({
     kyat_to_grams: data.settings?.kyat_to_grams || KYAT_TO_GRAMS,
-    baht_to_mmk_buy: data.settings?.baht_to_mmk_buy || 755,
-    baht_to_mmk_sell: data.settings?.baht_to_mmk_sell || 765,
+    baht_mmk_rate:
+      data.settings?.baht_mmk_rate ||
+      (data.settings?.baht_to_mmk_sell
+        ? 100000 / Number(data.settings.baht_to_mmk_sell)
+        : 100000 / 765),
     thai_gold_baht: data.settings?.thai_gold_baht || 65000,
   });
 }
@@ -220,8 +223,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
   const [shopSettings, setShopSettings] = useState<ShopSettings>({
     kyat_to_grams: KYAT_TO_GRAMS,
-    baht_to_mmk_buy: 755,
-    baht_to_mmk_sell: 765,
+    baht_mmk_rate: 100000 / 765,
     thai_gold_baht: 65000,
   });
   const [loading, setLoading] = useState(true);

@@ -247,13 +247,15 @@
 }
 
 /*
- * Print: paper size comes from the printer dialog (A4, Letter, 80mm thermal, etc.).
- * Do not force A4 — keep layout fluid to the printable area.
+ * Print vouchers: A4 portrait.
+ * Keep original layout proportions — enlarge with zoom (do NOT stretch
+ * signatures to the page bottom with empty gap).
+ * Barcode stickers override @page via react-to-print pageStyle.
  */
 @media print {
   @page {
-    size: auto;
-    margin: 5mm;
+    size: A4 portrait;
+    margin: 8mm;
   }
 
   html,
@@ -309,11 +311,14 @@
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
-    right: 0 !important;
+    right: auto !important;
     display: block !important;
+    /* ~¾ of printable A4 width/content scale; layout stays compact like screen */
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
@@ -325,8 +330,37 @@
     overflow: visible !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-    font-size: 10pt;
-    line-height: 1.35;
+    font-size: 11pt;
+    line-height: 1.4;
+    /* Enlarge whole voucher as one unit (Chrome / Edge print) */
+    zoom: 1.35;
+  }
+
+  #printable-voucher .voucher-print-head,
+  .printable-doc .voucher-print-head {
+    padding: 3mm 4mm !important;
+  }
+
+  #printable-voucher .voucher-print-body,
+  .printable-doc .voucher-print-body {
+    display: block !important;
+    padding: 4mm 5mm 5mm !important;
+  }
+
+  #printable-voucher .voucher-print-main,
+  .printable-doc .voucher-print-main {
+    display: block !important;
+  }
+
+  /* Spacer unused — keep collapsed if present */
+  #printable-voucher .voucher-print-spacer,
+  .printable-doc .voucher-print-spacer {
+    display: none !important;
+  }
+
+  #printable-voucher .voucher-print-foot,
+  .printable-doc .voucher-print-foot {
+    margin-top: 6mm !important;
   }
 
   #printable-voucher *,
@@ -348,25 +382,60 @@
     background: #1a1208 !important;
     color: #f5e6c8 !important;
     border: 1px solid #000 !important;
-    padding: 3px 4px !important;
-    font-size: 8.5pt !important;
+    padding: 4px 5px !important;
+    font-size: 9.5pt !important;
   }
 
   #printable-voucher .voucher-cell {
     border: 1px solid #777 !important;
     background: #fff !important;
-    padding: 2px 3px !important;
-    font-size: 8.5pt !important;
+    padding: 3px 4px !important;
+    font-size: 9.5pt !important;
   }
 
   #printable-voucher table th,
   #printable-voucher table td,
   .printable-doc table th,
   .printable-doc table td {
-    padding: 2px 3px !important;
+    padding: 3px 4px !important;
+    vertical-align: middle !important;
+  }
+
+  /* Only long free-text may wrap (address, notes, terms) */
+  #printable-voucher .voucher-wrap,
+  .printable-doc .voucher-wrap {
+    white-space: normal !important;
     word-break: break-word;
     overflow-wrap: anywhere;
-    white-space: normal !important;
+  }
+
+  /* Labels + money: keep each phrase on one line */
+  #printable-voucher .voucher-money,
+  #printable-voucher .voucher-money *,
+  #printable-voucher .voucher-nowrap,
+  #printable-voucher .voucher-nowrap *,
+  .printable-doc .voucher-money,
+  .printable-doc .voucher-money *,
+  .printable-doc .voucher-nowrap,
+  .printable-doc .voucher-nowrap * {
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+  }
+
+  /* Totals block: size to content so label + MMK stay one row */
+  #printable-voucher .voucher-print-split,
+  .printable-doc .voucher-print-split {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) max-content !important;
+    gap: 4mm !important;
+    align-items: start !important;
+  }
+
+  #printable-voucher .voucher-totals-table,
+  .printable-doc .voucher-totals-table {
+    width: auto !important;
+    min-width: 52mm !important;
   }
 
   /* Drop screen-only width locks that overflow narrow / thermal paper */
@@ -404,20 +473,17 @@
     page-break-inside: avoid;
   }
 
-  /* Prefer fluid 2-col when space allows; always allow shrink */
-  #printable-voucher .voucher-print-split,
-  .printable-doc .voucher-print-split {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) !important;
-    gap: 3mm !important;
-    align-items: start !important;
-  }
-
   /* Narrow / thermal paper: stack sections */
   @media (max-width: 100mm) {
     #printable-voucher .voucher-print-split,
     .printable-doc .voucher-print-split {
       grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    #printable-voucher .voucher-totals-table,
+    .printable-doc .voucher-totals-table {
+      width: 100% !important;
+      min-width: 0 !important;
     }
   }
 }

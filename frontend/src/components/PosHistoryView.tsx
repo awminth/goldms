@@ -3,10 +3,11 @@ import { useGoldShop } from '../context/GoldShopContext';
 import { useDialog } from '../context/DialogContext';
 import { Transaction, TransactionItem } from '../types/gold';
 import { formatKPYMyanmar, formatMMK, kpyToGrams, KYAT_TO_GRAMS } from '../utils/goldCalculations';
-import { formatDateTime } from '../utils/dateFormat';
+import { formatDateTime, inDateRange, todayISO } from '../utils/dateFormat';
 import { DataTable, DataTableColumn } from './DataTable';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
+import { DateRangeFilter } from './DateRangeFilter';
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -62,10 +63,16 @@ export const PosHistoryView: React.FC = () => {
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
   const [tab, setTab] = useState<HistoryTab>('SALE');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState(() => todayISO());
+  const [dateTo, setDateTo] = useState(() => todayISO());
 
   const filtered = useMemo(
-    () => transactions.filter((t) => t.transaction_type === tab),
-    [transactions, tab]
+    () =>
+      transactions.filter(
+        (t) =>
+          t.transaction_type === tab && inDateRange(t.created_at, dateFrom, dateTo)
+      ),
+    [transactions, tab, dateFrom, dateTo]
   );
 
   const tabMeta: {
@@ -120,10 +127,19 @@ export const PosHistoryView: React.FC = () => {
     setBusyId(t.id);
     try {
       await deleteTransaction(t.id);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message:
+          language === 'MM'
+            ? `${t.invoice_no} ဘောင်ချာကို ဖျက်ပြီးပါပြီ`
+            : `Voucher ${t.invoice_no} deleted`,
+        variant: 'success',
+      });
     } catch (err) {
       await dialog.alert({
         title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
         message: err instanceof Error ? err.message : 'Delete failed',
+        variant: 'error',
       });
     } finally {
       setBusyId(null);
@@ -501,7 +517,7 @@ export const PosHistoryView: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-12">
-      <div className="bg-white dark:bg-[#1A1A1A] p-3 sm:p-4 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white dark:bg-[#1A1A1A] p-3 sm:p-4 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div className="flex items-center gap-2">
           <ReceiptText className="w-5 h-5 text-[#D4AF37]" />
           <div>
@@ -515,17 +531,30 @@ export const PosHistoryView: React.FC = () => {
             </p>
           </div>
         </div>
-        <ExcelExportButton
-          language={language}
-          onClick={exportExcel}
-          disabled={filtered.length === 0}
-        />
+        <div className="flex flex-col sm:flex-row sm:items-end gap-2 shrink-0">
+          <DateRangeFilter
+            from={dateFrom}
+            to={dateTo}
+            onFromChange={setDateFrom}
+            onToChange={setDateTo}
+            language={language}
+          />
+          <ExcelExportButton
+            language={language}
+            onClick={exportExcel}
+            disabled={filtered.length === 0}
+            className="!h-8 !py-0"
+          />
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 bg-white dark:bg-[#1A1A1A] p-2 rounded-2xl border border-gray-200 dark:border-gray-800">
         {tabMeta.map((t) => {
           const Icon = t.icon;
-          const count = transactions.filter((x) => x.transaction_type === t.id).length;
+          const count = transactions.filter(
+            (x) =>
+              x.transaction_type === t.id && inDateRange(x.created_at, dateFrom, dateTo)
+          ).length;
           const active = tab === t.id;
           return (
             <button
@@ -570,7 +599,7 @@ export const PosHistoryView: React.FC = () => {
             rowKey={(t) => t.id}
             language={language}
             searchable
-            resetDeps={[tab]}
+            resetDeps={[tab, dateFrom, dateTo]}
             emptyMessage={language === 'MM' ? 'ဤအမျိုးအစားတွင် ဘောင်ချာ မရှိသေးပါ' : 'No vouchers in this tab'}
             searchPlaceholder={
               language === 'MM' ? 'ဘောင်ချာ / ဖောက်သည် ရှာရန်…' : 'Search invoice / customer…'

@@ -51,10 +51,10 @@ function WeightCells({
 }) {
   return (
     <>
-      <td className="voucher-cell text-center font-mono">{fmtUnit(grams, 3)}</td>
-      <td className="voucher-cell text-center font-mono">{fmtUnit(kpy.kyat)}</td>
-      <td className="voucher-cell text-center font-mono">{fmtUnit(kpy.pae)}</td>
-      <td className="voucher-cell text-center font-mono">{fmtUnit(kpy.yway, 1)}</td>
+      <td className="voucher-cell voucher-nowrap text-center font-mono whitespace-nowrap">{fmtUnit(grams, 3)}</td>
+      <td className="voucher-cell voucher-nowrap text-center font-mono whitespace-nowrap">{fmtUnit(kpy.kyat)}</td>
+      <td className="voucher-cell voucher-nowrap text-center font-mono whitespace-nowrap">{fmtUnit(kpy.pae)}</td>
+      <td className="voucher-cell voucher-nowrap text-center font-mono whitespace-nowrap">{fmtUnit(kpy.yway, 1)}</td>
     </>
   );
 }
@@ -124,18 +124,28 @@ function ItemWeightBlock({
   const amountForRow = (kind: RowKind) => {
     if (isThai && kind === 'thai') {
       return (
-        <div className="font-bold text-[12px] font-mono">{formatMMK(item.subtotal)}</div>
+        <div className="voucher-money font-bold text-[12px] font-mono whitespace-nowrap">
+          {formatMMK(item.subtotal)}
+        </div>
       );
     }
     if (kind === 'gold') {
-      return <div className="font-mono font-semibold text-[11px]">{formatMMK(goldPureAmount)}</div>;
+      return (
+        <div className="voucher-money font-mono font-semibold text-[11px] whitespace-nowrap">
+          {formatMMK(goldPureAmount)}
+        </div>
+      );
     }
     if (kind === 'waste') {
-      return <div className="font-mono font-semibold text-[11px]">{formatMMK(wastageValue)}</div>;
+      return (
+        <div className="voucher-money font-mono font-semibold text-[11px] whitespace-nowrap">
+          {formatMMK(wastageValue)}
+        </div>
+      );
     }
     if (kind === 'total') {
       return (
-        <div className="font-bold text-[12px] font-mono text-gray-900">
+        <div className="voucher-money font-bold text-[12px] font-mono text-gray-900 whitespace-nowrap">
           {formatMMK(item.subtotal)}
         </div>
       );
@@ -162,26 +172,28 @@ function ItemWeightBlock({
                 {code || '—'}
               </td>
               <td rowSpan={rows.length} className="voucher-cell align-middle px-2">
-                <div className="font-bold text-[12px] leading-snug text-gray-900">
+                <div className="voucher-nowrap font-bold text-[12px] leading-snug text-gray-900 whitespace-nowrap">
                   {item.item_name}
+                  <span className="font-semibold text-gray-500">
+                    {' '}
+                    · {PURITY_LABELS[item.purity]?.mm || item.purity}
+                    {isThai ? ' · ထိုင်းရွှေ' : ''}
+                  </span>
+                  {isThai && (
+                    <span className="font-mono font-normal text-[#996515]">
+                      {' '}
+                      ({thaiG.toFixed(3)} g)
+                    </span>
+                  )}
                 </div>
-                <div className="text-[10px] text-gray-500 mt-0.5">
-                  {PURITY_LABELS[item.purity]?.mm || item.purity}
-                  {isThai ? ' · ထိုင်းရွှေ' : ''}
-                </div>
-                {isThai && (
-                  <div className="text-[10px] font-mono text-[#996515] mt-0.5">
-                    ({thaiG.toFixed(3)} g)
-                  </div>
-                )}
               </td>
             </>
           )}
-          <td className="voucher-cell text-[10px] text-gray-600 whitespace-nowrap px-1.5">
+          <td className="voucher-cell voucher-nowrap text-[10px] text-gray-600 whitespace-nowrap px-1.5">
             {row.label}
           </td>
           <WeightCells grams={row.grams} kpy={row.kpy} />
-          <td className="voucher-cell text-right align-middle px-1.5 py-1">
+          <td className="voucher-cell voucher-money text-right align-middle px-1.5 py-1 whitespace-nowrap">
             {amountForRow(row.kind)}
           </td>
         </tr>
@@ -198,9 +210,30 @@ export const VoucherModal: React.FC = () => {
     goldPrices,
     shopSettings,
     inventory,
+    customers,
   } = useGoldShop();
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
+
+  const customerExtra = useMemo(() => {
+    if (!selectedVoucher) return { nrc: '', address: '' };
+    const byId = selectedVoucher.customer_id
+      ? customers.find((c) => c.id === selectedVoucher.customer_id)
+      : undefined;
+    if (byId) {
+      return { nrc: byId.nrc || '', address: byId.address || '' };
+    }
+    const phone = String(selectedVoucher.customer_phone || '').trim();
+    const name = String(selectedVoucher.customer_name || '').trim().toLowerCase();
+    const byPhone = phone
+      ? customers.find((c) => String(c.phone || '').trim() === phone)
+      : undefined;
+    if (byPhone) return { nrc: byPhone.nrc || '', address: byPhone.address || '' };
+    const byName = name
+      ? customers.find((c) => String(c.name || '').trim().toLowerCase() === name)
+      : undefined;
+    return { nrc: byName?.nrc || '', address: byName?.address || '' };
+  }, [selectedVoucher, customers]);
 
   const purityDisplay = useMemo(() => {
     if (!selectedVoucher?.items?.length) return '—';
@@ -284,7 +317,7 @@ export const VoucherModal: React.FC = () => {
 
   return (
     <ModalOverlay>
-      <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-[820px] w-full p-4 sm:p-6 shadow-2xl border border-gray-200 dark:border-gray-800 my-4 max-h-[92vh] overflow-y-auto print:max-w-none print:w-full print:p-0 print:m-0 print:max-h-none print:overflow-visible print:shadow-none print:border-0 print:rounded-none print:bg-white">
+      <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-[1100px] w-full p-4 sm:p-7 shadow-2xl border border-gray-200 dark:border-gray-800 my-4 max-h-[94vh] overflow-y-auto print:max-w-none print:w-full print:p-0 print:m-0 print:max-h-none print:overflow-visible print:shadow-none print:border-0 print:rounded-none print:bg-white">
         {/* Top Action Header (Non-printable) */}
         <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 print:hidden">
           <div className="flex items-center space-x-2">
@@ -314,13 +347,13 @@ export const VoucherModal: React.FC = () => {
           </div>
         </div>
 
-        {/* PRINTABLE VOUCHER */}
+        {/* PRINTABLE VOUCHER — print: same layout, larger scale (~¾ A4) */}
         <div
           id="printable-voucher"
-          className="printable-doc mt-3 bg-[#FFFEF9] text-gray-900 border border-[#D4AF37]/50 shadow-inner overflow-hidden print:mt-0 print:border-0 print:shadow-none print:overflow-visible"
+          className="printable-doc voucher-print-sheet mt-3 bg-[#FFFEF9] text-gray-900 border border-[#D4AF37]/50 shadow-inner overflow-hidden print:mt-0 print:border-0 print:shadow-none print:overflow-visible"
         >
           {/* Invoice meta only — no shop name / logo */}
-          <div className="px-5 py-3 border-b border-[#D4AF37]/50 bg-[#FAF3E0]/30 flex items-center justify-between gap-3 text-[11px]">
+          <div className="voucher-print-head px-5 py-3 border-b border-[#D4AF37]/50 bg-[#FAF3E0]/30 flex items-center justify-between gap-3 text-[11px]">
             <span className="font-bold text-gray-800">
               {isSale
                 ? 'အရောင်းဘောင်ချာ'
@@ -333,7 +366,8 @@ export const VoucherModal: React.FC = () => {
             <span className="font-mono font-semibold text-gray-600">{selectedVoucher.invoice_no}</span>
           </div>
 
-          <div className="px-4 sm:px-5 py-4 space-y-3">
+          <div className="voucher-print-body px-4 sm:px-5 py-4">
+            <div className="voucher-print-main space-y-3">
             {isShopOut ? (
               <>
                 <div className="space-y-2 text-[12px]">
@@ -466,23 +500,35 @@ export const VoucherModal: React.FC = () => {
               <>
             {/* Customer + Gold price */}
             <div className="voucher-print-split grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-start">
-              <div className="space-y-2 text-[12px]">
+              <div className="space-y-2 text-[13px]">
                 <div className="flex items-end gap-2">
-                  <span className="shrink-0 font-semibold text-gray-700 w-14">နေ့စွဲ</span>
-                  <span className="flex-1 border-b border-dotted border-gray-400 pb-0.5 font-mono">
+                  <span className="voucher-nowrap shrink-0 font-semibold text-gray-700 w-16 whitespace-nowrap">နေ့စွဲ</span>
+                  <span className="voucher-nowrap flex-1 border-b border-dotted border-gray-400 pb-0.5 font-mono whitespace-nowrap">
                     {dateStr}
                   </span>
                 </div>
                 <div className="flex items-end gap-2">
-                  <span className="shrink-0 font-semibold text-gray-700 w-14">အမည်</span>
-                  <span className="flex-1 border-b border-dotted border-gray-400 pb-0.5 font-bold">
+                  <span className="voucher-nowrap shrink-0 font-semibold text-gray-700 w-16 whitespace-nowrap">အမည်</span>
+                  <span className="voucher-nowrap flex-1 border-b border-dotted border-gray-400 pb-0.5 font-bold whitespace-nowrap">
                     {selectedVoucher.customer_name || '—'}
                   </span>
                 </div>
                 <div className="flex items-end gap-2">
-                  <span className="shrink-0 font-semibold text-gray-700 w-14">ဖုန်း</span>
-                  <span className="flex-1 border-b border-dotted border-gray-400 pb-0.5 font-mono">
+                  <span className="voucher-nowrap shrink-0 font-semibold text-gray-700 w-16 whitespace-nowrap">မှတ်ပုံတင်</span>
+                  <span className="voucher-nowrap flex-1 border-b border-dotted border-gray-400 pb-0.5 font-mono whitespace-nowrap">
+                    {customerExtra.nrc || '—'}
+                  </span>
+                </div>
+                <div className="flex items-end gap-2">
+                  <span className="voucher-nowrap shrink-0 font-semibold text-gray-700 w-16 whitespace-nowrap">ဖုန်း</span>
+                  <span className="voucher-nowrap flex-1 border-b border-dotted border-gray-400 pb-0.5 font-mono whitespace-nowrap">
                     {selectedVoucher.customer_phone || '—'}
+                  </span>
+                </div>
+                <div className="flex items-end gap-2">
+                  <span className="voucher-nowrap shrink-0 font-semibold text-gray-700 w-16 whitespace-nowrap">နေရပ်</span>
+                  <span className="voucher-wrap flex-1 border-b border-dotted border-gray-400 pb-0.5">
+                    {customerExtra.address || '—'}
                   </span>
                 </div>
               </div>
@@ -490,18 +536,18 @@ export const VoucherModal: React.FC = () => {
               <table className="text-[11px] border border-[#D4AF37]/60 border-collapse min-w-[200px] self-start print:min-w-0 print:w-full">
                 <tbody>
                   <tr>
-                    <td className="border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                    <td className="voucher-nowrap border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                       ရွှေရည်
                     </td>
-                    <td className="border border-[#D4AF37]/40 px-2 py-1.5 font-bold text-right text-[#996515]">
+                    <td className="voucher-nowrap border border-[#D4AF37]/40 px-2 py-1.5 font-bold text-right text-[#996515] whitespace-nowrap">
                       {purityDisplay}
                     </td>
                   </tr>
                   <tr>
-                    <td className="border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                    <td className="voucher-nowrap border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                       {goldPriceLabel}
                     </td>
-                    <td className="border border-[#D4AF37]/40 px-2 py-1.5 font-mono font-bold text-right">
+                    <td className="voucher-money border border-[#D4AF37]/40 px-2 py-1.5 font-mono font-bold text-right whitespace-nowrap">
                       {formatMMK(soldGoldPrice)}
                     </td>
                   </tr>
@@ -511,20 +557,20 @@ export const VoucherModal: React.FC = () => {
 
             {/* Main items table */}
             <div className="overflow-x-auto print:overflow-visible">
-              <table className="w-full border-collapse text-[11px] voucher-main-table">
+              <table className="w-full border-collapse text-[12px] voucher-main-table">
                 <thead>
                   <tr className="bg-[#1A1208] text-[#F5E6C8]">
-                    <th className="voucher-th w-8">No.</th>
-                    <th className="voucher-th text-center whitespace-nowrap min-w-[72px] print:min-w-0">
+                    <th className="voucher-th voucher-nowrap w-8 whitespace-nowrap">No.</th>
+                    <th className="voucher-th voucher-nowrap text-center whitespace-nowrap">
                       Item Code
                     </th>
-                    <th className="voucher-th text-left min-w-[100px] print:min-w-0">ပစ္စည်းအမျိုးအစား</th>
-                    <th className="voucher-th text-left whitespace-nowrap">အကြောင်းအရာ</th>
-                    <th className="voucher-th w-14">ဂရမ်</th>
-                    <th className="voucher-th w-12">ကျပ်</th>
-                    <th className="voucher-th w-12">ပဲ</th>
-                    <th className="voucher-th w-12">ရွေး</th>
-                    <th className="voucher-th text-right min-w-[90px] print:min-w-0">သင့်ငွေ</th>
+                    <th className="voucher-th voucher-nowrap text-left whitespace-nowrap">ပစ္စည်းအမျိုးအစား</th>
+                    <th className="voucher-th voucher-nowrap text-left whitespace-nowrap">အကြောင်းအရာ</th>
+                    <th className="voucher-th voucher-nowrap w-14 whitespace-nowrap">ဂရမ်</th>
+                    <th className="voucher-th voucher-nowrap w-12 whitespace-nowrap">ကျပ်</th>
+                    <th className="voucher-th voucher-nowrap w-12 whitespace-nowrap">ပဲ</th>
+                    <th className="voucher-th voucher-nowrap w-12 whitespace-nowrap">ရွေး</th>
+                    <th className="voucher-th voucher-money text-right whitespace-nowrap">သင့်ငွေ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -551,7 +597,7 @@ export const VoucherModal: React.FC = () => {
 
             {/* Bottom: terms + totals */}
             <div className="voucher-print-split grid grid-cols-1 sm:grid-cols-[1.2fr_0.9fr] gap-4 pt-1">
-              <div className="text-[10px] text-gray-600 space-y-2 leading-relaxed">
+              <div className="voucher-wrap text-[10px] text-gray-600 space-y-2 leading-relaxed">
                 <p>
                   * ဈေးနှုန်း၊ အလေးချိန် မှန်ကန်ပါကြောင်း အာမခံသည်။
                 </p>
@@ -567,41 +613,41 @@ export const VoucherModal: React.FC = () => {
                 )}
               </div>
 
-              <table className="w-full text-[11px] border border-[#D4AF37]/50 border-collapse self-start">
+              <table className="voucher-totals-table w-full text-[11px] border border-[#D4AF37]/50 border-collapse self-start">
                 <tbody>
                   {isThaiSale ? (
                     <>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           လက်ခ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
                           {formatMMK(selectedVoucher.craftsmanship_total || 0)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           စုစုပေါင်းကျငွေ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
                           {formatMMK(totalBeforeDiscount)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold text-rose-700">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold text-rose-700 whitespace-nowrap">
                           လျော့ငွေ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-rose-700">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
                           {Number(selectedVoucher.discount_amount || 0) > 0
                             ? `−${formatMMK(selectedVoucher.discount_amount)}`
                             : formatMMK(0)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#1A1208] text-[#F5E6C8] font-bold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#1A1208] text-[#F5E6C8] font-bold whitespace-nowrap">
                           ကျသင့်ငွေ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7]">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7] whitespace-nowrap">
                           {formatMMK(selectedVoucher.total_amount)}
                         </td>
                       </tr>
@@ -609,44 +655,44 @@ export const VoucherModal: React.FC = () => {
                   ) : (
                     <>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           လက်ခ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
                           {formatMMK(selectedVoucher.craftsmanship_total || 0)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           ကျောက်ဖိုး
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
                           {formatMMK(selectedVoucher.stone_total || 0)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           စုစုပေါင်းကျငွေ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
                           {formatMMK(totalBeforeDiscount)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold text-rose-700">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold text-rose-700 whitespace-nowrap">
                           လျော့ငွေ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-rose-700">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
                           {Number(selectedVoucher.discount_amount || 0) > 0
                             ? `−${formatMMK(selectedVoucher.discount_amount)}`
                             : formatMMK(0)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#1A1208] text-[#F5E6C8] font-bold">
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#1A1208] text-[#F5E6C8] font-bold whitespace-nowrap">
                           ကျသင့်ငွေ
                         </td>
-                        <td className="border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7]">
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7] whitespace-nowrap">
                           {formatMMK(selectedVoucher.total_amount)}
                         </td>
                       </tr>
@@ -655,23 +701,25 @@ export const VoucherModal: React.FC = () => {
                 </tbody>
               </table>
             </div>
+              </>
+            )}
+            </div>
 
-            {/* Signatures */}
-            <div className="grid grid-cols-2 gap-4 sm:gap-8 pt-8 pb-2 text-center text-[11px] print:gap-4 print:pt-6">
+            {!isShopOut && (
+            <div className="voucher-print-foot grid grid-cols-2 gap-4 sm:gap-8 pt-8 pb-2 text-center text-[11px] print:gap-6 print:pt-8">
               <div>
-                <div className="h-10 print:h-8" />
+                <div className="h-10 print:h-12" />
                 <div className="border-t border-dotted border-gray-500 mx-2 sm:mx-4 pt-1.5 font-semibold text-gray-800">
                   ဝယ်သူလက်မှတ်
                 </div>
               </div>
               <div>
-                <div className="h-10 print:h-8" />
+                <div className="h-10 print:h-12" />
                 <div className="border-t border-dotted border-gray-500 mx-2 sm:mx-4 pt-1.5 font-semibold text-gray-800">
                   အရောင်းဌာန
                 </div>
               </div>
             </div>
-              </>
             )}
           </div>
         </div>

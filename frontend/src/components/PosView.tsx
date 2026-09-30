@@ -17,7 +17,6 @@ import {
   calculateNetFromParts,
   estimateSellingPrice,
   calculateSaleLineBreakdown,
-  calculateThaiGoldPrice,
   generateInvoiceNo,
   PURITY_LABELS,
   gramsToKpy,
@@ -25,6 +24,7 @@ import {
   KYAT_TO_GRAMS,
   bahtToMmk,
   mmkToBaht,
+  resolveBahtMmkRate,
 } from '../utils/goldCalculations';
 import {
   ReceiptText,
@@ -43,10 +43,13 @@ import {
   LayoutGrid,
   List,
   Check,
+  AlertTriangle,
 } from 'lucide-react';
 import { ModalOverlay } from './ModalOverlay';
 import { NumberInput } from './NumberInput';
 import { CustomerSearchSelect } from './CustomerSearchSelect';
+import { InventorySearchSelect } from './InventorySearchSelect';
+import { formatDate, calendarDaysSince } from '../utils/dateFormat';
 
 type PosMode = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT';
 
@@ -68,17 +71,17 @@ type ThaiLineAmounts = {
 
 function thaiFxRates(shopSettings?: {
   thai_gold_baht?: number;
+  baht_mmk_rate?: number;
   baht_to_mmk_buy?: number;
   baht_to_mmk_sell?: number;
 }) {
   return {
     thaiBahtRate: shopSettings?.thai_gold_baht || 65000,
-    buyRate: shopSettings?.baht_to_mmk_buy || 755,
-    sellRate: shopSettings?.baht_to_mmk_sell || 765,
+    bahtMmkRate: resolveBahtMmkRate(shopSettings),
   };
 }
 
-/** Live Thai line in Baht or MMK using Header FX formula (rate / 100000). */
+/** Thai sale line from inventory frozen Baht/MMK (not live FX). */
 function buildThaiSaleLine(
   inv: Pick<
     InventoryItem,
@@ -87,44 +90,63 @@ function buildThaiSaleLine(
     | 'craftsmanship_profit_fee'
     | 'stone_price'
     | 'stone_profit_price'
+    | 'selling_price_estimated'
+    | 'craftsmanship_fee_baht'
+    | 'craftsmanship_profit_fee_baht'
+    | 'selling_price_baht'
+    | 'baht_mmk_rate'
+    | 'thai_gold_baht_snapshot'
   >,
   currency: ThaiSaleCurrency,
   shopSettings?: {
     thai_gold_baht?: number;
+    baht_mmk_rate?: number;
     baht_to_mmk_buy?: number;
     baht_to_mmk_sell?: number;
   }
 ): ThaiLineAmounts {
-  const { thaiBahtRate, buyRate, sellRate } = thaiFxRates(shopSettings);
-  const grams = Number(inv.thai_weight_unit || 0);
+  const { bahtMmkRate } = thaiFxRates(shopSettings);
+  const itemRate =
+    Number(inv.baht_mmk_rate) > 0 ? Number(inv.baht_mmk_rate) : bahtMmkRate;
+
   const craftMmk =
     Number(inv.craftsmanship_fee || 0) + Number(inv.craftsmanship_profit_fee || 0);
-  // Inventory saved Baht→MMK with sell rate — reverse MMK→Baht uses BUY rate
-  const craftBaht = mmkToBaht(craftMmk, buyRate);
-  const baht = calculateThaiGoldPrice(grams, thaiBahtRate, 0);
+  const craftBahtStored =
+    Number(inv.craftsmanship_fee_baht || 0) +
+    Number(inv.craftsmanship_profit_fee_baht || 0);
+  const craftBaht =
+    craftBahtStored > 0 ? craftBahtStored : mmkToBaht(craftMmk, itemRate);
+
+  const sellMmk = Number(inv.selling_price_estimated || 0);
+  const sellBahtStored = Number(inv.selling_price_baht || 0);
+  const sellBaht =
+    sellBahtStored > 0 ? sellBahtStored : mmkToBaht(sellMmk, itemRate);
+
+  const goldMmk = Math.max(0, sellMmk - craftMmk);
+  const goldBaht = Math.max(0, sellBaht - craftBaht);
+  const thaiSnap =
+    Number(inv.thai_gold_baht_snapshot) > 0
+      ? Number(inv.thai_gold_baht_snapshot)
+      : shopSettings?.thai_gold_baht || 65000;
 
   if (currency === 'BAHT') {
-    const gold = baht.baseGoldPrice;
-    const craft = Number(craftBaht.toFixed(2));
     return {
-      gold_amount: gold,
-      craftsmanship_fee: craft,
+      gold_amount: Number(goldBaht.toFixed(2)),
+      craftsmanship_fee: Number(craftBaht.toFixed(2)),
       stone_price: 0,
       wastage_amount: 0,
-      subtotal: Math.max(0, gold + craft),
-      gold_price_snapshot: thaiBahtRate,
+      subtotal: Math.max(0, Number(sellBaht.toFixed(2))),
+      gold_price_snapshot: thaiSnap,
     };
   }
 
-  // Baht → MMK uses SELL rate
-  const goldMmk = Math.round(bahtToMmk(baht.baseGoldPrice, sellRate));
   return {
-    gold_amount: goldMmk,
-    craftsmanship_fee: craftMmk,
+    gold_amount: Math.round(goldMmk),
+    craftsmanship_fee: Math.round(craftMmk),
     stone_price: 0,
     wastage_amount: 0,
-    subtotal: Math.max(0, goldMmk + craftMmk),
-    gold_price_snapshot: Math.round(bahtToMmk(thaiBahtRate, sellRate)),
+    subtotal: Math.max(0, Math.round(sellMmk)),
+    gold_price_snapshot: Math.round(bahtToMmk(thaiSnap, itemRate)),
   };
 }
 
@@ -132,6 +154,7 @@ function thaiDisplayPrices(
   inv: InventoryItem,
   shopSettings?: {
     thai_gold_baht?: number;
+    baht_mmk_rate?: number;
     baht_to_mmk_buy?: number;
     baht_to_mmk_sell?: number;
   }
@@ -144,14 +167,14 @@ function thaiDisplayPrices(
 function bahtCartLineToMmk(
   item: TransactionItem,
   shopSettings?: {
+    baht_mmk_rate?: number;
     baht_to_mmk_buy?: number;
     baht_to_mmk_sell?: number;
   }
 ): TransactionItem {
-  const { sellRate } = thaiFxRates(shopSettings);
-  // Baht → MMK always uses SELL rate
-  const gold = Math.round(bahtToMmk(Number(item.gold_amount || 0), sellRate));
-  const craft = Math.round(bahtToMmk(Number(item.craftsmanship_fee || 0), sellRate));
+  const { bahtMmkRate } = thaiFxRates(shopSettings);
+  const gold = Math.round(bahtToMmk(Number(item.gold_amount || 0), bahtMmkRate));
+  const craft = Math.round(bahtToMmk(Number(item.craftsmanship_fee || 0), bahtMmkRate));
   return {
     ...item,
     gold_amount: gold,
@@ -160,7 +183,7 @@ function bahtCartLineToMmk(
     wastage_amount: 0,
     subtotal: Math.max(0, gold + craft),
     gold_price_snapshot: Math.round(
-      bahtToMmk(Number(item.gold_price_snapshot || 0), sellRate)
+      bahtToMmk(Number(item.gold_price_snapshot || 0), bahtMmkRate)
     ),
   };
 }
@@ -168,6 +191,7 @@ function bahtCartLineToMmk(
 export const PosView: React.FC<Props> = ({ mode }) => {
   const {
     inventory,
+    transactions,
     customers,
     addCustomer,
     goldPrices,
@@ -612,7 +636,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     const subtotalApi = itemsForApi.reduce((s, i) => s + Number(i.subtotal || 0), 0);
     const discountMmk =
       thaiSaleCurrency === 'BAHT'
-        ? Math.round(bahtToMmk(Number(discountAmount || 0), thaiFxRates(shopSettings).sellRate))
+        ? Math.round(bahtToMmk(Number(discountAmount || 0), thaiFxRates(shopSettings).bahtMmkRate))
         : Number(discountAmount || 0);
     const totalMmk = Math.max(0, subtotalApi - discountMmk);
     const remainingMmk = 0;
@@ -646,6 +670,9 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     setAmountPaidInput('');
     setSaleNotes('');
     setThaiSaleCurrency('MMK');
+    setInventorySearch('');
+    setPaymentMethod('CASH');
+    clearCustomerDraft();
     setSelectedVoucher(newTxn);
   };
 
@@ -653,16 +680,16 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   // -------------------------------------------------------------
   // PURCHASE STATE (အဝယ် - ရွှေဟောင်းဝယ်ယူခြင်း)
   // -------------------------------------------------------------
-  const [purCustomerName, setPurCustomerName] = useState('ဦးဇော်လင်း');
-  const [purCustomerPhone, setPurCustomerPhone] = useState('09-445566778');
+  const [purCustomerName, setPurCustomerName] = useState('');
+  const [purCustomerPhone, setPurCustomerPhone] = useState('');
   const [purItemName, setPurItemName] = useState('ရွှေဟောင်းဆွဲကြိုး (အလဲ/အဝယ်)');
   const [purCategory, setPurCategory] = useState('NECKLACE');
   const [purPurity, setPurPurity] = useState<GoldPurity>('PE15A');
 
-  const [purGrossKyat, setPurGrossKyat] = useState<number>(1);
+  const [purGrossKyat, setPurGrossKyat] = useState<number>(0);
   const [purGrossPae, setPurGrossPae] = useState<number>(0);
   const [purGrossYway, setPurGrossYway] = useState<number>(0);
-  const [purGrossGrams, setPurGrossGrams] = useState<number>(KYAT_TO_GRAMS);
+  const [purGrossGrams, setPurGrossGrams] = useState<number>(0);
 
   // နုတ်ပယ်ချက် = ကျောက်ချိန် သာ
   const [purGemKyat, setPurGemKyat] = useState(0);
@@ -671,13 +698,14 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const [purGemGrams, setPurGemGrams] = useState(0);
 
   const [purPaymentMethod, setPurPaymentMethod] = useState<'CASH' | 'KPAY' | 'WAVEPAY' | 'BANK_TRANSFER'>('CASH');
-  const [purNotes, setPurNotes] = useState('ကျောက်ချိန် နုတ်ပြီး အဝယ်ပေါက်ဈေးအတိုင်း ရှင်းပေးသည်။');
+  const [purNotes, setPurNotes] = useState('ကျောက်ချိန် နုတ်ပြီး ဝယ်ဈေးအတိုင်း ရှင်းပေးသည်။');
   const [purManualAmount, setPurManualAmount] = useState<string>('');
-  /** Editable buy rate (MMK per kyat) — drives payout */
+  /** Editable buy price (MMK per kyat) — drives payout; can clear 0 while typing */
   const [purBuyPriceInput, setPurBuyPriceInput] = useState<number>(() => getBuyPriceForPurity('PE15A'));
 
   const isPurThai = purPurity === 'THAI_GOLD';
-  const fxBuy = shopSettings?.baht_to_mmk_buy || 755;
+  const fxRate = resolveBahtMmkRate(shopSettings);
+  const purMarketRate = getBuyPriceForPurity(purPurity);
 
   // Purchase Net = Gross − Gem (no wastage)
   const purNetKpy = calculateNetFromParts(
@@ -689,14 +717,14 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const purNetGrams = kpyToGrams(purNetKpy, kyatToGrams);
 
   const purBuyRateMmk = Number(purBuyPriceInput) || 0;
-  const purBuyRateBaht = mmkToBaht(purBuyRateMmk, fxBuy); // MMK → Baht = buy rate
+  const purBuyRateBaht = mmkToBaht(purBuyRateMmk, fxRate);
 
   const purNetYway = kpyToYway(purNetKpy.kyat, purNetKpy.pae, purNetKpy.yway);
   const purCalcPayoutMmk = Math.round((purNetYway / 128) * purBuyRateMmk);
-  const purCalcPayoutBaht = Number(mmkToBaht(purCalcPayoutMmk, fxBuy).toFixed(2));
+  const purCalcPayoutBaht = Number(mmkToBaht(purCalcPayoutMmk, fxRate).toFixed(2));
   const purTotalPayout =
     purManualAmount === '' ? purCalcPayoutMmk : Math.max(0, Number(purManualAmount) || 0);
-  const purTotalPayoutBaht = Number(mmkToBaht(purTotalPayout, fxBuy).toFixed(2));
+  const purTotalPayoutBaht = Number(mmkToBaht(purTotalPayout, fxRate).toFixed(2));
 
   useEffect(() => {
     setPurBuyPriceInput(getBuyPriceForPurity(purPurity));
@@ -731,6 +759,26 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     setPurGemPae(pae);
     setPurGemYway(yway);
     setPurGemGrams(kpyToGrams({ kyat, pae, yway }, kyatToGrams));
+  };
+
+  const resetPurchaseForm = () => {
+    setPurCustomerName('');
+    setPurCustomerPhone('');
+    setPurItemName('ရွှေဟောင်းဆွဲကြိုး (အလဲ/အဝယ်)');
+    setPurCategory('NECKLACE');
+    setPurPurity('PE15A');
+    setPurGrossKyat(0);
+    setPurGrossPae(0);
+    setPurGrossYway(0);
+    setPurGrossGrams(0);
+    setPurGemKyat(0);
+    setPurGemPae(0);
+    setPurGemYway(0);
+    setPurGemGrams(0);
+    setPurPaymentMethod('CASH');
+    setPurNotes('ကျောက်ချိန် နုတ်ပြီး ဝယ်ဈေးအတိုင်း ရှင်းပေးသည်။');
+    setPurManualAmount('');
+    setPurBuyPriceInput(getBuyPriceForPurity('PE15A'));
   };
 
   const handleCompletePurchase = async () => {
@@ -771,47 +819,135 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       remaining_amount: 0,
       payment_method: purPaymentMethod as any,
       notes: isPurThai
-        ? `${purNotes} · Baht ${purTotalPayoutBaht} ฿ (MMK→Baht @ buy ${fxBuy})`
+        ? `${purNotes} · Baht ${purTotalPayoutBaht} ฿ (MMK→Baht @ ${fxRate})`
         : purNotes,
       add_to_stock: false,
     } as any);
 
+    resetPurchaseForm();
     setSelectedVoucher(newTxn);
   };
 
   // -------------------------------------------------------------
-  // EXCHANGE STATE (အလဲအလှယ်)
+  // EXCHANGE STATE (အလဲအလှယ်) — voucher no → new item code
   // -------------------------------------------------------------
-  const [excCustomerName, setExcCustomerName] = useState('');
-  const [excCustomerPhone, setExcCustomerPhone] = useState('');
-  const [excStockId, setExcStockId] = useState('');
-  const [excTradeName, setExcTradeName] = useState('ရွှေဟောင်း အလဲ');
-  const [excTradeCategory, setExcTradeCategory] = useState('NECKLACE');
-  const [excTradePurity, setExcTradePurity] = useState<GoldPurity>('PE15A');
-  const [excGrossKyat, setExcGrossKyat] = useState(0);
-  const [excGrossPae, setExcGrossPae] = useState(0);
-  const [excGrossYway, setExcGrossYway] = useState(0);
-  const [excGrossGrams, setExcGrossGrams] = useState(0);
-  const [excDeductPae, setExcDeductPae] = useState(0);
-  const [excDeductYway, setExcDeductYway] = useState(4);
+  const [excVoucherNo, setExcVoucherNo] = useState('');
+  const [excReturnLineId, setExcReturnLineId] = useState('');
+  const [excNewCode, setExcNewCode] = useState('');
   const [excPaid, setExcPaid] = useState('');
+  const [excVoucherError, setExcVoucherError] = useState('');
+  const [excNewError, setExcNewError] = useState('');
 
-  const applyExcGrossFromGrams = (grams: number) => {
-    setExcGrossGrams(grams);
-    const kpy = gramsToKpy(grams, kyatToGrams);
-    setExcGrossKyat(kpy.kyat);
-    setExcGrossPae(kpy.pae);
-    setExcGrossYway(kpy.yway);
+  type ExcReturnOption = {
+    line: TransactionItem;
+    inv: InventoryItem;
   };
 
-  const excTradeNet = calculateNetWeight(
-    { kyat: excGrossKyat, pae: excGrossPae, yway: excGrossYway },
-    excDeductPae,
-    excDeductYway
-  );
-  const excBuyRate = getBuyPriceForPurity(excTradePurity);
-  const excTradeCredit = Math.round((kpyToYway(excTradeNet.kyat, excTradeNet.pae, excTradeNet.yway) / 128) * excBuyRate);
-  const excNewItem = inventory.find((i) => i.id === excStockId && i.status === 'IN_STOCK');
+  type ExcVoucherSource = {
+    txn: Transaction;
+    saleDate: string;
+    customerName: string;
+    customerPhone: string;
+    invoiceNo: string;
+    options: ExcReturnOption[];
+  };
+
+  const resolveVoucherForExchange = (rawNo: string): ExcVoucherSource | null => {
+    const q = rawNo.trim().toLowerCase();
+    if (!q) return null;
+
+    const matches = transactions.filter(
+      (t) =>
+        (t.transaction_type === 'SALE' || t.transaction_type === 'EXCHANGE') &&
+        String(t.invoice_no || '').trim().toLowerCase() === q
+    );
+    matches.sort((a, b) =>
+      String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    );
+    const txn = matches[0];
+    if (!txn) return null;
+
+    const options: ExcReturnOption[] = [];
+    for (const line of txn.items || []) {
+      if (line.line_role === 'TRADE_IN') continue;
+      const inv = line.item_id
+        ? inventory.find((i) => i.id === line.item_id)
+        : inventory.find(
+            (i) =>
+              String(i.barcode || '').trim().toLowerCase() ===
+              String(line.barcode || '').trim().toLowerCase()
+          );
+      if (!inv || inv.status !== 'SOLD') continue;
+      options.push({ line, inv });
+    }
+
+    return {
+      txn,
+      saleDate: txn.created_at,
+      customerName: txn.customer_name || '',
+      customerPhone: txn.customer_phone || '',
+      invoiceNo: txn.invoice_no || '',
+      options,
+    };
+  };
+
+  const excVoucher = useMemo(() => {
+    const q = excVoucherNo.trim();
+    if (!q) return null;
+    return resolveVoucherForExchange(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [excVoucherNo, inventory, transactions]);
+
+  // Auto-pick sole returnable line; clear if voucher changes
+  useEffect(() => {
+    if (!excVoucher) {
+      setExcReturnLineId('');
+      return;
+    }
+    if (excVoucher.options.length === 1) {
+      setExcReturnLineId(excVoucher.options[0].line.id);
+      return;
+    }
+    if (
+      excReturnLineId &&
+      !excVoucher.options.some((o) => o.line.id === excReturnLineId)
+    ) {
+      setExcReturnLineId('');
+    }
+  }, [excVoucher, excReturnLineId]);
+
+  const excSold = useMemo(() => {
+    if (!excVoucher || !excReturnLineId) return null;
+    const opt = excVoucher.options.find((o) => o.line.id === excReturnLineId);
+    if (!opt) return null;
+    return {
+      inv: opt.inv,
+      saleDate: excVoucher.saleDate,
+      saleSubtotal: Number(opt.line.subtotal || 0),
+      customerName: excVoucher.customerName,
+      customerPhone: excVoucher.customerPhone,
+      invoiceNo: excVoucher.invoiceNo,
+      saleLine: opt.line,
+    };
+  }, [excVoucher, excReturnLineId]);
+
+  const excDaysSinceSale = excVoucher
+    ? calendarDaysSince(excVoucher.saleDate)
+    : null;
+  /** ဝယ်ပြီး တစ်ရက်ထပ်ကျော် = calendar day diff > 1 */
+  const excExpired =
+    excDaysSinceSale != null && excDaysSinceSale > 1;
+
+  const excNewItem = useMemo(() => {
+    const q = excNewCode.trim().toLowerCase();
+    if (!q) return null;
+    return (
+      inventory.find(
+        (i) => i.status === 'IN_STOCK' && i.barcode.trim().toLowerCase() === q
+      ) || null
+    );
+  }, [excNewCode, inventory]);
+
   const pure16 = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
   const excNewPrice = excNewItem
     ? estimateSellingPrice({
@@ -829,16 +965,109 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         thaiRatePerKyat: getLivePriceForPurity('THAI_GOLD'),
       })
     : 0;
-  const excNetDue = Math.max(0, excNewPrice - excTradeCredit);
+  const excTradeCredit = excSold ? Math.round(Number(excSold.saleSubtotal || 0)) : 0;
+  const excBalance = excNewPrice - excTradeCredit;
+  const excNetDue = Math.max(0, excBalance);
+  const excRefund = Math.max(0, -excBalance);
+
+  const lookupExcVoucher = () => {
+    const q = excVoucherNo.trim();
+    setExcVoucherError('');
+    setExcNewCode('');
+    setExcNewError('');
+    setExcReturnLineId('');
+    if (!q) {
+      setExcVoucherError(language === 'MM' ? 'Voucher No ရိုက်ထည့်ပါ' : 'Enter voucher no');
+      return;
+    }
+    const found = resolveVoucherForExchange(q);
+    if (!found) {
+      setExcVoucherError(
+        language === 'MM'
+          ? 'အရောင်း Voucher No မတွေ့ပါ'
+          : 'Sale voucher not found'
+      );
+      return;
+    }
+    setExcVoucherNo(found.invoiceNo);
+    if (found.options.length === 0) {
+      setExcVoucherError(
+        language === 'MM'
+          ? 'ဤ voucher တွင် လဲလှယ်နိုင်သော (SOLD) ပစ္စည်း မရှိပါ'
+          : 'No returnable (SOLD) items on this voucher'
+      );
+    }
+  };
+
+  const lookupExcNew = () => {
+    const q = excNewCode.trim();
+    setExcNewError('');
+    if (!q) {
+      setExcNewError(language === 'MM' ? 'အသစ် Item Code ရိုက်ထည့်ပါ' : 'Enter new item code');
+      return;
+    }
+    if (excSold && excSold.inv.barcode.trim().toLowerCase() === q.toLowerCase()) {
+      setExcNewError(
+        language === 'MM'
+          ? 'အဟောင်းနဲ့ အသစ် Item Code တူ၍ မရပါ'
+          : 'New item code must differ from the returned item'
+      );
+      return;
+    }
+    const found = inventory.find(
+      (i) => i.status === 'IN_STOCK' && i.barcode.trim().toLowerCase() === q.toLowerCase()
+    );
+    if (!found) {
+      setExcNewError(
+        language === 'MM'
+          ? 'စတော့ရှိ Item Code မတွေ့ပါ'
+          : 'In-stock item code not found'
+      );
+      return;
+    }
+    setExcNewCode(found.barcode);
+  };
+
+  const resetExchangeForm = () => {
+    setExcVoucherNo('');
+    setExcReturnLineId('');
+    setExcNewCode('');
+    setExcPaid('');
+    setExcVoucherError('');
+    setExcNewError('');
+  };
 
   const handleCompleteExchange = async () => {
-    if (!excNewItem || excNewPrice <= 0) return;
-    const paid = excPaid !== '' ? Number(excPaid) : excNetDue;
+    if (!excSold || excExpired) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'လဲလှယ်၍ မရပါ — Voucher / ဝယ်ရက် စစ်ဆေးပါ'
+          : 'Exchange not allowed — check voucher / purchase date'
+      );
+      return;
+    }
+    if (!excNewItem || excNewPrice <= 0) {
+      void dialog.alert(
+        language === 'MM' ? 'လဲမည့် အသစ်ပစ္စည်း ရွေးပါ' : 'Select a new stock item'
+      );
+      return;
+    }
+    if (excSold.inv.id === excNewItem.id) {
+      void dialog.alert(
+        language === 'MM' ? 'အဟောင်း/အသစ် တူနေပါသည်' : 'Returned and new items must differ'
+      );
+      return;
+    }
+
+    const paid = excRefund > 0 ? 0 : excPaid !== '' ? Number(excPaid) : excNetDue;
+    const sold = excSold.inv;
+    const saleLine = excSold.saleLine;
+
     const txn = await createTransaction({
       invoice_no: generateInvoiceNo('EXC'),
       customer_id: '',
-      customer_name: excCustomerName || 'ဧည့်သည်',
-      customer_phone: excCustomerPhone,
+      customer_name: excSold.customerName || 'ဧည့်သည်',
+      customer_phone: excSold.customerPhone,
       transaction_type: 'EXCHANGE',
       items: [
         {
@@ -853,6 +1082,11 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             pae: excNewItem.weight_pae,
             yway: excNewItem.weight_yway,
           },
+          gemstone_weight: {
+            kyat: excNewItem.gemstone_weight_kyat,
+            pae: excNewItem.gemstone_weight_pae,
+            yway: excNewItem.gemstone_weight_yway,
+          },
           net_weight: {
             kyat: excNewItem.net_weight_kyat,
             pae: excNewItem.net_weight_pae,
@@ -863,24 +1097,38 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           craftsmanship_fee: excNewItem.craftsmanship_fee,
           subtotal: excNewPrice,
           item_type: excNewItem.item_type,
+          thai_weight_unit: excNewItem.thai_weight_unit,
           line_role: 'NEW_ITEM',
         } as any,
         {
           id: `exc-trade-${Date.now()}`,
           transaction_id: '',
-          item_name: excTradeName,
-          category: excTradeCategory || 'OLD_GOLD',
-          weight: { kyat: excGrossKyat, pae: excGrossPae, yway: excGrossYway },
-          net_weight: excTradeNet,
-          purity: excTradePurity,
-          gold_price_snapshot: excBuyRate,
-          craftsmanship_fee: 0,
+          item_id: sold.id,
+          barcode: sold.barcode,
+          item_name: sold.name_mm || sold.name,
+          category: sold.category,
+          weight: {
+            kyat: sold.weight_kyat,
+            pae: sold.weight_pae,
+            yway: sold.weight_yway,
+          },
+          gemstone_weight: {
+            kyat: sold.gemstone_weight_kyat,
+            pae: sold.gemstone_weight_pae,
+            yway: sold.gemstone_weight_yway,
+          },
+          net_weight: {
+            kyat: sold.net_weight_kyat,
+            pae: sold.net_weight_pae,
+            yway: sold.net_weight_yway,
+          },
+          purity: sold.purity,
+          gold_price_snapshot:
+            Number(saleLine.gold_price_snapshot || 0) || getBuyPriceForPurity(sold.purity),
+          craftsmanship_fee: Number(sold.craftsmanship_fee || 0),
           subtotal: excTradeCredit,
-          item_type: excTradePurity === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD',
-          thai_weight_unit:
-            excTradePurity === 'THAI_GOLD'
-              ? Number(kpyToGrams(excTradeNet, kyatToGrams).toFixed(3))
-              : undefined,
+          item_type: sold.item_type,
+          thai_weight_unit: sold.thai_weight_unit,
           line_role: 'TRADE_IN',
         } as any,
       ],
@@ -892,10 +1140,15 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       paid_amount: paid,
       remaining_amount: Math.max(0, excNetDue - paid),
       payment_method: 'CASH',
-      notes: 'အလဲအလှယ် (Exchange) — လက်ခ/အတိုးအတင် ပါဝင်သည်',
+      notes:
+        excRefund > 0
+          ? `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode} · ဧည့်သည်ပြန်ရ ${excRefund} MMK`
+          : `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode}`,
       add_to_stock: true,
       use_client_total: true,
+      refund_amount: excRefund,
     } as any);
+    resetExchangeForm();
     setSelectedVoucher(txn);
   };
 
@@ -1632,12 +1885,11 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                       <tr>
                         <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'လျော့ငွေ' : 'Discount'}</td>
                         <td className="px-2 py-1.5 text-right">
-                          <input
-                            type="number"
+                          <NumberInput
                             min={0}
                             step={saleInBaht ? 1 : 5000}
                             value={discountAmount}
-                            onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value)))}
+                            onChange={(v) => setDiscountAmount(Math.max(0, v))}
                             className="w-24 ml-auto block px-2 py-1 text-right font-mono text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212]"
                           />
                         </td>
@@ -1745,8 +1997,8 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {language === 'MM'
-                ? 'ကျောက်ချိန် နုတ်ပြီး ရိုက်ထည့်သော အဝယ်ပေါက်ဈေးအတိုင်း တန်ဖိုးရှင်းတွက်သည်'
-                : 'Net = Gross − Gem; payout from editable buyback rate'}
+                ? 'ကျောက်ချိန် နုတ်ပြီး ရိုက်ထည့်သော ဝယ်ဈေးအတိုင်း တန်ဖိုးရှင်းတွက်သည်'
+                : 'Net = Gross − Gem; payout from buy price'}
             </p>
           </div>
 
@@ -1982,12 +2234,22 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                 </div>
 
                 <div className="border-t border-blue-200 dark:border-blue-800 pt-3">
-                  <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
-                    {language === 'MM' ? 'ယနေ့အဝယ်ပေါက်ဈေး (ကျပ်တန်)' : 'Buyback rate (per kyat)'}
-                  </label>
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="min-w-[10rem] flex-1">
-                      <label className="text-[10px] text-gray-500 block mb-0.5">MMK</label>
+                      <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                        {language === 'MM' ? 'ယနေ့ပေါက်ဈေး (ကျပ်တန်)' : 'Today market rate (per kyat)'}
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={formatMMK(purMarketRate)}
+                        className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-[#121212] text-blue-900 dark:text-blue-200"
+                      />
+                    </div>
+                    <div className="min-w-[10rem] flex-1">
+                      <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                        {language === 'MM' ? 'ဝယ်ဈေး (ကျပ်တန်)' : 'Buy price (per kyat)'}
+                      </label>
                       <NumberInput
                         min={0}
                         step={1000}
@@ -2013,8 +2275,8 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     {language === 'MM'
-                      ? 'ဤဈေးဖြင့်သာ ဝယ်တွက်မည် — ရိုက်ပြင်နိုင်သည်'
-                      : 'Payout uses this rate — editable'}
+                      ? 'ဝယ်ဈေးဖြင့်သာ တွက်မည် — 0 ဖျက်ပြီး ရိုက်ပြင်နိုင်သည်'
+                      : 'Payout uses buy price — clear 0 and type freely'}
                   </p>
                 </div>
               </div>
@@ -2048,7 +2310,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                           value={formatBaht(
                             purManualAmount === ''
                               ? purCalcPayoutBaht
-                              : mmkToBaht(Number(purManualAmount) || 0, fxBuy)
+                              : mmkToBaht(Number(purManualAmount) || 0, fxRate)
                           )}
                           className="w-full px-3 py-2 text-xl font-extrabold font-mono rounded-xl border border-blue-300 bg-blue-50 dark:bg-[#121212] text-blue-800 dark:text-blue-300"
                         />
@@ -2128,170 +2390,340 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           <div className="pb-3 border-b border-gray-200 dark:border-gray-800">
             <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
               <ArrowLeftRight className="w-5 h-5 text-emerald-600" />
-              {language === 'MM' ? 'ပစ္စည်းအလဲအလှယ် (Exchange)' : 'Gold Exchange / Trade-in'}
+              {language === 'MM' ? 'ပစ္စည်းအလဲအလှယ် (Exchange)' : 'Gold Exchange'}
             </h3>
             <p className="text-xs text-gray-500 mt-1">
               {language === 'MM'
-                ? 'အဟောင်းဝယ်ဈေးနှုတ်ပြီး အသစ်ရောင်းဈေး (လက်ခပါ) ကျန်ငွေ ရှင်းတွက်သည်'
-                : 'Net due = new item live sell price − trade-in buyback credit'}
+                ? 'Voucher No → အချက်အလက် + ဝယ်ရက် စစ်ဆေး → အသစ် Item Code → Inventory ပြန်ပေါင်း / အသစ်နှုတ်'
+                : 'Voucher no → details + sale date check → new item code → restore / deduct stock'}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input
-              type="text"
-              placeholder={language === 'MM' ? 'ဧည့်သည်အမည်' : 'Customer name'}
-              value={excCustomerName}
-              onChange={(e) => setExcCustomerName(e.target.value)}
-              className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-            />
-            <input
-              type="text"
-              placeholder={language === 'MM' ? 'ဖုန်း' : 'Phone'}
-              value={excCustomerPhone}
-              onChange={(e) => setExcCustomerPhone(e.target.value)}
-              className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold mb-1">
-              {language === 'MM' ? 'အသစ်ရွေးမည့် စတော့ပစ္စည်း' : 'New stock item'}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-gray-800 dark:text-gray-200">
+              {language === 'MM' ? '၁။ အရောင်း Voucher No' : '1. Sale voucher no'}
             </label>
-            <select
-              value={excStockId}
-              onChange={(e) => setExcStockId(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-medium"
-            >
-              <option value="">—</option>
-              {inventory
-                .filter((i) => i.status === 'IN_STOCK')
-                .map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.barcode} · {i.name_mm || i.name} · {formatMMK(i.selling_price_estimated)}
-                  </option>
-                ))}
-            </select>
-            {excNewItem && (
-              <p className="text-xs mt-1 text-emerald-700 dark:text-emerald-400 font-mono">
-                {language === 'MM' ? 'အသစ်ဈေး (live):' : 'New item (live):'} {formatMMK(excNewPrice)}
-              </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={excVoucherNo}
+                onChange={(e) => {
+                  setExcVoucherNo(e.target.value);
+                  setExcVoucherError('');
+                  setExcReturnLineId('');
+                  setExcNewCode('');
+                  setExcNewError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    lookupExcVoucher();
+                  }
+                }}
+                placeholder={
+                  language === 'MM'
+                    ? 'ဥပမာ INV-20260929-6161'
+                    : 'e.g. INV-20260929-6161'
+                }
+                className="flex-1 px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono"
+              />
+              <button
+                type="button"
+                onClick={lookupExcVoucher}
+                className="px-3 py-2 rounded-xl bg-[#996515] hover:bg-[#7a5010] text-white text-xs font-bold flex items-center gap-1.5 shrink-0"
+              >
+                <Search className="w-3.5 h-3.5" />
+                {language === 'MM' ? 'ရှာမည်' : 'Lookup'}
+              </button>
+            </div>
+            {excVoucherError && (
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold">{excVoucherError}</p>
             )}
           </div>
 
-          <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#141414] border border-gray-200 dark:border-gray-800 space-y-2">
-            <div className="text-xs font-bold">{language === 'MM' ? 'အဟောင်းအလဲ (Trade-in)' : 'Trade-in gold'}</div>
-            <input
-              type="text"
-              value={excTradeName}
-              onChange={(e) => setExcTradeName(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={excTradeCategory}
-                onChange={(e) => setExcTradeCategory(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-              >
-                {productCategories.map((c) => (
-                  <option key={c.id || c.code} value={c.code}>
-                    {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={excTradePurity}
-                onChange={(e) => setExcTradePurity(e.target.value as GoldPurity)}
-                className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-              >
-                {Object.entries(PURITY_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {language === 'MM' ? v.mm : v.en}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              <input
-                type="number"
-                min={0}
-                step={0.001}
-                value={excGrossGrams}
-                onChange={(e) => applyExcGrossFromGrams(Number(e.target.value))}
-                placeholder="Gram"
-                className="px-2 py-1.5 text-xs rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]"
-              />
-              <input
-                type="number"
-                min={0}
-                value={excGrossKyat}
-                onChange={(e) => {
-                  const k = Number(e.target.value);
-                  setExcGrossKyat(k);
-                  setExcGrossGrams(kpyToGrams({ kyat: k, pae: excGrossPae, yway: excGrossYway }, kyatToGrams));
-                }}
-                placeholder="ကျပ်"
-                className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-              />
-              <input
-                type="number"
-                min={0}
-                value={excGrossPae}
-                onChange={(e) => {
-                  const p = Number(e.target.value);
-                  setExcGrossPae(p);
-                  setExcGrossGrams(kpyToGrams({ kyat: excGrossKyat, pae: p, yway: excGrossYway }, kyatToGrams));
-                }}
-                placeholder="ပဲ"
-                className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-              />
-              <input
-                type="number"
-                min={0}
-                value={excGrossYway}
-                onChange={(e) => {
-                  const y = Number(e.target.value);
-                  setExcGrossYway(y);
-                  setExcGrossGrams(kpyToGrams({ kyat: excGrossKyat, pae: excGrossPae, yway: y }, kyatToGrams));
-                }}
-                placeholder="ရွေး"
-                className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input type="number" min={0} value={excDeductPae} onChange={(e) => setExcDeductPae(Number(e.target.value))} placeholder="ပန်းထိန်း ပဲ" className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
-              <input type="number" min={0} value={excDeductYway} onChange={(e) => setExcDeductYway(Number(e.target.value))} placeholder="အမွှတ် ရွေး" className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
-            </div>
-            <p className="text-xs font-mono text-blue-700 dark:text-blue-300">
-              {language === 'MM' ? 'အဟောင်းခရက်ဒစ်:' : 'Trade credit:'} {formatMMK(excTradeCredit)} · net {formatKPYMyanmar(excTradeNet)}
-            </p>
-          </div>
+          {excVoucher && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/80 dark:bg-amber-950/20 p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                  {language === 'MM' ? 'Voucher အချက်အလက်' : 'Voucher details'}
+                </p>
+                <span className="font-mono text-[11px] font-bold text-[#996515]">
+                  {excVoucher.invoiceNo}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <p>
+                  <span className="text-gray-500">{language === 'MM' ? 'ဧည့်သည်:' : 'Customer:'}</span>{' '}
+                  <span className="font-semibold">{excVoucher.customerName || '—'}</span>
+                  {excVoucher.customerPhone ? ` · ${excVoucher.customerPhone}` : ''}
+                </p>
+                <p>
+                  <span className="text-gray-500">{language === 'MM' ? 'ဝယ်ရက်:' : 'Purchase date:'}</span>{' '}
+                  <span className="font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                    {formatDate(excVoucher.saleDate)}
+                  </span>
+                  {excDaysSinceSale != null && (
+                    <span className="ml-2 text-gray-500">
+                      ({excDaysSinceSale === 0
+                        ? language === 'MM'
+                          ? 'ယနေ့'
+                          : 'today'
+                        : language === 'MM'
+                          ? `${excDaysSinceSale} ရက်ကြာ`
+                          : `${excDaysSinceSale} day(s) ago`}
+                      )
+                    </span>
+                  )}
+                </p>
+              </div>
 
-          <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900">
-            <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
-              {language === 'MM' ? 'ဧည့်သည်ပေးရမည့်ကျန်ငွေ' : 'Customer net due'}
-            </span>
-            <span className="text-xl font-mono font-extrabold text-emerald-700 dark:text-emerald-300">{formatMMK(excNetDue)}</span>
-          </div>
+              {excExpired && (
+                <div className="flex items-start gap-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-rose-800 dark:text-rose-200">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold leading-snug">
+                    {language === 'MM'
+                      ? 'သတိပေးချက် — ဝယ်ပြီး တစ်ရက်ထက် ကျော်နေပါပြီ။ ဤ voucher ဖြင့် လဲလှယ်၍ မရတော့ပါ။'
+                      : 'Warning — more than one day has passed since purchase. Exchange is not allowed.'}
+                  </p>
+                </div>
+              )}
 
-          <input
-            type="number"
-            min={0}
-            value={excPaid}
-            onChange={(e) => setExcPaid(e.target.value)}
-            placeholder={language === 'MM' ? 'ပေးသွင်းငွေ (အလွတ် = ကျန်ငွေအပြည့်)' : 'Amount paid (blank = full due)'}
-            className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-          />
+              {!excExpired && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                    {language === 'MM'
+                      ? 'ပြန်သွင်းမည့် ပစ္စည်း ရွေးပါ'
+                      : 'Select item to return'}
+                  </p>
+                  {excVoucher.options.length === 0 ? (
+                    <p className="text-xs text-rose-600 font-semibold">
+                      {language === 'MM'
+                        ? 'လဲလှယ်နိုင်သော (SOLD) ပစ္စည်း မရှိပါ'
+                        : 'No returnable (SOLD) items'}
+                    </p>
+                  ) : (
+                    excVoucher.options.map((opt) => {
+                      const selected = excReturnLineId === opt.line.id;
+                      return (
+                        <button
+                          key={opt.line.id}
+                          type="button"
+                          onClick={() => {
+                            setExcReturnLineId(opt.line.id);
+                            setExcNewCode('');
+                            setExcNewError('');
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg border text-xs transition ${
+                            selected
+                              ? 'border-[#996515] bg-white dark:bg-[#1A1A1A] ring-1 ring-[#996515]/40'
+                              : 'border-amber-200/80 dark:border-amber-900/40 bg-white/70 dark:bg-[#121212] hover:border-[#996515]/50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-gray-900 dark:text-white truncate">
+                                {opt.inv.name_mm || opt.inv.name}
+                              </p>
+                              <p className="font-mono text-[10px] text-[#996515] mt-0.5">
+                                {opt.inv.barcode}
+                              </p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">
+                                {PURITY_LABELS[opt.inv.purity]?.mm || opt.inv.purity}
+                                {' · '}
+                                {opt.inv.net_weight_kyat}က {opt.inv.net_weight_pae}ပ{' '}
+                                {opt.inv.net_weight_yway}ရ
+                              </p>
+                            </div>
+                            <span className="font-mono font-bold text-[11px] shrink-0">
+                              {formatMMK(Number(opt.line.subtotal || 0))}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-          <button
-            type="button"
-            onClick={() => void handleCompleteExchange()}
-            disabled={!excNewItem}
-            className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-sm flex items-center justify-center gap-2"
-          >
-            <CheckCircle className="w-4 h-4" />
-            {language === 'MM' ? 'အလဲအလှယ် ပြီးစီးမည်' : 'Complete Exchange'}
-          </button>
+          {excSold && !excExpired && (
+            <div className="space-y-3 pt-1">
+              <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                {language === 'MM'
+                  ? '၂။ လဲချင်သော အသစ်ပစ္စည်း'
+                  : '2. New item to exchange for'}
+              </p>
+
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400">
+                  Item Code
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={excNewCode}
+                    onChange={(e) => {
+                      setExcNewCode(e.target.value);
+                      setExcNewError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        lookupExcNew();
+                      }
+                    }}
+                    placeholder={
+                      language === 'MM'
+                        ? 'Item Code / ဘားကုဒ် ရိုက်ထည့်ပါ'
+                        : 'Type item code / barcode'
+                    }
+                    className="flex-1 px-3 py-2 text-xs rounded-xl border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-[#121212] font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={lookupExcNew}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shrink-0"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    {language === 'MM' ? 'ရှာမည်' : 'Lookup'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400">
+                  {language === 'MM' ? 'Item Name (ရှာ၍ ရွေးရန်)' : 'Item name (searchable)'}
+                </label>
+                <InventorySearchSelect
+                  items={inventory}
+                  value={excNewItem}
+                  excludeIds={excSold ? [excSold.inv.id] : []}
+                  language={language}
+                  placeholder={
+                    language === 'MM'
+                      ? 'ပစ္စည်းအမည် ရွေးရန် / ရှာရန်…'
+                      : 'Select / search item name…'
+                  }
+                  onChange={(item) => {
+                    setExcNewError('');
+                    if (!item) {
+                      setExcNewCode('');
+                      return;
+                    }
+                    setExcNewCode(item.barcode);
+                  }}
+                />
+              </div>
+
+              {excNewError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold">{excNewError}</p>
+              )}
+
+              {excNewItem && (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/80 dark:bg-emerald-950/20 p-3 space-y-1.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-bold text-emerald-900 dark:text-emerald-200">
+                      {language === 'MM' ? 'အသစ်ပစ္စည်း အချက်အလက်' : 'New item details'}
+                    </p>
+                    <span className="font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                      {excNewItem.barcode}
+                    </span>
+                  </div>
+                  <p>
+                    <span className="text-gray-500">{language === 'MM' ? 'အမည်:' : 'Name:'}</span>{' '}
+                    <span className="font-semibold">{excNewItem.name_mm || excNewItem.name}</span>
+                    {' · '}
+                    {PURITY_LABELS[excNewItem.purity]?.mm || excNewItem.purity}
+                  </p>
+                  <p className="font-mono text-gray-600 dark:text-gray-400">
+                    {excNewItem.net_weight_kyat}က {excNewItem.net_weight_pae}ပ {excNewItem.net_weight_yway}ရ
+                    {excNewItem.thai_weight_unit
+                      ? ` · ${Number(excNewItem.thai_weight_unit).toFixed(3)} g`
+                      : ''}
+                  </p>
+                  <p className="font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                    {language === 'MM' ? 'အသစ်ဈေး (live):' : 'New price (live):'}{' '}
+                    {formatMMK(excNewPrice)}
+                  </p>
+                </div>
+              )}
+
+              {excNewItem && (
+                <>
+                  <div
+                    className={`flex items-center justify-between p-3 rounded-xl border ${
+                      excRefund > 0
+                        ? 'bg-sky-50 dark:bg-sky-950/20 border-sky-200 dark:border-sky-900'
+                        : 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900'
+                    }`}
+                  >
+                    <div className="text-xs space-y-0.5">
+                      <p
+                        className={`font-bold ${
+                          excRefund > 0
+                            ? 'text-sky-800 dark:text-sky-300'
+                            : 'text-emerald-800 dark:text-emerald-300'
+                        }`}
+                      >
+                        {excRefund > 0
+                          ? language === 'MM'
+                            ? 'ဧည့်သည်ပြန်ရမည့်ငွေ'
+                            : 'Refund to customer'
+                          : language === 'MM'
+                            ? 'ဧည့်သည်ပေးရမည့်ကျန်ငွေ'
+                            : 'Customer net due'}
+                      </p>
+                      <p className="text-[10px] text-gray-500 font-mono">
+                        {excRefund > 0
+                          ? `${formatMMK(excTradeCredit)} − ${formatMMK(excNewPrice)}`
+                          : `${formatMMK(excNewPrice)} − ${formatMMK(excTradeCredit)}`}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xl font-mono font-extrabold ${
+                        excRefund > 0
+                          ? 'text-sky-700 dark:text-sky-300'
+                          : 'text-emerald-700 dark:text-emerald-300'
+                      }`}
+                    >
+                      {formatMMK(excRefund > 0 ? excRefund : excNetDue)}
+                    </span>
+                  </div>
+
+                  {excRefund > 0 ? (
+                    <p className="text-[11px] text-sky-700 dark:text-sky-300 font-semibold px-1">
+                      {language === 'MM'
+                        ? 'အသစ်ဈေး ပိုနည်းသောကြောင့် ဧည့်သည်ထံ ငွေပြန်ပေးရမည်။'
+                        : 'New item is cheaper — refund this amount to the customer.'}
+                    </p>
+                  ) : (
+                    <input
+                      type="number"
+                      min={0}
+                      value={excPaid}
+                      onChange={(e) => setExcPaid(e.target.value)}
+                      placeholder={
+                        language === 'MM'
+                          ? 'ပေးသွင်းငွေ (အလွတ် = ကျန်ငွေအပြည့်)'
+                          : 'Amount paid (blank = full due)'
+                      }
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
+                    />
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleCompleteExchange()}
+                    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    {language === 'MM' ? 'အလဲအလှယ် ပြီးစီးမည်' : 'Complete Exchange'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

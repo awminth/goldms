@@ -350,6 +350,15 @@ export const api = {
     return request<FinancialReport>(`/reports/financial${qs ? `?${qs}` : ''}`);
   },
 
+  reportSalesPerformance: (month?: string) => {
+    const q = new URLSearchParams();
+    if (month) q.set('month', month);
+    const qs = q.toString();
+    return request<SalesPerformanceReport>(
+      `/reports/sales-performance${qs ? `?${qs}` : ''}`
+    );
+  },
+
   resetToDemoData: () => request<BootstrapData>('/reset-demo', { method: 'POST' }),
 };
 
@@ -388,5 +397,39 @@ export type FinancialReport = {
     income: number;
     expense: number;
     net: number;
+  };
+};
+
+export type SalesPerformanceMyanmarRow = {
+  category: string;
+  purity: string;
+  qty: number;
+  total_amount: number;
+};
+
+export type SalesPerformanceThaiRow = {
+  category: string;
+  grams: number;
+  qty: number;
+  total_amount: number;
+};
+
+export type SalesPerformanceReport = {
+  month: string;
+  from: string;
+  to: string;
+  myanmar: {
+    best: SalesPerformanceMyanmarRow[];
+    least: SalesPerformanceMyanmarRow[];
+    total_groups: number;
+    total_qty: number;
+    total_amount: number;
+  };
+  thai: {
+    best: SalesPerformanceThaiRow[];
+    least: SalesPerformanceThaiRow[];
+    total_groups: number;
+    total_qty: number;
+    total_amount: number;
   };
 };

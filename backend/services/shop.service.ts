@@ -50,6 +50,20 @@ function mapMasterCategory(row: RowDataPacket) {
 
 const CATEGORY_GROUPS = new Set(['PRODUCT', 'GOLD_CLASS', 'OTHER']);
 
+/** Add calendar months to an ISO yyyy-mm-dd date (local components, no UTC shift). */
+function addMonthsISO(isoDate: string, months: number): string {
+  const parts = String(isoDate || '').slice(0, 10).split('-').map(Number);
+  const y = parts[0] || 1970;
+  const m = parts[1] || 1;
+  const d = parts[2] || 1;
+  const dt = new Date(y, m - 1, d);
+  dt.setMonth(dt.getMonth() + months);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 function normalizeCategoryCode(raw: unknown) {
   return String(raw || '')
     .trim()
@@ -139,6 +153,12 @@ function mapInventory(row: RowDataPacket) {
     stone_price: num(row.stone_price),
     stone_profit_price: num(row.stone_profit_price),
     selling_price_estimated: num(row.selling_price_estimated),
+    craftsmanship_fee_baht: num(row.craftsmanship_fee_baht),
+    craftsmanship_profit_fee_baht: num(row.craftsmanship_profit_fee_baht),
+    selling_price_baht: num(row.selling_price_baht),
+    baht_mmk_rate: row.baht_mmk_rate != null ? num(row.baht_mmk_rate) : undefined,
+    thai_gold_baht_snapshot:
+      row.thai_gold_baht_snapshot != null ? num(row.thai_gold_baht_snapshot) : undefined,
     status: row.status,
     thai_weight_unit: row.thai_weight_unit != null ? num(row.thai_weight_unit) : undefined,
     created_at: toIso(row.created_at),
@@ -415,6 +435,7 @@ function mapLedger(row: RowDataPacket) {
     description: row.description,
     reference_no: row.reference_no ?? undefined,
     date: String(row.date).slice(0, 10),
+    entry_source: row.entry_source != null ? String(row.entry_source) : 'SYSTEM',
   };
 }
 
@@ -430,8 +451,8 @@ async function insertLedger(
   }
 ) {
   await conn.query(
-    `INSERT INTO financial_ledger (type, category, amount, description, reference_no, date)
-     VALUES (:type, :category, :amount, :description, :reference_no, :date)`,
+    `INSERT INTO financial_ledger (type, category, amount, description, reference_no, date, entry_source)
+     VALUES (:type, :category, :amount, :description, :reference_no, :date, 'SYSTEM')`,
     {
       type: entry.type,
       category: entry.category,
@@ -556,14 +577,22 @@ export const shopService = {
       `SELECT setting_key, setting_value FROM shop_settings`
     );
     const map = new Map(rows.map((r) => [String(r.setting_key), String(r.setting_value)]));
-    const pos = (key: string, fallback: number) => {
+    const pos = (key: string, fallback = 0) => {
       const raw = Number(map.get(key));
       return Number.isFinite(raw) && raw > 0 ? raw : fallback;
     };
+    // Prefer baht_mmk_rate (MMK per 1฿). Migrate legacy scaled buy/sell if needed.
+    let bahtMmkRate = pos('baht_mmk_rate');
+    if (!bahtMmkRate) {
+      const sell = pos('baht_to_mmk_sell');
+      const buy = pos('baht_to_mmk_buy');
+      if (sell > 0) bahtMmkRate = Number((100000 / sell).toFixed(4));
+      else if (buy > 0) bahtMmkRate = Number((100000 / buy).toFixed(4));
+      else bahtMmkRate = Number((100000 / 765).toFixed(4));
+    }
     return {
       kyat_to_grams: pos('kyat_to_grams', 16.6),
-      baht_to_mmk_buy: pos('baht_to_mmk_buy', 755),
-      baht_to_mmk_sell: pos('baht_to_mmk_sell', 765),
+      baht_mmk_rate: bahtMmkRate,
       thai_gold_baht: pos('thai_gold_baht', 65000),
     };
   },
@@ -583,8 +612,20 @@ export const shopService = {
       );
     };
     await upsert('kyat_to_grams', data.kyat_to_grams);
-    await upsert('baht_to_mmk_buy', data.baht_to_mmk_buy);
-    await upsert('baht_to_mmk_sell', data.baht_to_mmk_sell);
+    // Single FX: MMK per 1 Baht (also accept legacy keys → convert)
+    if (data.baht_mmk_rate != null) {
+      await upsert('baht_mmk_rate', data.baht_mmk_rate);
+    } else if (data.baht_to_mmk_sell != null) {
+      const sell = Number(data.baht_to_mmk_sell);
+      if (Number.isFinite(sell) && sell > 0) {
+        await upsert('baht_mmk_rate', Number((100000 / sell).toFixed(4)));
+      }
+    } else if (data.baht_to_mmk_buy != null) {
+      const buy = Number(data.baht_to_mmk_buy);
+      if (Number.isFinite(buy) && buy > 0) {
+        await upsert('baht_mmk_rate', Number((100000 / buy).toFixed(4)));
+      }
+    }
     await upsert('thai_gold_baht', data.thai_gold_baht);
     return this.getShopSettings();
   },
@@ -1024,13 +1065,17 @@ export const shopService = {
     return `STG-${Date.now().toString().slice(-8)}`;
   },
 
-  /** Recalculate selling_price_estimated for all IN_STOCK items from live daily prices */
+  /** Recalculate selling_price_estimated for Myanmar IN_STOCK items from live daily prices.
+   * Thai items keep stock-in Baht/MMK freeze — not revalued. */
   async revalueInStockInventory() {
     const prices = await this.listPrices();
     const pure16 = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
     const thaiRate = this.getLivePriceForPurity(prices, 'THAI_GOLD');
     const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT * FROM inventory_items WHERE status = 'IN_STOCK'`
+      `SELECT * FROM inventory_items
+       WHERE status = 'IN_STOCK'
+         AND item_type <> 'THAI_GOLD'
+         AND purity <> 'THAI_GOLD'`
     );
     for (const row of rows) {
       const net: WeightKPY = {
@@ -1223,7 +1268,9 @@ export const shopService = {
         profit_deduction_pae, profit_deduction_yway,
         deduction_pae, deduction_yway,
         net_weight_kyat, net_weight_pae, net_weight_yway,
-        purity, item_type, thai_weight_unit, craftsmanship_fee, craftsmanship_profit_fee, stone_price, stone_profit_price, selling_price_estimated, status, image_url
+        purity, item_type, thai_weight_unit, craftsmanship_fee, craftsmanship_profit_fee, stone_price, stone_profit_price, selling_price_estimated,
+        craftsmanship_fee_baht, craftsmanship_profit_fee_baht, selling_price_baht, baht_mmk_rate, thai_gold_baht_snapshot,
+        status, image_url
       ) VALUES (
         :barcode, :category, :name, :name_mm,
         :weight_kyat, :weight_pae, :weight_yway,
@@ -1232,7 +1279,9 @@ export const shopService = {
         :profit_deduction_pae, :profit_deduction_yway,
         :deduction_pae, :deduction_yway,
         :net_weight_kyat, :net_weight_pae, :net_weight_yway,
-        :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :craftsmanship_profit_fee, :stone_price, :stone_profit_price, :selling_price_estimated, :status, :image_url
+        :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :craftsmanship_profit_fee, :stone_price, :stone_profit_price, :selling_price_estimated,
+        :craftsmanship_fee_baht, :craftsmanship_profit_fee_baht, :selling_price_baht, :baht_mmk_rate, :thai_gold_baht_snapshot,
+        :status, :image_url
       )`,
       {
         barcode,
@@ -1262,6 +1311,12 @@ export const shopService = {
         stone_price: num(data.stone_price),
         stone_profit_price: num(data.stone_profit_price),
         selling_price_estimated: estimated,
+        craftsmanship_fee_baht: num(data.craftsmanship_fee_baht),
+        craftsmanship_profit_fee_baht: num(data.craftsmanship_profit_fee_baht),
+        selling_price_baht: num(data.selling_price_baht),
+        baht_mmk_rate: data.baht_mmk_rate != null ? num(data.baht_mmk_rate) : null,
+        thai_gold_baht_snapshot:
+          data.thai_gold_baht_snapshot != null ? num(data.thai_gold_baht_snapshot) : null,
         status: data.status ?? 'IN_STOCK',
         image_url: data.image_url ?? null,
       }
@@ -1284,7 +1339,9 @@ export const shopService = {
       'deduction_pae', 'deduction_yway',
       'net_weight_kyat', 'net_weight_pae', 'net_weight_yway',
       'purity', 'item_type', 'thai_weight_unit', 'craftsmanship_fee', 'craftsmanship_profit_fee', 'stone_price', 'stone_profit_price',
-      'selling_price_estimated', 'status', 'image_url',
+      'selling_price_estimated',
+      'craftsmanship_fee_baht', 'craftsmanship_profit_fee_baht', 'selling_price_baht', 'baht_mmk_rate', 'thai_gold_baht_snapshot',
+      'status', 'image_url',
     ] as const;
 
     if (updates.category !== undefined) {
@@ -1439,8 +1496,8 @@ export const shopService = {
           .filter((i) => i.line_role === 'TRADE_IN')
           .reduce((s, i) => s + num(i.subtotal), 0);
         totalAmount = Math.max(0, saleSum - tradeSum - discount + tax);
-        if (num(data.total_amount) > 0 && data.use_client_total === true) {
-          totalAmount = num(data.total_amount);
+        if (data.use_client_total === true && data.total_amount !== undefined) {
+          totalAmount = Math.max(0, num(data.total_amount));
         }
       }
 
@@ -1580,20 +1637,40 @@ export const shopService = {
           );
         }
 
-        // Trade-in on exchange only → create stock (purchase never enters inventory)
+        // Trade-in on exchange: return sold item to stock, or create old-gold stock (legacy)
         if (addToStock && txnType === 'EXCHANGE' && raw.line_role === 'TRADE_IN') {
-          await this.insertPurchaseStock(conn, {
-            item_name: String(raw.item_name || 'ရွှေဟောင်း'),
-            category: String(raw.category || 'OLD_GOLD'),
-            weight,
-            net,
-            purity: String(raw.purity),
-            item_type: String(raw.item_type ?? 'MYANMAR_GOLD'),
-            gold_price_snapshot: num(raw.gold_price_snapshot),
-            invoice_no: invoiceNo,
-            thai_weight_unit:
-              raw.thai_weight_unit != null ? num(raw.thai_weight_unit) : null,
-          });
+          if (itemId) {
+            const [soldRows] = await conn.query<RowDataPacket[]>(
+              `SELECT id, status FROM inventory_items WHERE id = :id LIMIT 1`,
+              { id: itemId }
+            );
+            if (!soldRows[0]) {
+              throw new HttpError(404, 'Trade-in inventory item not found');
+            }
+            if (String(soldRows[0].status) !== 'SOLD') {
+              throw new HttpError(
+                400,
+                'လဲမည့်ပစ္စည်းသည် ရောင်းပြီး (SOLD) အခြေအနေဖြစ်ရမည်'
+              );
+            }
+            await conn.query(
+              `UPDATE inventory_items SET status = 'IN_STOCK' WHERE id = :id AND status = 'SOLD'`,
+              { id: itemId }
+            );
+          } else {
+            await this.insertPurchaseStock(conn, {
+              item_name: String(raw.item_name || 'ရွှေဟောင်း'),
+              category: String(raw.category || 'OLD_GOLD'),
+              weight,
+              net,
+              purity: String(raw.purity),
+              item_type: String(raw.item_type ?? 'MYANMAR_GOLD'),
+              gold_price_snapshot: num(raw.gold_price_snapshot),
+              invoice_no: invoiceNo,
+              thai_weight_unit:
+                raw.thai_weight_unit != null ? num(raw.thai_weight_unit) : null,
+            });
+          }
         }
       }
 
@@ -1611,6 +1688,30 @@ export const shopService = {
             reference_no: invoiceNo,
             date: today,
           });
+        }
+
+        // Exchange refund when trade-in credit exceeds new item price
+        if (txnType === 'EXCHANGE') {
+          const saleSum = normalizedItems
+            .filter((i) => i.line_role !== 'TRADE_IN')
+            .reduce((s, i) => s + num(i.subtotal), 0);
+          const tradeSum = normalizedItems
+            .filter((i) => i.line_role === 'TRADE_IN')
+            .reduce((s, i) => s + num(i.subtotal), 0);
+          const refundAmount = Math.max(
+            0,
+            num(data.refund_amount) > 0 ? num(data.refund_amount) : tradeSum - saleSum
+          );
+          if (refundAmount > 0) {
+            await insertLedger(conn, {
+              type: 'EXPENSE',
+              category: 'GOLD_PURCHASE',
+              amount: refundAmount,
+              description: `အလဲအလှယ် ငွေပြန်ပေး ${invoiceNo} (${data.customer_name})`,
+              reference_no: invoiceNo,
+              date: today,
+            });
+          }
         }
 
         if (remainingAmount > 0 && customerId) {
@@ -2756,27 +2857,19 @@ export const shopService = {
       }
 
       const [remaining] = await conn.query<RowDataPacket[]>(
-        `SELECT payment_date, days_paid
+        `SELECT months_paid, days_paid, payment_date, id
          FROM pawn_interest_payments
          WHERE pawn_id = :pawn_id
-         ORDER BY payment_date DESC, id DESC
-         LIMIT 1`,
+         ORDER BY payment_date ASC, id ASC`,
         { pawn_id: pawnId }
       );
 
       let lastInterest = String(pawnRows[0].start_date).slice(0, 10);
-      let nextInterest = lastInterest;
-      if (remaining[0]) {
-        lastInterest = String(remaining[0].payment_date).slice(0, 10);
-        const days = Math.max(1, num(remaining[0].days_paid, 30));
-        const d = new Date(lastInterest);
-        d.setDate(d.getDate() + days);
-        nextInterest = d.toISOString().slice(0, 10);
-      } else {
-        const d = new Date(lastInterest);
-        d.setMonth(d.getMonth() + 1);
-        nextInterest = d.toISOString().slice(0, 10);
+      for (const p of remaining) {
+        const months = Math.max(1, num(p.months_paid, Math.round(num(p.days_paid, 30) / 30) || 1));
+        lastInterest = addMonthsISO(lastInterest, months);
       }
+      const nextInterest = addMonthsISO(lastInterest, 1);
 
       await conn.query(
         `UPDATE pawn_records SET
@@ -2922,11 +3015,10 @@ export const shopService = {
           ? String(data.voucher_no)
           : `INT-${paymentDate.replace(/-/g, '')}-${pawnId}`;
 
-      const nextDate = (() => {
-        const base = new Date(paymentDate);
-        base.setMonth(base.getMonth() + monthsPaid);
-        return base.toISOString().slice(0, 10);
-      })();
+      // နောက်ဆုံးအတိုးရက် = ယခင် last_interest_date (သို့ start_date) + သွင်းရက်စာ လအရေအတွက်
+      const prevLast = String(rows[0].last_interest_date || rows[0].start_date).slice(0, 10);
+      const newLastInterest = addMonthsISO(prevLast, monthsPaid);
+      const nextDate = addMonthsISO(newLastInterest, 1);
 
       await conn.query<ResultSetHeader>(
         `INSERT INTO pawn_interest_payments (
@@ -2951,7 +3043,7 @@ export const shopService = {
         `UPDATE pawn_records SET
            interest_paid_kyat = interest_paid_kyat + :kyat,
            interest_paid_baht = interest_paid_baht + :baht,
-           last_interest_date = :payment_date,
+           last_interest_date = :last_date,
            next_interest_date = :next_date,
            accrued_interest = GREATEST(0, accrued_interest - :kyat)
          WHERE id = :id`,
@@ -2959,7 +3051,7 @@ export const shopService = {
           id: pawnId,
           kyat: interestKyat,
           baht: interestBaht,
-          payment_date: paymentDate,
+          last_date: newLastInterest,
           next_date: nextDate,
         }
       );
@@ -3152,8 +3244,8 @@ export const shopService = {
 
   async addLedgerEntry(data: Record<string, unknown>) {
     const [result] = await getPool().query<ResultSetHeader>(
-      `INSERT INTO financial_ledger (type, category, amount, description, reference_no, date)
-       VALUES (:type, :category, :amount, :description, :reference_no, :date)`,
+      `INSERT INTO financial_ledger (type, category, amount, description, reference_no, date, entry_source)
+       VALUES (:type, :category, :amount, :description, :reference_no, :date, 'MANUAL')`,
       {
         type: data.type,
         category: data.category,
@@ -3312,6 +3404,106 @@ export const shopService = {
         income,
         expense,
         net: income - expense,
+      },
+    };
+  },
+
+  /**
+   * Monthly sales ranking — best / least sold product groups.
+   * Myanmar: category + purity · Thai: gram + category
+   * Sources: SALE lines + EXCHANGE NEW_ITEM lines
+   */
+  async reportSalesPerformance(month?: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const ym =
+      month && /^\d{4}-\d{2}$/.test(month) ? month : today.slice(0, 7);
+    const fromDate = `${ym}-01`;
+    const lastDay = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+    const toDate = `${ym}-${String(lastDay).padStart(2, '0')}`;
+
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT
+          ti.item_type,
+          ti.purity,
+          ti.category,
+          ti.thai_weight_unit,
+          ti.subtotal,
+          ti.net_weight_kyat,
+          ti.net_weight_pae,
+          ti.net_weight_yway
+       FROM transaction_items ti
+       INNER JOIN transactions t ON t.id = ti.transaction_id
+       WHERE DATE(t.created_at) >= :fromDate
+         AND DATE(t.created_at) <= :toDate
+         AND (
+           t.transaction_type = 'SALE'
+           OR (
+             t.transaction_type = 'EXCHANGE'
+             AND (ti.line_role IS NULL OR ti.line_role = '' OR ti.line_role = 'NEW_ITEM')
+           )
+         )`,
+      { fromDate, toDate }
+    );
+
+    type MmKey = string;
+    type ThaiKey = string;
+    const mmMap = new Map<
+      MmKey,
+      { category: string; purity: string; qty: number; total_amount: number }
+    >();
+    const thaiMap = new Map<
+      ThaiKey,
+      { category: string; grams: number; qty: number; total_amount: number }
+    >();
+
+    for (const r of rows) {
+      const itemType = String(r.item_type || '');
+      const purity = String(r.purity || '');
+      const isThai = itemType === 'THAI_GOLD' || purity === 'THAI_GOLD';
+      const category = String(r.category || 'OTHER') || 'OTHER';
+      const amount = num(r.subtotal);
+      if (isThai) {
+        const grams = Number(Number(r.thai_weight_unit || 0).toFixed(2));
+        const key = `${category}|${grams}`;
+        const prev = thaiMap.get(key) || { category, grams, qty: 0, total_amount: 0 };
+        prev.qty += 1;
+        prev.total_amount += amount;
+        thaiMap.set(key, prev);
+      } else {
+        const key = `${category}|${purity}`;
+        const prev = mmMap.get(key) || { category, purity, qty: 0, total_amount: 0 };
+        prev.qty += 1;
+        prev.total_amount += amount;
+        mmMap.set(key, prev);
+      }
+    }
+
+    const sortBest = <T extends { qty: number; total_amount: number }>(a: T, b: T) =>
+      b.qty - a.qty || b.total_amount - a.total_amount;
+    const sortLeast = <T extends { qty: number; total_amount: number }>(a: T, b: T) =>
+      a.qty - b.qty || a.total_amount - b.total_amount;
+
+    const mmAll = Array.from(mmMap.values());
+    const thaiAll = Array.from(thaiMap.values());
+    const LIMIT = 10;
+
+    return {
+      month: ym,
+      from: fromDate,
+      to: toDate,
+      myanmar: {
+        best: [...mmAll].sort(sortBest).slice(0, LIMIT),
+        least: [...mmAll].sort(sortLeast).slice(0, LIMIT),
+        total_groups: mmAll.length,
+        total_qty: mmAll.reduce((s, r) => s + r.qty, 0),
+        total_amount: mmAll.reduce((s, r) => s + r.total_amount, 0),
+      },
+      thai: {
+        best: [...thaiAll].sort(sortBest).slice(0, LIMIT),
+        least: [...thaiAll].sort(sortLeast).slice(0, LIMIT),
+        total_groups: thaiAll.length,
+        total_qty: thaiAll.reduce((s, r) => s + r.qty, 0),
+        total_amount: thaiAll.reduce((s, r) => s + r.total_amount, 0),
       },
     };
   },

@@ -4,7 +4,7 @@ import { api } from '../services/api';
 import {
   formatMMK,
   meelinMmkToBaht,
-  mmkToThaiBaht,
+  resolveBahtMmkRate,
   thaiBahtToMmk,
 } from '../utils/goldCalculations';
 import {
@@ -46,43 +46,34 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [editedMeelin, setEditedMeelin] = useState('');
   const [editedThaiBaht, setEditedThaiBaht] = useState('');
-  const [editedBuy, setEditedBuy] = useState('');
-  const [editedSell, setEditedSell] = useState('');
+  const [editedBahtMmk, setEditedBahtMmk] = useState('');
   const [saving, setSaving] = useState(false);
 
   const pure16 = goldPrices.find((p) => p.gold_type === 'MEELIN');
-  const thaiGold = goldPrices.find((p) => p.gold_type === 'THAI_GOLD');
-  const buyRate = shopSettings.baht_to_mmk_buy || 755;
-  const sellRate = shopSettings.baht_to_mmk_sell || 765;
-  const thaiBahtStored =
-    shopSettings.thai_gold_baht ||
-    mmkToThaiBaht(thaiGold?.price_per_kyat || 0, buyRate) ||
-    65000;
+  const bahtMmkRate = resolveBahtMmkRate(shopSettings);
+  const thaiBahtStored = shopSettings.thai_gold_baht || 65000;
 
   const startEditPrices = () => {
     setEditedMeelin(pure16 ? String(pure16.price_per_kyat) : '9000000');
     setEditedThaiBaht(String(Math.round(thaiBahtStored) || 65000));
-    setEditedBuy(String(buyRate));
-    setEditedSell(String(sellRate));
+    setEditedBahtMmk(String(Number(bahtMmkRate.toFixed(4))));
     setIsEditingPrices(true);
   };
 
   const saveQuickPrices = async () => {
     const meelin = Number(editedMeelin);
     const thaiBaht = Number(editedThaiBaht);
-    const buy = Number(editedBuy);
-    const sell = Number(editedSell);
-    if (![meelin, thaiBaht, buy, sell].every((n) => Number.isFinite(n) && n > 0)) {
+    const bahtMmk = Number(editedBahtMmk);
+    if (![meelin, thaiBaht, bahtMmk].every((n) => Number.isFinite(n) && n > 0)) {
       return;
     }
     setSaving(true);
     try {
       await updateShopSettings({
-        baht_to_mmk_buy: buy,
-        baht_to_mmk_sell: sell,
+        baht_mmk_rate: bahtMmk,
         thai_gold_baht: thaiBaht,
       });
-      const thaiMmk = Math.round(thaiBahtToMmk(thaiBaht, sell));
+      const thaiMmk = Math.round(thaiBahtToMmk(thaiBaht, bahtMmk));
       await api.updateGoldPricesBulk([
         {
           gold_type: 'MEELIN',
@@ -103,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
   };
 
   const meelinBahtDisplay = pure16
-    ? meelinMmkToBaht(pure16.price_per_kyat, buyRate)
+    ? meelinMmkToBaht(pure16.price_per_kyat, bahtMmkRate)
     : 0;
 
   return (
@@ -157,25 +148,17 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                 </div>
                 <div className="flex items-center space-x-1">
                   <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
-                    {language === 'MM' ? 'ဝယ်ဈေး:' : 'Buy:'}
+                    {language === 'MM' ? '၁฿ =' : '1฿ ='}
                   </span>
                   <input
                     type="number"
-                    value={editedBuy}
-                    onChange={(e) => setEditedBuy(e.target.value)}
-                    className="w-16 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
+                    step="0.0001"
+                    value={editedBahtMmk}
+                    onChange={(e) => setEditedBahtMmk(e.target.value)}
+                    className="w-20 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
+                    title="MMK per 1 Baht"
                   />
-                </div>
-                <div className="flex items-center space-x-1">
-                  <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
-                    {language === 'MM' ? 'ရောင်းဈေး:' : 'Sell:'}
-                  </span>
-                  <input
-                    type="number"
-                    value={editedSell}
-                    onChange={(e) => setEditedSell(e.target.value)}
-                    className="w-16 px-2 py-1 text-xs border rounded bg-white dark:bg-[#121212] dark:text-white border-[#D4AF37] focus:outline-hidden font-mono"
-                  />
+                  <span className="text-[10px] text-gray-400">MMK</span>
                 </div>
                 <button
                   onClick={saveQuickPrices}
@@ -215,26 +198,18 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                   </span>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500">
                     (~
-                    {formatMMK(
-                      Math.round(thaiBahtToMmk(thaiBahtStored, sellRate))
-                    )}
-                    )
+                    {formatMMK(Math.round(thaiBahtToMmk(thaiBahtStored, bahtMmkRate)))})
                   </span>
                 </div>
                 <span className="text-gray-300 dark:text-gray-700">|</span>
-                <div className="flex items-center space-x-2 whitespace-nowrap">
+                <div className="flex items-center space-x-1 whitespace-nowrap">
                   <span className="text-gray-500 dark:text-gray-400">
-                    {language === 'MM' ? 'ဝယ်:' : 'Buy:'}
+                    {language === 'MM' ? '၁฿ =' : '1฿ ='}
                   </span>
                   <span className="font-bold text-gray-900 dark:text-amber-300 font-mono">
-                    {buyRate}
+                    {Number(bahtMmkRate.toFixed(2)).toLocaleString()}
                   </span>
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {language === 'MM' ? 'ရောင်း:' : 'Sell:'}
-                  </span>
-                  <span className="font-bold text-gray-900 dark:text-amber-300 font-mono">
-                    {sellRate}
-                  </span>
+                  <span className="text-gray-500 dark:text-gray-400">MMK</span>
                 </div>
                 {can('prices', 'update') && (
                   <button
@@ -298,9 +273,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
               title="Logout / Switch User"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">
-                {language === 'MM' ? 'ထွက်မည်' : 'Logout'}
-              </span>
+              <span className="hidden sm:inline">{language === 'MM' ? 'ထွက်မည်' : 'Logout'}</span>
             </button>
           </div>
         </div>

@@ -292,10 +292,10 @@ export function formatBaht(amount: number): string {
   );
 }
 
-/** Format currency into MMK string */
+/** Format currency into MMK string (nbsp keeps unit on same line) */
 export function formatMMK(amount: number): string {
-  if (isNaN(amount) || amount === null || amount === undefined) return '0 MMK';
-  return new Intl.NumberFormat('en-US').format(Math.round(amount)) + ' MMK';
+  if (isNaN(amount) || amount === null || amount === undefined) return '0\u00A0MMK';
+  return new Intl.NumberFormat('en-US').format(Math.round(amount)) + '\u00A0MMK';
 }
 
 /** Convert numbers to Burmese digits */
@@ -336,35 +336,55 @@ export function generateInvoiceNo(type: string = 'INV'): string {
 }
 
 /**
- * Header FX scale: rate is “per 100,000” (e.g. 755 → 755/100000).
- *
- * SYSTEM RULE (always):
- * - Baht → MMK  = SELL rate (ရောင်းဈေး)
- * - MMK → Baht  = BUY rate (ဝယ်ဈေး)
+ * Baht ↔ MMK using a single rate: MMK per 1 Baht.
+ * Example: rate 130.72 → 1฿ = 130.72 MMK.
  */
-export function bahtToMmk(baht: number, sellRate: number): number {
-  const r = Number(sellRate);
+export function bahtToMmk(baht: number, mmkPerBaht: number): number {
+  const r = Number(mmkPerBaht);
   if (!Number.isFinite(baht) || !Number.isFinite(r) || r <= 0) return 0;
-  return baht / (r / 100000);
+  return baht * r;
 }
 
-export function mmkToBaht(mmk: number, buyRate: number): number {
-  const r = Number(buyRate);
+export function mmkToBaht(mmk: number, mmkPerBaht: number): number {
+  const r = Number(mmkPerBaht);
   if (!Number.isFinite(mmk) || !Number.isFinite(r) || r <= 0) return 0;
-  return mmk * (r / 100000);
+  return mmk / r;
 }
 
-/** Baht → MMK (sell rate) — alias */
-export function thaiBahtToMmk(baht: number, sellRate: number): number {
-  return bahtToMmk(baht, sellRate);
+/** @deprecated same as mmkToBaht — single rate */
+export function mmkToBahtFromSell(mmk: number, mmkPerBaht: number): number {
+  return mmkToBaht(mmk, mmkPerBaht);
 }
 
-/** MMK → Baht (buy rate) — alias */
-export function meelinMmkToBaht(mmk: number, buyRate: number): number {
-  return mmkToBaht(mmk, buyRate);
+/** Baht → MMK — alias */
+export function thaiBahtToMmk(baht: number, mmkPerBaht: number): number {
+  return bahtToMmk(baht, mmkPerBaht);
 }
 
-/** MMK → Baht for Thai edit display (buy rate) — alias */
-export function mmkToThaiBaht(mmk: number, buyRate: number): number {
-  return mmkToBaht(mmk, buyRate);
+/** MMK → Baht — alias */
+export function meelinMmkToBaht(mmk: number, mmkPerBaht: number): number {
+  return mmkToBaht(mmk, mmkPerBaht);
+}
+
+/** MMK → Baht — alias */
+export function mmkToThaiBaht(mmk: number, mmkPerBaht: number): number {
+  return mmkToBaht(mmk, mmkPerBaht);
+}
+
+/**
+ * Resolve MMK-per-Baht from settings.
+ * Migrates legacy scaled buy/sell (rate/100000) → MMK per 1฿.
+ */
+export function resolveBahtMmkRate(settings?: {
+  baht_mmk_rate?: number;
+  baht_to_mmk_buy?: number;
+  baht_to_mmk_sell?: number;
+} | null): number {
+  const direct = Number(settings?.baht_mmk_rate);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const sell = Number(settings?.baht_to_mmk_sell);
+  if (Number.isFinite(sell) && sell > 0) return 100000 / sell;
+  const buy = Number(settings?.baht_to_mmk_buy);
+  if (Number.isFinite(buy) && buy > 0) return 100000 / buy;
+  return 100000 / 765;
 }

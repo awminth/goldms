@@ -78,5 +78,6 @@ router.post('/calc/thai', shopController.calcThai);
 
 router.get('/reports/summary', shopController.reportSummary);
 router.get('/reports/financial', shopController.reportFinancial);
+router.get('/reports/sales-performance', shopController.reportSalesPerformance);
 
 export default router;

@@ -68,6 +68,14 @@ export interface InventoryItem {
   /** ကျောက်ဖိုးအမြတ် (stored MMK) */
   stone_profit_price?: number;
   selling_price_estimated: number;
+  /** Thai entry: Baht amounts frozen at stock-in (with MMK counterparts) */
+  craftsmanship_fee_baht?: number;
+  craftsmanship_profit_fee_baht?: number;
+  selling_price_baht?: number;
+  /** MMK-per-Baht rate used when item was stocked */
+  baht_mmk_rate?: number;
+  /** ထိုင်းရွှေ ฿/ကျပ် rate snapshot at stock-in */
+  thai_gold_baht_snapshot?: number;
   status: 'IN_STOCK' | 'SOLD' | 'RESERVED' | 'UNDER_PAWN' | 'SHOP_OUT' | 'WITH_GOLDSMITH';
   thai_weight_unit?: number;
   created_at: string;
@@ -279,6 +287,8 @@ export interface FinancialLedger {
   description: string;
   reference_no?: string;
   date: string;
+  /** MANUAL = entered in Other Income/Expense UI; SYSTEM = auto from sales/pawn/etc. */
+  entry_source?: 'MANUAL' | 'SYSTEM' | string;
 }
 
 export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER';
@@ -289,16 +299,15 @@ export interface ShopSettings {
   /** 1 ကျပ် = N grams (Myanmar) */
   kyat_to_grams: number;
   /**
-   * Header Baht FX “buy” rate (scale /100000).
-   * Used for: item MMK→Baht, Thai gold Baht→MMK.
+   * MMK for 1 Baht (single FX rate for all Baht↔MMK).
+   * Example: 130.72 → 1฿ = 130.72 MMK.
    */
-  baht_to_mmk_buy: number;
-  /**
-   * Header Baht FX “sell” rate (scale /100000).
-   * Used for: item Baht→MMK, Meelin MMK→Baht display.
-   */
-  baht_to_mmk_sell: number;
-  /** ထိုင်းရွှေ price entered in Baht (Header); MMK derived via buy rate */
+  baht_mmk_rate: number;
+  /** @deprecated migrated into baht_mmk_rate */
+  baht_to_mmk_buy?: number;
+  /** @deprecated migrated into baht_mmk_rate */
+  baht_to_mmk_sell?: number;
+  /** ထိုင်းရွှေ price entered in Baht (Header); MMK derived via baht_mmk_rate */
   thai_gold_baht: number;
 }
 

@@ -34,6 +34,7 @@ export type ActiveTab =
   | 'ledger'
   | 'customers'
   | 'financial-report'
+  | 'sales-performance'
   | 'users'
   | 'permissions'
   | 'unit-conversion';
@@ -51,7 +52,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab 
     { id: 'inventory', label: 'Inventory', icon: Gem },
     { id: 'orders', label: 'Orders', icon: Clock },
     { id: 'pawn', label: 'Pawn', icon: HandCoins },
-    { id: 'ledger', label: 'Ledger', icon: BookOpenCheck },
+    { id: 'ledger', label: 'Other I/E', icon: BookOpenCheck },
     { id: 'financial-report', label: 'Financial', icon: FileBarChart2 },
     { id: 'categories', label: 'Setup', icon: Settings2 },
   ];

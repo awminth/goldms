@@ -1,4 +1,4 @@
-import type { Pool } from 'mysql2/promise';
+import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 export const PERMISSION_MODULES = [
   { key: 'dashboard', name_mm: 'ပင်မစာမျက်နှာ', name_en: 'Dashboard', sort: 10 },
@@ -410,8 +410,8 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
 export async function ensureShopSettings(pool: Pool): Promise<void> {
   const defaults: Array<[string, string]> = [
     ['kyat_to_grams', '16.6'],
-    ['baht_to_mmk_buy', '755'],
-    ['baht_to_mmk_sell', '765'],
+    // MMK per 1 Baht (≈ former sell 765 → 100000/765)
+    ['baht_mmk_rate', '130.719'],
     ['thai_gold_baht', '65000'],
   ];
   for (const [key, value] of defaults) {
@@ -424,9 +424,120 @@ export async function ensureShopSettings(pool: Pool): Promise<void> {
   }
 }
 
+/**
+ * Resolve MMK-per-Baht from shop_settings (migrates legacy buy/sell scale).
+ */
+async function resolveBahtMmkRateFromDb(pool: Pool): Promise<{
+  bahtMmkRate: number;
+  thaiGoldBaht: number;
+}> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT setting_key, setting_value FROM shop_settings
+     WHERE setting_key IN ('baht_mmk_rate','baht_to_mmk_sell','baht_to_mmk_buy','thai_gold_baht')`
+  );
+  const map = new Map(rows.map((r) => [String(r.setting_key), Number(r.setting_value)]));
+  let bahtMmkRate = Number(map.get('baht_mmk_rate'));
+  if (!Number.isFinite(bahtMmkRate) || bahtMmkRate <= 0) {
+    const sell = Number(map.get('baht_to_mmk_sell'));
+    const buy = Number(map.get('baht_to_mmk_buy'));
+    if (Number.isFinite(sell) && sell > 0) bahtMmkRate = Number((100000 / sell).toFixed(4));
+    else if (Number.isFinite(buy) && buy > 0) bahtMmkRate = Number((100000 / buy).toFixed(4));
+    else bahtMmkRate = Number((100000 / 765).toFixed(4));
+    await pool.query(
+      `INSERT INTO shop_settings (setting_key, setting_value)
+       VALUES ('baht_mmk_rate', ?)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+      [String(bahtMmkRate)]
+    );
+  }
+  let thaiGoldBaht = Number(map.get('thai_gold_baht'));
+  if (!Number.isFinite(thaiGoldBaht) || thaiGoldBaht <= 0) thaiGoldBaht = 65000;
+  return { bahtMmkRate, thaiGoldBaht };
+}
+
+/**
+ * Backfill Thai inventory: store Baht counterparts + FX snapshot from existing MMK.
+ *
+ * Existing MMK was saved with the OLD scaled formula (baht * 100000 / sellRate).
+ * Recover Baht with: baht = mmk * sell / 100000, and store
+ * baht_mmk_rate = 100000/sell (MMK per 1฿ under that era).
+ *
+ * Force-rewrites all Thai rows once (flag thai_inv_baht_backfill_v2).
+ */
+export async function backfillThaiInventoryBahtFields(pool: Pool): Promise<number> {
+  const [flagRows] = await pool.query<RowDataPacket[]>(
+    `SELECT setting_value FROM shop_settings WHERE setting_key = 'thai_inv_baht_backfill_v2'`
+  );
+  if (flagRows[0]?.setting_value === '1') {
+    // Still fill any new Thai rows missing rate (idempotent soft pass)
+    const { bahtMmkRate, thaiGoldBaht } = await resolveBahtMmkRateFromDb(pool);
+    if (!(bahtMmkRate > 0)) return 0;
+    const [soft] = await pool.query<ResultSetHeader>(
+      `UPDATE inventory_items
+       SET
+         craftsmanship_fee_baht = ROUND(COALESCE(craftsmanship_fee, 0) / ?, 2),
+         craftsmanship_profit_fee_baht = ROUND(COALESCE(craftsmanship_profit_fee, 0) / ?, 2),
+         selling_price_baht = ROUND(COALESCE(selling_price_estimated, 0) / ?, 2),
+         baht_mmk_rate = ?,
+         thai_gold_baht_snapshot = COALESCE(NULLIF(thai_gold_baht_snapshot, 0), ?)
+       WHERE (item_type = 'THAI_GOLD' OR purity = 'THAI_GOLD')
+         AND (baht_mmk_rate IS NULL OR baht_mmk_rate = 0)`,
+      [bahtMmkRate, bahtMmkRate, bahtMmkRate, bahtMmkRate, thaiGoldBaht]
+    );
+    return Number(soft.affectedRows || 0);
+  }
+
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT setting_key, setting_value FROM shop_settings
+     WHERE setting_key IN ('baht_to_mmk_sell','baht_to_mmk_buy','thai_gold_baht','baht_mmk_rate')`
+  );
+  const map = new Map(rows.map((r) => [String(r.setting_key), Number(r.setting_value)]));
+  const legacySell = Number(map.get('baht_to_mmk_sell'));
+  const legacyBuy = Number(map.get('baht_to_mmk_buy'));
+  // Historical MMK-per-Baht from old scaled sell (fallback buy, then 765)
+  const scale =
+    Number.isFinite(legacySell) && legacySell > 0
+      ? legacySell
+      : Number.isFinite(legacyBuy) && legacyBuy > 0
+        ? legacyBuy
+        : 765;
+  const historicalRate = Number((100000 / scale).toFixed(4));
+  let thaiGoldBaht = Number(map.get('thai_gold_baht'));
+  if (!Number.isFinite(thaiGoldBaht) || thaiGoldBaht <= 0) thaiGoldBaht = 65000;
+
+  // baht = mmk * scale / 100000  (== mmk / historicalRate)
+  const [result] = await pool.query<ResultSetHeader>(
+    `UPDATE inventory_items
+     SET
+       craftsmanship_fee_baht = ROUND(COALESCE(craftsmanship_fee, 0) * ? / 100000, 2),
+       craftsmanship_profit_fee_baht = ROUND(COALESCE(craftsmanship_profit_fee, 0) * ? / 100000, 2),
+       selling_price_baht = ROUND(COALESCE(selling_price_estimated, 0) * ? / 100000, 2),
+       baht_mmk_rate = ?,
+       thai_gold_baht_snapshot = ?
+     WHERE item_type = 'THAI_GOLD' OR purity = 'THAI_GOLD'`,
+    [scale, scale, scale, historicalRate, thaiGoldBaht]
+  );
+
+  await pool.query(
+    `INSERT INTO shop_settings (setting_key, setting_value)
+     VALUES ('thai_inv_baht_backfill_v2', '1')
+     ON DUPLICATE KEY UPDATE setting_value = '1'`
+  );
+
+  return Number(result.affectedRows || 0);
+}
+
 /** Upsert permission modules + fill missing role rows (safe for existing DBs; does not overwrite custom CRUD). */
 export async function ensureMasterAndPermissions(pool: Pool): Promise<void> {
   await ensureShopSettings(pool);
+  try {
+    const n = await backfillThaiInventoryBahtFields(pool);
+    if (n > 0) {
+      console.log(`[migrate] Backfilled Baht/MMK on ${n} Thai inventory item(s)`);
+    }
+  } catch (err) {
+    console.warn('[migrate] Thai inventory Baht backfill skipped:', err);
+  }
 
   const modValues: any[] = [];
   const modSql = PERMISSION_MODULES.map((m) => {

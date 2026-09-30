@@ -26,6 +26,7 @@ export const TAB_TO_PATH: Record<ActiveTab, string> = {
   ledger: 'ledger',
   customers: 'customers',
   'financial-report': 'financial-report',
+  'sales-performance': 'sales-performance',
   users: 'users',
   permissions: 'permissions',
   'unit-conversion': 'unit-conversion',
