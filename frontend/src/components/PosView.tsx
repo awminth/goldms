@@ -13,10 +13,12 @@ import {
   formatBaht,
   formatKPYMyanmar,
   kpyToYway,
+  ywayToKpy,
   calculateNetWeight,
   calculateNetFromParts,
   estimateSellingPrice,
   calculateSaleLineBreakdown,
+  calculateGoldValuation,
   generateInvoiceNo,
   PURITY_LABELS,
   gramsToKpy,
@@ -162,6 +164,25 @@ function thaiDisplayPrices(
   const bahtLine = buildThaiSaleLine(inv, 'BAHT', shopSettings);
   const mmkLine = buildThaiSaleLine(inv, 'MMK', shopSettings);
   return { baht: bahtLine.subtotal, mmk: mmkLine.subtotal };
+}
+
+/** Inventory အလျော့တွက် weight → MMK (same basis as voucher: Net − (Gross − Gem)). */
+function inventoryWastageMmk(
+  inv: InventoryItem,
+  purity: GoldPurity,
+  pricePerKyat: number
+): number {
+  if (!(pricePerKyat > 0)) return 0;
+  const grossY = kpyToYway(inv.weight_kyat, inv.weight_pae, inv.weight_yway);
+  const gemY = kpyToYway(
+    inv.gemstone_weight_kyat || 0,
+    inv.gemstone_weight_pae || 0,
+    inv.gemstone_weight_yway || 0
+  );
+  const netY = kpyToYway(inv.net_weight_kyat, inv.net_weight_pae, inv.net_weight_yway);
+  const wasteY = netY - (grossY - gemY);
+  if (!(wasteY > 0)) return 0;
+  return calculateGoldValuation(ywayToKpy(wasteY), purity, pricePerKyat, pricePerKyat).goldAmount;
 }
 
 function bahtCartLineToMmk(
@@ -411,6 +432,10 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       gold_price_snapshot = breakdown.effectivePricePerKyat;
     }
 
+    const wastage_amount = isThaiItem(inv)
+      ? 0
+      : inventoryWastageMmk(inv, inv.purity, gold_price_snapshot);
+
     setCartItems((prev) => [
       ...prev,
       {
@@ -428,7 +453,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         gold_amount,
         craftsmanship_fee,
         stone_price,
-        wastage_amount: 0,
+        wastage_amount,
         subtotal,
         item_type: inv.item_type,
         thai_weight_unit: inv.thai_weight_unit,
@@ -490,7 +515,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
 
   const updateCartLine = (
     id: string,
-    patch: Partial<Pick<TransactionItem, 'gold_amount' | 'craftsmanship_fee' | 'stone_price' | 'wastage_amount'>>
+    patch: Partial<Pick<TransactionItem, 'gold_amount' | 'craftsmanship_fee' | 'stone_price'>>
   ) => {
     setCartItems((prev) =>
       prev.map((item) => {
@@ -504,9 +529,9 @@ export const PosView: React.FC<Props> = ({ mode }) => {
           next.wastage_amount = 0;
           next.subtotal = Math.max(0, gold + craft);
         } else {
+          // အလျော့တွက် is already in net-weight gold; show inventory value only — do not subtract again
           const stone = Number(next.stone_price || 0);
-          const waste = Number(next.wastage_amount || 0);
-          next.subtotal = Math.max(0, gold + craft + stone - waste);
+          next.subtotal = Math.max(0, gold + craft + stone);
         }
         return next;
       })
@@ -1803,24 +1828,14 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                           />
                         </div>
                         {!isThaiItem(item) && (
-                          <>
-                            <div>
-                              <label className="text-[10px] text-gray-400">ကျောက်ဖိုး</label>
-                              <NumberInput
-                                value={Number(item.stone_price || 0)}
-                                onChange={(v) => updateCartLine(item.id, { stone_price: v })}
-                                className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-gray-400">အလျော့တွက်</label>
-                              <NumberInput
-                                value={Number(item.wastage_amount || 0)}
-                                onChange={(v) => updateCartLine(item.id, { wastage_amount: v })}
-                                className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-                              />
-                            </div>
-                          </>
+                          <div>
+                            <label className="text-[10px] text-gray-400">ကျောက်ဖိုး</label>
+                            <NumberInput
+                              value={Number(item.stone_price || 0)}
+                              onChange={(v) => updateCartLine(item.id, { stone_price: v })}
+                              className="w-full px-1.5 py-1 text-[11px] font-mono rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
+                            />
+                          </div>
                         )}
                       </div>
                       <div className="text-right font-mono font-bold text-gray-900 dark:text-amber-300">
@@ -1876,8 +1891,8 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                           </tr>
                           <tr>
                             <td className="px-2 py-1.5 text-gray-600">{language === 'MM' ? 'အလျော့တွက်' : 'Wastage'}</td>
-                            <td className="px-2 py-1.5 text-right font-mono font-bold text-rose-600">
-                              −{formatSaleMoney(totalWastageCart)}
+                            <td className="px-2 py-1.5 text-right font-mono font-bold">
+                              {formatSaleMoney(totalWastageCart)}
                             </td>
                           </tr>
                         </>

@@ -52,6 +52,7 @@ const GOLD_KINDS = [
   { code: 'MYANMAR', mm: 'မြန်မာရွှေ', en: 'Myanmar Gold' },
   { code: 'BAR', mm: 'အခေါက်ရွှေ', en: 'Fine / Bar Gold' },
   { code: 'THAI', mm: 'ထိုင်းရွှေ', en: 'Thai Gold' },
+  { code: 'MIXED', mm: 'အမယ်စုံ', en: 'Mixed items' },
 ];
 
 function weightDecimal(r: Pick<PawnRecord, 'weight' | 'weight_grams'>): number {
@@ -279,25 +280,21 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const productCats = masterCategories.filter((c) => c.category_group === 'PRODUCT' && c.is_active);
-  const itemTypeOptions = (() => {
-    const base =
-      productCats.length > 0
-        ? productCats.map((c) => ({ code: c.code, mm: c.name_mm, en: c.name_en }))
-        : [
-            { code: 'RING', mm: 'လက်စွပ်', en: 'Ring' },
-            { code: 'NECKLACE', mm: 'လည်ဆွဲ', en: 'Necklace' },
-            { code: 'BRACELET', mm: 'လက်ကောက်', en: 'Bracelet' },
-            { code: 'EARRING', mm: 'နားကပ်', en: 'Earrings' },
-            { code: 'PENDANT', mm: 'ဆွဲသီး', en: 'Pendant' },
-            { code: 'BANGLE', mm: 'လက်ကြပ်', en: 'Bangle' },
-          ];
-    if (!base.some((o) => o.code === 'MIXED')) {
-      base.push({ code: 'MIXED', mm: 'အမယ်စုံ', en: 'Mixed items' });
-    }
-    return base;
-  })();
-  const isMixedItems = formItemType === 'MIXED';
+  const productCats = masterCategories.filter(
+    (c) => c.category_group === 'PRODUCT' && c.is_active && c.code !== 'MIXED'
+  );
+  const itemTypeOptions =
+    productCats.length > 0
+      ? productCats.map((c) => ({ code: c.code, mm: c.name_mm, en: c.name_en }))
+      : [
+          { code: 'RING', mm: 'လက်စွပ်', en: 'Ring' },
+          { code: 'NECKLACE', mm: 'လည်ဆွဲ', en: 'Necklace' },
+          { code: 'BRACELET', mm: 'လက်ကောက်', en: 'Bracelet' },
+          { code: 'EARRING', mm: 'နားကပ်', en: 'Earrings' },
+          { code: 'PENDANT', mm: 'ဆွဲသီး', en: 'Pendant' },
+          { code: 'BANGLE', mm: 'လက်ကြပ်', en: 'Bangle' },
+        ];
+  const isMixedItems = formGoldKind === 'MIXED';
   const loanIsBaht = formLoanCurrency === 'BAHT';
 
   const pure16Price = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
@@ -421,8 +418,9 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     setFormName(r.customer_name);
     setFormItem(r.item_name);
     setFormPhone(r.customer_phone || '');
-    setFormGoldKind(r.gold_kind || 'MYANMAR');
-    setFormItemType(r.item_type || 'RING');
+    const legacyMixed = r.item_type === 'MIXED' || r.gold_kind === 'MIXED';
+    setFormGoldKind(legacyMixed ? 'MIXED' : r.gold_kind || 'MYANMAR');
+    setFormItemType(r.item_type === 'MIXED' ? 'RING' : r.item_type || 'RING');
     setFormPurity(r.purity);
     setFormStart(r.start_date);
     setFormDue(r.due_date);

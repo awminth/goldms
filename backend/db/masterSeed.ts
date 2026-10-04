@@ -101,15 +101,8 @@ export const DEFAULT_CATEGORIES: Array<{
       description: 'Buyback / scrap old gold',
       sort: 90,
     },
-    {
-      code: 'MIXED',
-      name_mm: 'အမယ်စုံ',
-      name_en: 'Mixed items',
-      category_group: 'PRODUCT',
-      description: 'Multiple pawn items (comma-separated names)',
-      sort: 95,
-    },
     // —— Categories = shop gold classes (Setup → Categories) ——
+    // Note: pawn-only "အမယ်စုံ" (MIXED) lives in PawnView GOLD_KINDS — not PRODUCT / GOLD_CLASS.
     {
       code: 'MEELIN',
       name_mm: 'မီးလင်း',
@@ -275,6 +268,11 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
     `DELETE FROM master_categories
      WHERE category_group = 'GOLD_CLASS' AND code NOT IN (${placeholders})`,
     GOLD_CLASS_CODES
+  );
+
+  // MIXED (အမယ်စုံ) is pawn gold_kind only — never a product / purity category
+  await pool.query(
+    `DELETE FROM master_categories WHERE code = 'MIXED' AND category_group IN ('PRODUCT', 'GOLD_CLASS', 'OTHER')`
   );
 
   for (const c of DEFAULT_CATEGORIES) {
