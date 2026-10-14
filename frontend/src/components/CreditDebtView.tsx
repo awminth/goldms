@@ -757,7 +757,7 @@ export const CreditDebtView: React.FC<Props> = ({ initialDebtType = 'RECEIVABLE'
                           className={
                             item.status === 'SETTLED'
                               ? 'text-gray-400 line-through'
-                              : isRec
+                              : item.type === 'RECEIVABLE'
                               ? 'text-emerald-700 dark:text-emerald-300'
                               : 'text-rose-700 dark:text-rose-300'
                           }

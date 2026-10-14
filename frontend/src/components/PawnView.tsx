@@ -13,6 +13,7 @@ import {
 } from '../utils/goldCalculations';
 import {
   ArrowLeft,
+  CalendarDays,
   Coins,
   Eye,
   Pencil,
@@ -27,7 +28,7 @@ import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
-import { formatDate } from '../utils/dateFormat';
+import { formatDate, inDateRange } from '../utils/dateFormat';
 import { ModalOverlay } from './ModalOverlay';
 import { DataTable, type DataTableColumn } from './DataTable';
 
@@ -249,6 +250,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
 
   const [qSearch, setQSearch] = useState('');
   const [searchTick, setSearchTick] = useState(0);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [detailView, setDetailView] = useState<DetailViewState | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -516,6 +519,11 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section, editId]);
 
+  useEffect(() => {
+    setDateFrom('');
+    setDateTo('');
+  }, [section]);
+
   const duePreview = (() => {
     if (formDue) return formDue;
     const d = new Date(formStart);
@@ -559,6 +567,21 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     });
   };
 
+  const filterByDateRange = (
+    rows: Record<string, unknown>[],
+    getDate: (row: Record<string, unknown>) => string | null | undefined
+  ) => {
+    if (!dateFrom && !dateTo) return rows;
+    let from = dateFrom || '0000-01-01';
+    let to = dateTo || '9999-12-31';
+    if (from > to) {
+      const tmp = from;
+      from = to;
+      to = tmp;
+    }
+    return rows.filter((r) => inDateRange(getDate(r), from, to));
+  };
+
   const activePawns = useMemo(
     () => pawnRecords.filter((r) => r.status === 'ACTIVE' || r.status === 'OVERDUE'),
     [pawnRecords]
@@ -584,26 +607,47 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   );
 
   const listPawnRows = filterBySearch(
-    activePawns as unknown as Record<string, unknown>[]
+    filterByDateRange(activePawns as unknown as Record<string, unknown>[], (r) =>
+      String(r.start_date || '')
+    )
   ) as unknown as PawnRecord[];
   const listInterestRows = filterBySearch(
-    interestRowsWithStatus as unknown as Record<string, unknown>[]
+    filterByDateRange(interestRowsWithStatus as unknown as Record<string, unknown>[], (r) =>
+      String(r.payment_date || '')
+    )
   ) as unknown as PawnInterestPayment[];
   const listRedeemRows = filterBySearch(
-    redeemedPawns as unknown as Record<string, unknown>[]
+    filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
+      String(r.redeem_date || '')
+    )
   ) as unknown as PawnRecord[];
   const overduePawns = useMemo(
     () => pawnRecords.filter((r) => isOverduePawn(r)),
     [pawnRecords]
   );
   const listOverdueRows = filterBySearch(
-    overduePawns as unknown as Record<string, unknown>[]
+    filterByDateRange(overduePawns as unknown as Record<string, unknown>[], (r) =>
+      String(r.due_date || '')
+    )
   ) as unknown as PawnRecord[];
   const selectList = filterBySearch(
     activePawns as unknown as Record<string, unknown>[]
   ) as unknown as PawnRecord[];
 
   const selectPager = useClientPagination(selectList, [searchTick, qSearch, section]);
+
+  const listDateFieldHint = useMemo(() => {
+    if (section === 'interest-list') {
+      return language === 'MM' ? 'အတိုးပေးရက်' : 'Payment date';
+    }
+    if (section === 'redeem-list') {
+      return language === 'MM' ? 'ရွေးရက်' : 'Redeem date';
+    }
+    if (section === 'overdue-list') {
+      return language === 'MM' ? 'စာချုပ်နောက်ဆုံးရက်' : 'Due date';
+    }
+    return language === 'MM' ? 'အပေါင်ရက်' : 'Pawn date';
+  }, [section, language]);
 
   const listPawnTotals = useMemo(() => {
     const count = listPawnRows.length;
@@ -1804,31 +1848,73 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   );
 
   const searchBar = (
-    <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 p-3 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center w-full">
-      <div className="relative flex-1 min-w-0">
-        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        <input
-          className={`${inputCls} pl-8`}
-          value={qSearch}
-          onChange={(e) => setQSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') setSearchTick((n) => n + 1);
-          }}
-          placeholder={
-            language === 'MM'
-              ? 'အမည် / ပစ္စည်း / VNO / ဖုန်း / Status… ရှာရန်'
-              : 'Search name / item / VNO / phone / status…'
-          }
-        />
+    <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2 w-full">
+      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center w-full">
+        <div className="relative flex-1 min-w-0">
+          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            className={`${inputCls} pl-8`}
+            value={qSearch}
+            onChange={(e) => setQSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') setSearchTick((n) => n + 1);
+            }}
+            placeholder={
+              language === 'MM'
+                ? 'အမည် / ပစ္စည်း / VNO / ဖုန်း / Status… ရှာရန်'
+                : 'Search name / item / VNO / phone / status…'
+            }
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setSearchTick((n) => n + 1)}
+          className="h-[34px] px-4 shrink-0 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1"
+        >
+          <Search className="w-3.5 h-3.5" />
+          {language === 'MM' ? 'ရှာဖွေမည်' : 'Search'}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={() => setSearchTick((n) => n + 1)}
-        className="h-[34px] px-4 shrink-0 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1"
-      >
-        <Search className="w-3.5 h-3.5" />
-        {language === 'MM' ? 'ရှာဖွေမည်' : 'Search'}
-      </button>
+
+      {!isForm && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+            <CalendarDays className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>{language === 'MM' ? 'ရက်စွဲ' : 'Date'}</span>
+            <span className="text-[10px] font-normal text-gray-400">({listDateFieldHint})</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+              <span>{language === 'MM' ? 'မှ' : 'From'}</span>
+              <DateInput
+                value={dateFrom}
+                onChange={setDateFrom}
+                className="w-36 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-mono"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+              <span>{language === 'MM' ? 'ထိ' : 'To'}</span>
+              <DateInput
+                value={dateTo}
+                onChange={setDateTo}
+                className="w-36 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-mono"
+              />
+            </div>
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom('');
+                  setDateTo('');
+                }}
+                className="h-[34px] px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-[11px] font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              >
+                {language === 'MM' ? 'ရက်စွဲ ရှင်းမည်' : 'Clear dates'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -2396,7 +2482,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, section]}
+          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => pawnStatusRowClass(effectivePawnStatus(r))}
         />
@@ -2411,7 +2497,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, section]}
+          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => {
             const p = pawnById.get(String(r.pawn_id));
@@ -2429,7 +2515,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, section]}
+          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => pawnStatusRowClass(r.status)}
         />
@@ -2444,7 +2530,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, section]}
+          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'ရက်လွန် အပေါင် မရှိပါ' : 'No overdue pawns'}
           rowClassName={() => pawnStatusRowClass('OVERDUE')}
         />

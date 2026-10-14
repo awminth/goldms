@@ -15,7 +15,7 @@ import {
   OLD_GOLD_CATEGORY_CONFIG,
   OldGoldCategoryKey,
 } from '../utils/goldCalculations';
-import { formatDate } from '../utils/dateFormat';
+import { formatDate, todayISO } from '../utils/dateFormat';
 import { exportToExcel } from '../utils/excelExport';
 import type { ActiveTab } from './Navigation';
 import {
@@ -40,6 +40,7 @@ import {
   FileSpreadsheet,
   List,
   PackageMinus,
+  CalendarDays,
 } from 'lucide-react';
 import { ModalOverlay } from './ModalOverlay';
 import { NumberInput } from './NumberInput';
@@ -48,7 +49,7 @@ import { DateInput } from './DateInput';
 type FlowTab = 'INFLOW' | 'OUTFLOW';
 type CategoryFilter = 'ALL' | OldGoldCategoryKey;
 
-type InflowSource = 'PURCHASE' | 'SHOP_OUT' | 'PAWN_CONFISCATED' | 'OTHER_IN';
+type InflowSource = 'PURCHASE' | 'SHOP_OUT' | 'PAWN_CONFISCATED' | 'OTHER_IN' | 'EXCHANGE';
 
 type OldGoldInflowRow = {
   key: string;
@@ -97,6 +98,19 @@ type OldGoldOutflowRow = {
 
 const CATEGORY_KEYS: OldGoldCategoryKey[] = ['THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14'];
 
+function toDayISO(value?: string | null): string {
+  if (!value) return '';
+  const s = String(value).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 interface OldGoldViewProps {
   section?: 'summary' | 'outflows';
   onNavigate?: (tab: ActiveTab) => void;
@@ -144,6 +158,9 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
 
   // Search keyword
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Summary date filter (default: today)
+  const [summaryDate, setSummaryDate] = useState(() => todayISO());
 
   // Merchant Return (ကုန်သည်ပြန်ပေး) modal state
   const [mrOpen, setMrOpen] = useState(false);
@@ -233,10 +250,14 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
       if (
         t.transaction_type !== 'PURCHASE' &&
         t.transaction_type !== 'SHOP_OUT' &&
-        t.transaction_type !== 'OTHER_IN'
+        t.transaction_type !== 'OTHER_IN' &&
+        t.transaction_type !== 'EXCHANGE'
       )
         continue;
       for (const item of t.items) {
+        if (t.transaction_type === 'EXCHANGE' && item.line_role !== 'TRADE_IN') {
+          continue; // only trade-in old gold is inflow
+        }
         const catKey = getOldGoldCategory(item.purity, item.item_type);
         const unit = Number(item.thai_weight_unit || 0);
         const grams =
@@ -252,13 +273,17 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
               ? 'အဝယ်'
               : t.transaction_type === 'OTHER_IN'
                 ? 'အခြားရွှေအဝင်'
-                : 'ဆိုင်ထုတ်',
+                : t.transaction_type === 'EXCHANGE'
+                  ? 'အလဲအလှယ်'
+                  : 'ဆိုင်ထုတ်',
           sourceLabelEn:
             t.transaction_type === 'PURCHASE'
               ? 'Purchase'
               : t.transaction_type === 'OTHER_IN'
                 ? 'Other Inflow'
-                : 'Shop Out',
+                : t.transaction_type === 'EXCHANGE'
+                  ? 'Exchange Trade-in'
+                  : 'Shop Out',
           invoice_no: t.invoice_no,
           created_at: t.created_at,
           customer_name: t.customer_name || '—',
@@ -528,6 +553,92 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
       balanceGrams: Number(Math.max(0, inG - outG).toFixed(3)),
     };
   }, [inflowRows, outflowRows, categoryStats]);
+
+  /**
+   * Per-category daily summary for selected date:
+   * - shopStock (ဆိုင်ရှိအဟောင်းထည်): opening = inflows before date − outflows before date
+   * - dayIn (ယနေ့အဟောင်းအဝင်): inflows on selected date
+   * - dayOut (ယနေ့အဟောင်းအထွက်): outflows on selected date
+   * - balance (စုစုပေါင်းလက်ကျန်): shopStock + dayIn − dayOut
+   */
+  const dateCategorySummary = useMemo(() => {
+    const day = summaryDate || todayISO();
+    const rows = CATEGORY_KEYS.map((key) => {
+      const cfg = OLD_GOLD_CATEGORY_CONFIG[key];
+      let beforeIn = 0;
+      let beforeOut = 0;
+      let dayIn = 0;
+      let dayInCount = 0;
+      let dayOut = 0;
+      let dayOutCount = 0;
+
+      for (const r of inflowRows) {
+        if (r.goldCategory !== key) continue;
+        const d = toDayISO(r.created_at);
+        if (!d) continue;
+        if (d < day) beforeIn += r.net_grams;
+        else if (d === day) {
+          dayIn += r.net_grams;
+          dayInCount += 1;
+        }
+      }
+
+      for (const r of outflowRows) {
+        if (r.category !== key) continue;
+        const d = toDayISO(r.created_at);
+        if (!d) continue;
+        if (d < day) beforeOut += r.grams;
+        else if (d === day) {
+          dayOut += r.grams;
+          dayOutCount += 1;
+        }
+      }
+
+      const shopStock = Number(Math.max(0, beforeIn - beforeOut).toFixed(3));
+      dayIn = Number(dayIn.toFixed(3));
+      dayOut = Number(dayOut.toFixed(3));
+      const balance = Number(Math.max(0, shopStock + dayIn - dayOut).toFixed(3));
+
+      return {
+        key,
+        nameMm: cfg.nameMm,
+        nameEn: cfg.nameEn,
+        badgeClass: cfg.badgeClass,
+        shopStock,
+        dayIn,
+        dayInCount,
+        dayOut,
+        dayOutCount,
+        balance,
+      };
+    });
+
+    const totals = rows.reduce(
+      (acc, r) => {
+        acc.shopStock += r.shopStock;
+        acc.dayIn += r.dayIn;
+        acc.dayInCount += r.dayInCount;
+        acc.dayOut += r.dayOut;
+        acc.dayOutCount += r.dayOutCount;
+        acc.balance += r.balance;
+        return acc;
+      },
+      { shopStock: 0, dayIn: 0, dayInCount: 0, dayOut: 0, dayOutCount: 0, balance: 0 }
+    );
+
+    return {
+      day,
+      rows,
+      totals: {
+        shopStock: Number(totals.shopStock.toFixed(3)),
+        dayIn: Number(totals.dayIn.toFixed(3)),
+        dayInCount: totals.dayInCount,
+        dayOut: Number(totals.dayOut.toFixed(3)),
+        dayOutCount: totals.dayOutCount,
+        balance: Number(totals.balance.toFixed(3)),
+      },
+    };
+  }, [inflowRows, outflowRows, summaryDate]);
 
   // Filtered rows for current view
   const filteredInflows = useMemo(() => {
@@ -1516,34 +1627,161 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
           </div>
         </div>
 
-        {/* Overall Total Summary Bar */}
-        <div className="mt-4 p-3 rounded-xl bg-slate-900 text-white dark:bg-[#121212] dark:border dark:border-gray-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <Scale className="w-4 h-4 text-amber-400" />
-            <span className="font-bold">
-              {language === 'MM' ? 'စုစုပေါင်း လက်ကျန်' : 'Total Net Available'}:
-            </span>
-            <span className="font-mono text-sm font-extrabold text-amber-400">
-              {overallTotals.balanceGrams.toFixed(3)} g
-            </span>
+        {/* Daily summary (date-filtered) */}
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-extrabold tracking-wide">
+                  {language === 'MM' ? 'နေ့စဉ်' : 'DAILY'}
+                </span>
+                <h2 className="text-sm font-bold text-gray-900 dark:text-white">
+                  {language === 'MM' ? 'နေ့စဉ် စာရင်းချုပ်' : 'Daily Summary'}
+                </h2>
+                {summaryDate === todayISO() && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 text-[10px] font-semibold">
+                    {language === 'MM' ? 'ယနေ့' : 'Today'}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                {language === 'MM'
+                  ? 'ရွေးချယ်ထားသော ရက်တစ်ရက်အတွက်သာ — ဆိုင်ရှိလက်ကျန်၊ ယနေ့အဝင်၊ ယနေ့အထွက်'
+                  : 'For the selected date only — opening stock, day in, day out'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 hidden sm:block" />
+              <DateInput
+                value={summaryDate}
+                onChange={setSummaryDate}
+                className="w-full sm:w-44 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
+              />
+              {summaryDate !== todayISO() && (
+                <button
+                  type="button"
+                  onClick={() => setSummaryDate(todayISO())}
+                  className="px-3 py-2 rounded-xl text-[11px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer whitespace-nowrap"
+                >
+                  {language === 'MM' ? 'ယနေ့' : 'Today'}
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px] font-mono text-gray-300">
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              {language === 'MM' ? 'စုစုပေါင်း အဝင်' : 'Total In'}:{' '}
-              <strong className="text-white">{overallTotals.inflowGrams.toFixed(3)} g</strong> (
-              {overallTotals.inflowCount})
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-rose-400"></span>
-              {language === 'MM' ? 'စုစုပေါင်း အထွက်' : 'Total Out'}:{' '}
-              <strong className="text-white">{overallTotals.outflowGrams.toFixed(3)} g</strong> (
-              {overallTotals.outflowCount})
-            </span>
+          <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-yellow-950/20 border border-amber-200 dark:border-amber-800/50 overflow-hidden shadow-xs">
+            <div className="px-3 py-2.5 border-b border-amber-200/80 dark:border-amber-800/40 flex flex-wrap items-center justify-between gap-2 text-[11px] bg-amber-100/50 dark:bg-amber-950/30">
+              <div className="flex items-center gap-2">
+                <Scale className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                <span className="font-bold text-amber-950 dark:text-amber-100">
+                  {language === 'MM' ? 'နေ့စဉ် — ရွှေအမျိုးအစားအလိုက်' : 'Daily — by gold type'}
+                </span>
+                <span className="font-mono text-amber-700/70 dark:text-amber-300/70">
+                  ({formatDate(dateCategorySummary.day)})
+                </span>
+              </div>
+              <div className="font-mono text-amber-800 dark:text-amber-300 font-extrabold">
+                {language === 'MM' ? 'နေ့စဉ် လက်ကျန်' : 'Daily net'}:{' '}
+                {dateCategorySummary.totals.balance.toFixed(3)} g
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px] text-left border-collapse min-w-[640px]">
+                <thead>
+                  <tr className="bg-amber-100/70 dark:bg-amber-950/40 text-amber-900/80 dark:text-amber-200/80 border-b border-amber-200 dark:border-amber-800/40">
+                    <th className="px-3 py-2.5 font-bold w-10">စဉ်</th>
+                    <th className="px-3 py-2.5 font-bold">
+                      {language === 'MM' ? 'ရွှေအမျိုးအစား' : 'Gold Type'}
+                    </th>
+                    <th className="px-3 py-2.5 font-bold text-right">
+                      {language === 'MM' ? 'ဆိုင်ရှိအဟောင်းထည်' : 'Shop stock'}
+                    </th>
+                    <th className="px-3 py-2.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                      {language === 'MM' ? 'ယနေ့အဟောင်းအဝင်' : 'Day inflow'}
+                    </th>
+                    <th className="px-3 py-2.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                      {language === 'MM' ? 'ယနေ့အဟောင်းအထွက်' : 'Day outflow'}
+                    </th>
+                    <th className="px-3 py-2.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                      {language === 'MM' ? 'စုစုပေါင်းလက်ကျန်' : 'Net balance'}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100 dark:divide-amber-900/30">
+                  {dateCategorySummary.rows.map((cat, idx) => (
+                    <tr key={cat.key} className="hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition">
+                      <td className="px-3 py-2.5 font-mono text-amber-700/50 dark:text-amber-400/50">{idx + 1}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${cat.badgeClass}`}>
+                          {language === 'MM' ? cat.nameMm : cat.nameEn}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        {cat.shopStock.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {cat.dayIn.toFixed(3)} g
+                        <span className="text-gray-400 dark:text-gray-500 ml-1">({cat.dayInCount})</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        {cat.dayOut.toFixed(3)} g
+                        <span className="text-gray-400 dark:text-gray-500 ml-1">({cat.dayOutCount})</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                        {cat.balance.toFixed(3)} g
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t border-amber-200 dark:border-amber-800/50 font-bold">
+                    <td className="px-3 py-2.5 text-amber-950 dark:text-amber-100" colSpan={2}>
+                      {language === 'MM' ? 'နေ့စဉ် စုစုပေါင်း' : 'Daily total'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                      {dateCategorySummary.totals.shopStock.toFixed(3)} g
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                      {dateCategorySummary.totals.dayIn.toFixed(3)} g
+                      <span className="text-gray-400 dark:text-gray-500 ml-1 font-normal">
+                        ({dateCategorySummary.totals.dayInCount})
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                      {dateCategorySummary.totals.dayOut.toFixed(3)} g
+                      <span className="text-gray-400 dark:text-gray-500 ml-1 font-normal">
+                        ({dateCategorySummary.totals.dayOutCount})
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                      {dateCategorySummary.totals.balance.toFixed(3)} g
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Lifetime summary section */}
+      <div className="space-y-3">
+        <div className="space-y-1 px-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-700 text-white text-[10px] font-extrabold tracking-wide">
+              {language === 'MM' ? 'အစဉ်အဆက်' : 'LIFETIME'}
+            </span>
+            <h2 className="text-sm font-bold text-gray-900 dark:text-white">
+              {language === 'MM' ? 'စုစုပေါင်း အားလုံး (Lifetime)' : 'Lifetime Totals'}
+            </h2>
+          </div>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            {language === 'MM'
+              ? 'ရက်စွဲ မစစ်ဘဲ — အစမှ ယနေ့အထိ အဝင်/အထွက် စုစုပေါင်း (အပေါ် Daily နှင့် မတူပါ)'
+              : 'All-time totals — not filtered by the date above (different from Daily)'}
+          </p>
+        </div>
 
       {/* Main Tabs (အဝင် vs အထွက်) */}
       <div className="bg-white dark:bg-[#1A1A1A] p-3 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
@@ -1560,7 +1798,7 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
               }`}
             >
               <ArrowDownRight className="w-3.5 h-3.5" />
-              <span>{language === 'MM' ? 'အဝင် စာရင်းချုပ်' : 'Inflow Summary'}</span>
+              <span>{language === 'MM' ? 'Lifetime အဝင်' : 'Lifetime Inflow'}</span>
               <span
                 className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
                   flowTab === 'INFLOW' ? 'bg-black/20 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
@@ -1580,7 +1818,7 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
               }`}
             >
               <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>{language === 'MM' ? 'အထွက် စာရင်းချုပ်' : 'Outflow Summary'}</span>
+              <span>{language === 'MM' ? 'Lifetime အထွက်' : 'Lifetime Outflow'}</span>
               <span
                 className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
                   flowTab === 'OUTFLOW' ? 'bg-black/20 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
@@ -1612,11 +1850,14 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
               <h2 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                {language === 'MM' ? 'အဟောင်းထည် အဝင် စာရင်းချုပ်' : 'Old Gold Inflow Summary'}
+                {language === 'MM' ? 'Lifetime — အဟောင်းထည် အဝင်' : 'Lifetime — Inflow by type'}
               </h2>
+              <span className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-semibold">
+                {language === 'MM' ? 'အားလုံး' : 'All time'}
+              </span>
             </div>
             <div className="text-[11px] font-mono text-gray-600 dark:text-gray-300">
-              <span className="text-gray-500 font-sans mr-1">{language === 'MM' ? 'စုစုပေါင်း:' : 'Total:'}</span>
+              <span className="text-gray-500 font-sans mr-1">{language === 'MM' ? 'Lifetime စုစုပေါင်း:' : 'Lifetime total:'}</span>
               <strong className="text-gray-900 dark:text-white font-bold">{overallTotals.inflowCount}</strong> {language === 'MM' ? 'ခု' : 'items'}
               <span className="mx-1.5 text-gray-300 dark:text-gray-600">|</span>
               <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{overallTotals.inflowGrams.toFixed(3)} g</strong>
@@ -1654,7 +1895,7 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
               <tfoot>
                 <tr className="bg-gray-50/80 dark:bg-[#141414] border-t-2 border-gray-200 dark:border-gray-700 font-bold">
                   <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-bold" colSpan={2}>
-                    {language === 'MM' ? 'စုစုပေါင်း အားလုံး' : 'Total All'}
+                    {language === 'MM' ? 'Lifetime စုစုပေါင်း' : 'Lifetime total'}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-gray-900 dark:text-white font-bold">
                     {overallTotals.inflowCount} {language === 'MM' ? 'ခု' : 'items'}
@@ -1676,11 +1917,14 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
                 <h2 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                  {language === 'MM' ? 'အဟောင်းထည် အထွက် စာရင်းချုပ်' : 'Old Gold Outflow Summary'}
+                  {language === 'MM' ? 'Lifetime — အဟောင်းထည် အထွက်' : 'Lifetime — Outflow by type'}
                 </h2>
+                <span className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-semibold">
+                  {language === 'MM' ? 'အားလုံး' : 'All time'}
+                </span>
               </div>
               <div className="text-[11px] font-mono text-gray-600 dark:text-gray-300">
-                <span className="text-gray-500 font-sans mr-1">{language === 'MM' ? 'စုစုပေါင်း:' : 'Total:'}</span>
+                <span className="text-gray-500 font-sans mr-1">{language === 'MM' ? 'Lifetime စုစုပေါင်း:' : 'Lifetime total:'}</span>
                 <strong className="text-gray-900 dark:text-white font-bold">{overallTotals.outflowCount}</strong> {language === 'MM' ? 'ခု' : 'items'}
                 <span className="mx-1.5 text-gray-300 dark:text-gray-600">|</span>
                 <strong className="text-rose-700 dark:text-rose-400 font-bold">{overallTotals.outflowGrams.toFixed(3)} g</strong>
@@ -1725,7 +1969,7 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
                 <tfoot>
                   <tr className="bg-gray-50/80 dark:bg-[#141414] border-t-2 border-gray-200 dark:border-gray-700 font-bold">
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-bold" colSpan={2}>
-                      <span>{language === 'MM' ? 'စုစုပေါင်း အားလုံး' : 'Total All'}</span>
+                      <span>{language === 'MM' ? 'Lifetime စုစုပေါင်း' : 'Lifetime total'}</span>
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-gray-900 dark:text-white font-bold">
                       {overallTotals.outflowCount} {language === 'MM' ? 'ခု' : 'items'}
@@ -1771,6 +2015,7 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 

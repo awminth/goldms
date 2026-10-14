@@ -33,10 +33,10 @@ export async function seedDatabase(pool: Pool): Promise<void> {
 
     await conn.query(`
       INSERT INTO customers (id, name, phone, address, outstanding_balance, created_at) VALUES
-      (1, 'ဒေါ်ခင်လှိုင်', '09-450012345', 'အမှတ် (၄၂)၊ လမ်းမတော်လမ်း၊ ရန်ကုန်မြို့', 450000, '2026-08-15 09:30:00'),
-      (2, 'ဦးကျော်ဇင်ဝင်း', '09-795678901', 'အမှတ် (၁၅)၊ ၇၃ လမ်း၊ ချမ်းအေးသာစံ၊ မန္တလေးမြို့', 1200000, '2026-08-20 14:15:00'),
+      (1, 'ဒေါ်ခင်လှိုင်', '09-450012345', 'အမှတ် (၄၂)၊ လမ်းမတော်လမ်း၊ ရန်ကုန်မြို့', 0, '2026-08-15 09:30:00'),
+      (2, 'ဦးကျော်ဇင်ဝင်း', '09-795678901', 'အမှတ် (၁၅)၊ ၇၃ လမ်း၊ ချမ်းအေးသာစံ၊ မန္တလေးမြို့', 6750000, '2026-08-20 14:15:00'),
       (3, 'မသီတာအေး', '09-250889922', 'အမှတ် (၁၀၈)၊ ကုန်သည်လမ်း၊ ကျောက်တံတား၊ ရန်ကုန်မြို့', 0, '2026-09-01 11:00:00'),
-      (4, 'ဒေါ်နီလာဆွေ', '09-421155990', 'အမှတ် (၇)၊ ဗိုလ်တထောင်လမ်း၊ ရန်ကုန်မြို့', 780000, '2026-09-02 16:45:00')
+      (4, 'ဒေါ်နီလာဆွေ', '09-421155990', 'အမှတ် (၇)၊ ဗိုလ်တထောင်လမ်း၊ ရန်ကုန်မြို့', 1350000, '2026-09-02 16:45:00')
     `);
 
     await conn.query(`
@@ -47,7 +47,7 @@ export async function seedDatabase(pool: Pool): Promise<void> {
         purity, item_type, thai_weight_unit, craftsmanship_fee, selling_price_estimated, status, created_at
       ) VALUES
       (1, 'STG-804101', 'NECKLACE', 'Dragon Rope Necklace (နဂါးလိမ် ဆွဲကြိုး)', 'နဂါးလိမ် ဆွဲကြိုး',
-        1, 2, 0, 0, 4, 1, 1, 4, 'MEELIN', 'MYANMAR_GOLD', NULL, 120000, 6420000, 'IN_STOCK', '2026-09-01 10:00:00'),
+        1, 2, 0, 0, 4, 1, 1, 4, 'MEELIN', 'MYANMAR_GOLD', NULL, 120000, 6420000, 'SOLD', '2026-09-01 10:00:00'),
       (2, 'STG-804102', 'RING', 'Floral Diamond-cut Ring (ပန်းပွင့် လက်စွပ်)', 'ပန်းပွင့် လက်စွပ် (၁၅ ပဲ)',
         0, 4, 2, 0, 2, 0, 4, 0, 'PE15A', 'MYANMAR_GOLD', NULL, 65000, 1420000, 'IN_STOCK', '2026-09-02 11:30:00'),
       /* Thai gold: thai_weight_unit = grams; qty → separate barcodes (-01, -02, …); category = THAI_GOLD */
@@ -93,7 +93,7 @@ export async function seedDatabase(pool: Pool): Promise<void> {
         weight_kyat, weight_pae, weight_yway, net_weight_kyat, net_weight_pae, net_weight_yway,
         purity, gold_price_snapshot, craftsmanship_fee, subtotal, item_type
       ) VALUES
-      (1, 1, NULL, 'နဂါးလိမ် ဆွဲကြိုး (1K 1P 4Y)', 'NECKLACE',
+      (1, 1, 1, 'နဂါးလိမ် ဆွဲကြိုး (1K 1P 4Y)', 'NECKLACE',
         1, 2, 0, 1, 1, 4, 'MEELIN', 5750000, 120000, 6420000, 'MYANMAR_GOLD'),
       (2, 2, NULL, 'အဟောင်းရွှေကြိုး (ပြန်ဝယ်)', 'NECKLACE',
         0, 12, 0, 0, 11, 4, 'PE15A', 5360000, 0, 3852500, 'MYANMAR_GOLD')
@@ -133,7 +133,7 @@ export async function seedDatabase(pool: Pool): Promise<void> {
         'NECKLACE', 'MYANMAR', 1, 0, 0, 16.329000, 'MEELIN',
         5750000, 4000000, 0, 5.0, 3,
         '2026-08-15', '2026-11-15', '2026-09-15', '2026-10-15', 'ACTIVE',
-        200000, 200000, 0, 'အတိုး နှစ်လ ပေးပြီး'),
+        400000, 400000, 0, 'အတိုး နှစ်လ ပေးပြီး'),
       (3, 'PWN-8803', 'VNO-8803', 1, 'ဒေါ်ခင်လှိုင်', '09-450012345', 'ရွှေလက်ကောက်လုံး (မီးလင်း)',
         'BANGLE', 'MYANMAR', 2, 0, 0, 32.658000, 'MEELIN',
         11450000, 8000000, 0, 5.0, 3,

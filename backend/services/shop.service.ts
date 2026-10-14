@@ -563,7 +563,7 @@ export const shopService = {
         password,
         avatar_color: data.avatar_color || data.avatarColor || 'from-amber-600 to-yellow-600',
         is_active: data.is_active === false || data.is_active === 0 ? 0 : 1,
-      }
+      } as any
     );
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM staff_users WHERE id = :id`,
@@ -594,7 +594,7 @@ export const shopService = {
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
 
-    await getPool().query(`UPDATE staff_users SET ${sets.join(', ')} WHERE id = :id`, params);
+    await getPool().query(`UPDATE staff_users SET ${sets.join(', ')} WHERE id = :id`, params as any);
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM staff_users WHERE id = :id`,
       { id: staffId }
@@ -1006,7 +1006,7 @@ export const shopService = {
       if (sets.length) {
         await getPool().query(
           `UPDATE role_permissions SET ${sets.join(', ')} WHERE role = :role AND module_key = :module`,
-          params
+          params as any
         );
       }
     }
@@ -1246,7 +1246,7 @@ export const shopService = {
       }
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
-    await getPool().query(`UPDATE customers SET ${sets.join(', ')} WHERE id = :id`, params);
+    await getPool().query(`UPDATE customers SET ${sets.join(', ')} WHERE id = :id`, params as any);
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM customers WHERE id = :id`,
       { id: customerId }
@@ -1397,7 +1397,7 @@ export const shopService = {
           data.thai_gold_baht_snapshot != null ? num(data.thai_gold_baht_snapshot) : null,
         status: data.status ?? 'IN_STOCK',
         image_url: data.image_url ?? null,
-      }
+      } as any
     );
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM inventory_items WHERE id = :id`,
@@ -1436,7 +1436,7 @@ export const shopService = {
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
 
-    await getPool().query(`UPDATE inventory_items SET ${sets.join(', ')} WHERE id = :id`, params);
+    await getPool().query(`UPDATE inventory_items SET ${sets.join(', ')} WHERE id = :id`, params as any);
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM inventory_items WHERE id = :id`,
       { id: itemId }
@@ -1639,7 +1639,7 @@ export const shopService = {
           is_installment: isInstallment ? 1 : 0,
           payment_method: data.payment_method ?? 'CASH',
           notes: data.notes ?? null,
-        }
+        } as any
       );
 
       const txnId = result.insertId;
@@ -1707,7 +1707,7 @@ export const shopService = {
             thai_weight_unit:
               raw.thai_weight_unit != null ? num(raw.thai_weight_unit) : null,
             line_role: raw.line_role != null ? String(raw.line_role) : null,
-          }
+          } as any
         );
 
         if ((txnType === 'SALE' || txnType === 'EXCHANGE') && itemId && raw.line_role !== 'TRADE_IN') {
@@ -2001,7 +2001,7 @@ export const shopService = {
           due_date: data.due_date,
           status: data.status ?? 'PENDING',
           gold_rate_snapshot: num(data.gold_rate_snapshot),
-        }
+        } as any
       );
 
       const orderId = result.insertId;
@@ -3784,7 +3784,7 @@ export const shopService = {
             stone_profit_price: num(invPayload.stone_profit_price),
             selling_price_estimated: estimated,
             image_url: invPayload.image_url ?? null,
-          }
+          } as any
         );
         returnedInventoryId = invResult.insertId;
       }
@@ -3959,7 +3959,7 @@ export const shopService = {
       }
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
-    await getPool().query(`UPDATE pawn_records SET ${sets.join(', ')} WHERE id = :id`, params);
+    await getPool().query(`UPDATE pawn_records SET ${sets.join(', ')} WHERE id = :id`, params as any);
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM pawn_records WHERE id = :id`,
       { id: pawnId }
@@ -3970,13 +3970,48 @@ export const shopService = {
 
   async deletePawn(id: string) {
     const pawnId = parseId(id);
-    const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT id FROM pawn_records WHERE id = :id`,
-      { id: pawnId }
-    );
-    if (!rows[0]) throw new HttpError(404, 'Pawn record not found');
-    await getPool().query(`DELETE FROM pawn_records WHERE id = :id`, { id: pawnId });
-    return { id: String(pawnId) };
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT id, pawn_ticket_no FROM pawn_records WHERE id = :id FOR UPDATE`,
+        { id: pawnId }
+      );
+      if (!rows[0]) throw new HttpError(404, 'Pawn record not found');
+      const ticketNo = String(rows[0].pawn_ticket_no || '');
+
+      // Clean up financial ledger entries (pawn loan disbursements and redemption records)
+      if (ticketNo) {
+        await conn.query(
+          `DELETE FROM financial_ledger WHERE reference_no = :ticketNo`,
+          { ticketNo }
+        );
+      }
+
+      // Also clean up interest payment vouchers from financial ledger
+      const [payments] = await conn.query<RowDataPacket[]>(
+        `SELECT voucher_no FROM pawn_interest_payments WHERE pawn_id = :id`,
+        { id: pawnId }
+      );
+      for (const p of payments) {
+        if (p.voucher_no) {
+          await conn.query(
+            `DELETE FROM financial_ledger WHERE reference_no = :vno AND category = 'PAWN_INTEREST'`,
+            { vno: p.voucher_no }
+          );
+        }
+      }
+
+      await conn.query(`DELETE FROM pawn_records WHERE id = :id`, { id: pawnId });
+      await conn.commit();
+      return { id: String(pawnId) };
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
   },
 
   async deletePawnInterestPayment(id: string) {
@@ -4068,8 +4103,12 @@ export const shopService = {
         d.setMonth(d.getMonth() + lossMonths);
         dueDate = d.toISOString().slice(0, 10);
       }
+      const initialLastInterest =
+        data.last_interest_date != null && String(data.last_interest_date).trim()
+          ? String(data.last_interest_date).slice(0, 10)
+          : startDate;
       const nextInterest = (() => {
-        const d = new Date(startDate);
+        const d = new Date(initialLastInterest);
         d.setMonth(d.getMonth() + 1);
         return d.toISOString().slice(0, 10);
       })();
@@ -4109,24 +4148,32 @@ export const shopService = {
           loss_months: lossMonths,
           start_date: startDate,
           due_date: dueDate,
-          last_interest_date: startDate,
+          last_interest_date: initialLastInterest,
           next_interest_date: nextInterest,
           status: data.status ?? 'ACTIVE',
           accrued_interest: num(data.accrued_interest),
           notes: data.notes != null ? String(data.notes) : null,
           customer_signature: data.customer_signature != null ? String(data.customer_signature) : null,
           owner_signature: data.owner_signature != null ? String(data.owner_signature) : null,
-        }
+        } as any
       );
+
+      const loanMmk = num(data.loan_amount);
+      const loanBaht = num(data.loan_amount_baht);
+      let ledgerLoanAmount = loanMmk;
+      if (ledgerLoanAmount <= 0 && loanBaht > 0) {
+        const settings = await this.getShopSettings();
+        ledgerLoanAmount = Math.round(loanBaht * (settings.baht_mmk_rate || 130));
+      }
 
       await insertLedger(conn, {
         type: 'EXPENSE',
         category: 'PAWN_LOAN',
-        amount: num(data.loan_amount) > 0 ? num(data.loan_amount) : num(data.loan_amount_baht),
+        amount: ledgerLoanAmount,
         description:
-          num(data.loan_amount) > 0
+          loanMmk > 0
             ? `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${data.pawn_ticket_no} - ${data.customer_name})`
-            : `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း ဘတ် (${data.pawn_ticket_no} - ${data.customer_name})`,
+            : `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${loanBaht} ฿) (${data.pawn_ticket_no} - ${data.customer_name})`,
         reference_no: String(data.pawn_ticket_no),
         date: startDate,
       });
@@ -4221,11 +4268,13 @@ export const shopService = {
           date: paymentDate,
         });
       } else if (interestBaht > 0) {
+        const settings = await this.getShopSettings();
+        const interestConvertedMmk = Math.round(interestBaht * (settings.baht_mmk_rate || 130));
         await insertLedger(conn, {
           type: 'INCOME',
           category: 'PAWN_INTEREST',
-          amount: interestBaht,
-          description: `အပေါင်အတိုးသွင်း ဘတ် (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
+          amount: interestConvertedMmk,
+          description: `အပေါင်အတိုးသွင်း (${interestBaht} ฿) (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
           reference_no: voucherNo,
           date: paymentDate,
         });
@@ -4310,14 +4359,20 @@ export const shopService = {
         }
       );
 
+      let ledgerRedeemAmount = totalKyat;
+      if (ledgerRedeemAmount <= 0 && totalBaht > 0) {
+        const settings = await this.getShopSettings();
+        ledgerRedeemAmount = Math.round(totalBaht * (settings.baht_mmk_rate || 130));
+      }
+
       await insertLedger(conn, {
         type: 'INCOME',
         category: 'PAWN_INTEREST',
-        amount: totalKyat > 0 ? totalKyat : totalBaht,
+        amount: ledgerRedeemAmount,
         description:
           totalKyat > 0
             ? `ပေါင်နှံပစ္စည်း လာရောက်ရွေးယူငွေ (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`
-            : `ပေါင်နှံပစ္စည်း လာရောက်ရွေးယူငွေ ဘတ် (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
+            : `ပေါင်နှံပစ္စည်း လာရောက်ရွေးယူငွေ (${totalBaht} ฿) (${rows[0].pawn_ticket_no} - ${rows[0].customer_name})`,
         reference_no: rows[0].pawn_ticket_no,
         date: redeemDate,
       });
@@ -4452,7 +4507,7 @@ export const shopService = {
         description: data.description,
         reference_no: data.reference_no ?? null,
         date: data.date,
-      }
+      } as any
     );
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM financial_ledger WHERE id = :id`,
@@ -4479,7 +4534,7 @@ export const shopService = {
       }
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
-    await getPool().query(`UPDATE financial_ledger SET ${sets.join(', ')} WHERE id = :id`, params);
+    await getPool().query(`UPDATE financial_ledger SET ${sets.join(', ')} WHERE id = :id`, params as any);
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM financial_ledger WHERE id = :id`,
       { id: ledgerId }

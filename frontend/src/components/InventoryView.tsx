@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useGoldShop } from '../context/GoldShopContext';
 import {
@@ -28,6 +28,7 @@ import {
   mmkToBahtFromSell,
   resolveBahtMmkRate,
 } from '../utils/goldCalculations';
+import { formatDate, todayISO } from '../utils/dateFormat';
 import {
   Plus,
   Filter,
@@ -39,7 +40,8 @@ import {
   Printer,
   Sparkles,
   RefreshCw,
-  Hammer,
+  CalendarDays,
+  Scale,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { DataTable, type DataTableColumn } from './DataTable';
@@ -50,6 +52,29 @@ import { InventoryBarcodeTag, BARCODE_TAG_PAGE_STYLE } from './InventoryBarcodeT
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { useDialog } from '../context/DialogContext';
+
+/** Normalize inventory / transaction purity to a gold-class code (Setup GOLD_CLASS). */
+function resolveGoldClassKey(purity?: string | null, itemType?: string | null): string {
+  const p = String(purity || '').trim().toUpperCase();
+  const t = String(itemType || '').trim().toUpperCase();
+  if (t === 'THAI_GOLD' || p === 'THAI_GOLD' || p.includes('THAI') || p.includes('ထိုင်း')) {
+    return 'THAI_GOLD';
+  }
+  return p || 'OTHER';
+}
+
+function toDayISO(value?: string | null): string {
+  if (!value) return '';
+  const s = String(value).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 /** Full-row text color by inventory status (like pawn lists). */
 function inventoryStatusRowClass(status: string | undefined | null): string {
@@ -74,6 +99,8 @@ function inventoryStatusRowClass(status: string | undefined | null): string {
 export const InventoryView: React.FC = () => {
   const {
     inventory,
+    transactions,
+    goldsmithJobs,
     addInventoryItem,
     updateInventoryItem,
     deleteInventoryItem,
@@ -83,8 +110,6 @@ export const InventoryView: React.FC = () => {
     masterCategories,
     shopSettings,
     getLivePriceForPurity,
-    createGoldsmithJob,
-    can,
   } = useGoldShop();
   const dialog = useDialog();
   const barcodePrintRef = useRef<HTMLDivElement>(null);
@@ -102,6 +127,323 @@ export const InventoryView: React.FC = () => {
   });
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
+
+  // Movement summary date range (default: today → today)
+  const [summaryFrom, setSummaryFrom] = useState(() => todayISO());
+  const [summaryTo, setSummaryTo] = useState(() => todayISO());
+  const summaryTableRef = useRef<HTMLTableElement>(null);
+  const [summaryVLines, setSummaryVLines] = useState<number[]>([]);
+
+  const inventoryItemGrams = (item: InventoryItem): number => {
+    const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+    const unit = Number(item.thai_weight_unit || 0);
+    if (isThai && unit > 0) return Number(unit.toFixed(3));
+    return Number(
+      kpyToGrams(
+        {
+          kyat: Number(item.net_weight_kyat || 0),
+          pae: Number(item.net_weight_pae || 0),
+          yway: Number(item.net_weight_yway || 0),
+        },
+        kyatToGrams
+      ).toFixed(3)
+    );
+  };
+
+  /**
+   * Inventory movement by Setup GOLD_CLASS (မီးလင်း, 15A, …) for [from, to]:
+   * - opening (ဆိုင်ရှိ): stocked before from − out before from
+   * - dayIn (အဝင်): stocked in range
+   * - dayOut (အထွက်): sold / shop-out / goldsmith send in range
+   * - balance: opening + in − out
+   */
+  const inventoryDateSummary = useMemo(() => {
+    let from = summaryFrom || todayISO();
+    let to = summaryTo || todayISO();
+    if (from > to) {
+      const tmp = from;
+      from = to;
+      to = tmp;
+    }
+
+    type Stat = {
+      openingGrams: number;
+      openingCount: number;
+      inCount: number;
+      inGrams: number;
+      outCount: number;
+      outGrams: number;
+    };
+    const empty = (): Stat => ({
+      openingGrams: 0,
+      openingCount: 0,
+      inCount: 0,
+      inGrams: 0,
+      outCount: 0,
+      outGrams: 0,
+    });
+
+    const setupClasses = masterCategories
+      .filter((c) => c.category_group === 'GOLD_CLASS' && c.is_active)
+      .slice()
+      .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+
+    const classMeta = new Map<
+      string,
+      { code: string; nameMm: string; nameEn: string; sort: number }
+    >();
+
+    if (setupClasses.length > 0) {
+      for (const c of setupClasses) {
+        const code = String(c.code || '').toUpperCase();
+        if (!code) continue;
+        classMeta.set(code, {
+          code,
+          nameMm: c.name_mm || code,
+          nameEn: c.name_en || code,
+          sort: Number(c.sort_order || 0),
+        });
+      }
+    } else {
+      Object.entries(PURITY_LABELS).forEach(([code, label], idx) => {
+        classMeta.set(code, {
+          code,
+          nameMm: label.mm,
+          nameEn: label.en,
+          sort: (idx + 1) * 10,
+        });
+      });
+    }
+
+    const stats: Record<string, Stat> = {};
+    for (const code of classMeta.keys()) stats[code] = empty();
+
+    const ensureKey = (key: string) => {
+      const k = key || 'OTHER';
+      if (!stats[k]) {
+        stats[k] = empty();
+        if (!classMeta.has(k)) {
+          const label = PURITY_LABELS[k as keyof typeof PURITY_LABELS];
+          classMeta.set(k, {
+            code: k,
+            nameMm: label?.mm || k,
+            nameEn: label?.en || k,
+            sort: 9000 + classMeta.size,
+          });
+        }
+      }
+      return k;
+    };
+
+    const addIn = (rawKey: string, grams: number, before: boolean) => {
+      const key = ensureKey(rawKey);
+      const g = Number(grams) || 0;
+      if (before) {
+        stats[key].openingGrams += g;
+        stats[key].openingCount += 1;
+      } else {
+        stats[key].inCount += 1;
+        stats[key].inGrams += g;
+      }
+    };
+
+    const addOut = (rawKey: string, grams: number, before: boolean) => {
+      const key = ensureKey(rawKey);
+      const g = Number(grams) || 0;
+      if (before) {
+        stats[key].openingGrams -= g;
+        stats[key].openingCount -= 1;
+      } else {
+        stats[key].outCount += 1;
+        stats[key].outGrams += g;
+      }
+    };
+
+    // Stock-in movements from inventory created_at
+    for (const item of inventory) {
+      const day = toDayISO(item.created_at);
+      if (!day) continue;
+      const key = resolveGoldClassKey(item.purity, item.item_type);
+      const grams = inventoryItemGrams(item);
+      if (day < from) addIn(key, grams, true);
+      else if (day >= from && day <= to) addIn(key, grams, false);
+    }
+
+    // Outflows from SALE / SHOP_OUT / EXCHANGE (new sold lines)
+    for (const t of transactions) {
+      const type = String(t.transaction_type || '').toUpperCase();
+      if (type !== 'SALE' && type !== 'SHOP_OUT' && type !== 'EXCHANGE') continue;
+      const day = toDayISO(t.created_at);
+      if (!day) continue;
+      const before = day < from;
+      const inRange = day >= from && day <= to;
+      if (!before && !inRange) continue;
+
+      for (const line of t.items || []) {
+        if (type === 'EXCHANGE' && String(line.line_role || '').toUpperCase() === 'TRADE_IN') {
+          continue;
+        }
+        // Only inventory-linked lines affect stock (orphan sales without item_id stay out of this report)
+        const linkedId = String(line.item_id || '').trim();
+        if (!linkedId) continue;
+
+        const key = resolveGoldClassKey(line.purity, line.item_type);
+        const isThai = line.item_type === 'THAI_GOLD' || line.purity === 'THAI_GOLD';
+        const unit = Number(line.thai_weight_unit || 0);
+        const grams =
+          isThai && unit > 0
+            ? Number(unit.toFixed(3))
+            : Number(
+                kpyToGrams(line.net_weight || { kyat: 0, pae: 0, yway: 0 }, kyatToGrams).toFixed(3)
+              );
+        addOut(key, grams, before);
+      }
+    }
+
+    // Outflows: inventory sent to goldsmith
+    for (const j of goldsmithJobs) {
+      if (j.source_type !== 'INVENTORY' && !j.inventory_item_id) continue;
+      const day = toDayISO(j.sent_at || j.created_at);
+      if (!day) continue;
+      const before = day < from;
+      const inRange = day >= from && day <= to;
+      if (!before && !inRange) continue;
+      const key = resolveGoldClassKey(j.purity || j.source_purity, j.item_type);
+      const grams = Number(Number(j.source_grams || 0).toFixed(3));
+      if (grams <= 0 && j.inventory_item_id) {
+        const inv = inventory.find((i) => i.id === j.inventory_item_id);
+        addOut(key, inv ? inventoryItemGrams(inv) : 0, before);
+      } else {
+        addOut(key, grams, before);
+      }
+    }
+
+    const orderedKeys = Array.from(classMeta.values())
+      .sort((a, b) => a.sort - b.sort || a.code.localeCompare(b.code))
+      .map((m) => m.code);
+
+    const rows = orderedKeys
+      .map((key) => {
+        const meta = classMeta.get(key)!;
+        const s = stats[key] || empty();
+        const openingGrams = Number(Math.max(0, s.openingGrams).toFixed(3));
+        const openingCount = Math.max(0, s.openingCount);
+        const inGrams = Number(s.inGrams.toFixed(3));
+        const outGrams = Number(s.outGrams.toFixed(3));
+        const balanceGrams = Number(Math.max(0, openingGrams + inGrams - outGrams).toFixed(3));
+        const balanceCount = Math.max(0, openingCount + s.inCount - s.outCount);
+        return {
+          key,
+          nameMm: meta.nameMm,
+          nameEn: meta.nameEn,
+          badgeClass:
+            'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 border border-amber-300 dark:border-amber-800',
+          openingCount,
+          openingGrams,
+          inCount: s.inCount,
+          inGrams,
+          outCount: s.outCount,
+          outGrams,
+          balanceCount,
+          balanceGrams,
+        };
+      })
+      .filter(
+        (r) =>
+          r.openingCount > 0 ||
+          r.inCount > 0 ||
+          r.outCount > 0 ||
+          r.balanceCount > 0 ||
+          r.openingGrams > 0 ||
+          r.inGrams > 0 ||
+          r.outGrams > 0 ||
+          r.balanceGrams > 0
+      );
+
+    const totals = rows.reduce(
+      (acc, r) => {
+        acc.openingCount += r.openingCount;
+        acc.openingGrams += r.openingGrams;
+        acc.inCount += r.inCount;
+        acc.inGrams += r.inGrams;
+        acc.outCount += r.outCount;
+        acc.outGrams += r.outGrams;
+        acc.balanceCount += r.balanceCount;
+        acc.balanceGrams += r.balanceGrams;
+        return acc;
+      },
+      {
+        openingCount: 0,
+        openingGrams: 0,
+        inCount: 0,
+        inGrams: 0,
+        outCount: 0,
+        outGrams: 0,
+        balanceCount: 0,
+        balanceGrams: 0,
+      }
+    );
+
+    return {
+      from,
+      to,
+      rows,
+      totals: {
+        openingCount: totals.openingCount,
+        openingGrams: Number(totals.openingGrams.toFixed(3)),
+        inCount: totals.inCount,
+        inGrams: Number(totals.inGrams.toFixed(3)),
+        outCount: totals.outCount,
+        outGrams: Number(totals.outGrams.toFixed(3)),
+        balanceCount: totals.balanceCount,
+        balanceGrams: Number(totals.balanceGrams.toFixed(3)),
+      },
+    };
+  }, [
+    inventory,
+    transactions,
+    goldsmithJobs,
+    masterCategories,
+    summaryFrom,
+    summaryTo,
+    kyatToGrams,
+  ]);
+
+  /** Continuous vertical lines: ရွှေအမျိုးအစား → ကာလစုစုပေါင်း (full table height). */
+  useLayoutEffect(() => {
+    const table = summaryTableRef.current;
+    if (!table) return;
+
+    const measure = () => {
+      const row =
+        table.querySelector('tbody tr') ||
+        table.querySelector('tfoot tr');
+      if (!row) {
+        setSummaryVLines([]);
+        return;
+      }
+      const cells = Array.from(row.querySelectorAll('th, td'));
+      const isFooter = row.parentElement?.tagName === 'TFOOT';
+      // After: type | opening-g | in-g | out-g
+      const rightEdgeIndices = isFooter ? [0, 2, 4, 6] : [1, 3, 5, 7];
+      const tableLeft = table.getBoundingClientRect().left;
+      setSummaryVLines(
+        rightEdgeIndices
+          .map((i) => cells[i])
+          .filter(Boolean)
+          .map((el) => Math.round(el.getBoundingClientRect().right - tableLeft))
+      );
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(table);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [inventoryDateSummary.rows.length, language]);
 
   /** Myanmar: ရွှေတန်ဖိုး + စုစုပေါင်းလက်ခ + ကျောက်ဖိုးစုစုပေါင်း */
   const myanmarItemEstimatedValue = (item: InventoryItem): number => {
@@ -144,17 +486,6 @@ export const InventoryView: React.FC = () => {
 
   // Barcode Tag Preview Modal
   const [tagItem, setTagItem] = useState<InventoryItem | null>(null);
-
-  // Goldsmith send (inventory → goldsmith)
-  const [gsItem, setGsItem] = useState<InventoryItem | null>(null);
-  const [gsReturnDue, setGsReturnDue] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().slice(0, 10);
-  });
-  const [gsNote, setGsNote] = useState('');
-  const [gsSaving, setGsSaving] = useState(false);
-  const [gsErr, setGsErr] = useState('');
 
   // Form State
   const [formBarcode, setFormBarcode] = useState('');
@@ -829,23 +1160,6 @@ export const InventoryView: React.FC = () => {
         align: 'center',
         cell: (item) => (
           <div className="flex items-center justify-center space-x-1" onClick={(e) => e.stopPropagation()}>
-            {can('goldsmith', 'create') && item.status === 'IN_STOCK' && (
-              <button
-                type="button"
-                onClick={() => {
-                  setGsItem(item);
-                  const d = new Date();
-                  d.setDate(d.getDate() + 7);
-                  setGsReturnDue(d.toISOString().slice(0, 10));
-                  setGsNote('');
-                  setGsErr('');
-                }}
-                className="p-1.5 rounded-lg text-violet-500 hover:text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-950/40"
-                title={language === 'MM' ? 'ပန်းထိမ်အပ်' : 'Send to goldsmith'}
-              >
-                <Hammer className="w-3.5 h-3.5" />
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setTagItem(item)}
@@ -894,7 +1208,7 @@ export const InventoryView: React.FC = () => {
         ),
       },
     ],
-    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, can, dialog]
+    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, dialog]
   );
 
   return (
@@ -956,6 +1270,224 @@ export const InventoryView: React.FC = () => {
 
         </div>
 
+      </div>
+
+      {/* Daily / period movement summary by gold type */}
+      <div className="space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-extrabold tracking-wide">
+                {language === 'MM' ? 'နေ့စဉ် / ကာလ' : 'PERIOD'}
+              </span>
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                {language === 'MM' ? 'ရွှေထည် အဝင်–အထွက် စာရင်းချုပ်' : 'Inventory In–Out Summary'}
+              </h3>
+            </div>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              {language === 'MM'
+                ? 'ရွေးချယ်ရက်အပိုင်းအတွက် — Setup ရွှေအမျိုးအစား (မီးလင်း အစရှိ) အကုန်လုံးဖြင့် စတော့အဝင်၊ ရောင်း/ဆိုင်ထုတ်/ပန်းထိမ်အပ် အထွက်'
+                : 'For selected date range — all Setup gold classes (Meelin, …) with stock-in vs sold / shop-out / goldsmith'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 hidden sm:block" />
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+              <span>{language === 'MM' ? 'မှ' : 'From'}</span>
+              <DateInput
+                value={summaryFrom}
+                onChange={setSummaryFrom}
+                className="w-36 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+              <span>{language === 'MM' ? 'ထိ' : 'To'}</span>
+              <DateInput
+                value={summaryTo}
+                onChange={setSummaryTo}
+                className="w-36 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
+              />
+            </div>
+            {(summaryFrom !== todayISO() || summaryTo !== todayISO()) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const t = todayISO();
+                  setSummaryFrom(t);
+                  setSummaryTo(t);
+                }}
+                className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer"
+              >
+                {language === 'MM' ? 'ယနေ့' : 'Today'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-yellow-950/20 border border-amber-200 dark:border-amber-800/50 overflow-hidden shadow-xs">
+          <div className="px-3 py-2.5 border-b border-amber-200/80 dark:border-amber-800/40 flex flex-wrap items-center justify-between gap-2 text-[11px] bg-amber-100/50 dark:bg-amber-950/30">
+            <div className="flex items-center gap-2">
+              <Scale className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+              <span className="font-bold text-amber-950 dark:text-amber-100">
+                {language === 'MM' ? 'ရွှေအမျိုးအစားအလိုက် အဝင်–အထွက်' : 'In–Out by gold type'}
+              </span>
+              <span className="font-mono text-amber-700/70 dark:text-amber-300/70">
+                ({formatDate(inventoryDateSummary.from)} → {formatDate(inventoryDateSummary.to)})
+              </span>
+            </div>
+            <div className="font-mono text-amber-800 dark:text-amber-300 font-extrabold">
+              {language === 'MM' ? 'လက်ကျန်' : 'Balance'}:{' '}
+              {inventoryDateSummary.totals.balanceCount}{' '}
+              {language === 'MM' ? 'ခု' : 'pcs'} · {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <div className="relative min-w-[720px]">
+              {/* Full-height continuous vertical lines (through ကာလစုစုပေါင်း) */}
+              {summaryVLines.map((x) => (
+                <div
+                  key={x}
+                  aria-hidden
+                  className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-amber-500 dark:bg-amber-400"
+                  style={{ left: x }}
+                />
+              ))}
+              <table
+                ref={summaryTableRef}
+                className="w-full text-[11px] text-left border-collapse border border-amber-200 dark:border-amber-800/50"
+              >
+                <thead>
+                  <tr className="bg-amber-100/70 dark:bg-amber-950/40 text-amber-900/80 dark:text-amber-200/80 border-b border-amber-200 dark:border-amber-800/40">
+                    <th className="px-3 py-2.5 font-bold w-10" rowSpan={2}>
+                      စဉ်
+                    </th>
+                    <th className="px-3 py-2.5 font-bold" rowSpan={2}>
+                      {language === 'MM' ? 'ရွှေအမျိုးအစား' : 'Gold Type'}
+                    </th>
+                    <th className="px-3 py-2 font-bold text-center" colSpan={2}>
+                      {language === 'MM' ? 'ဆိုင်ရှိ (မတိုင်မီ)' : 'Opening'}
+                    </th>
+                    <th
+                      className="px-3 py-2 font-bold text-center text-emerald-700 dark:text-emerald-400"
+                      colSpan={2}
+                    >
+                      {language === 'MM' ? 'အဝင်' : 'In'}
+                    </th>
+                    <th
+                      className="px-3 py-2 font-bold text-center text-rose-700 dark:text-rose-400"
+                      colSpan={2}
+                    >
+                      {language === 'MM' ? 'အထွက်' : 'Out'}
+                    </th>
+                    <th
+                      className="px-3 py-2 font-bold text-center text-amber-800 dark:text-amber-300"
+                      colSpan={2}
+                    >
+                      {language === 'MM' ? 'လက်ကျန်' : 'Balance'}
+                    </th>
+                  </tr>
+                  <tr className="bg-amber-100/50 dark:bg-amber-950/30 text-amber-900/70 dark:text-amber-200/70 border-b border-amber-200 dark:border-amber-800/40">
+                    <th className="px-3 py-1.5 font-bold text-right">
+                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                    </th>
+                    <th className="px-3 py-1.5 font-bold text-right">Gram</th>
+                    <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                    </th>
+                    <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                      Gram
+                    </th>
+                    <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                    </th>
+                    <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                      Gram
+                    </th>
+                    <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                    </th>
+                    <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                      Gram
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryDateSummary.rows.map((cat, idx) => (
+                    <tr
+                      key={cat.key}
+                      className="hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition border-b border-amber-100 dark:border-amber-900/30"
+                    >
+                      <td className="px-3 py-2.5 font-mono text-amber-700/50 dark:text-amber-400/50">
+                        {idx + 1}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${cat.badgeClass}`}>
+                          {language === 'MM' ? cat.nameMm : cat.nameEn}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        {cat.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        {cat.openingGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {cat.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {cat.inGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        {cat.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        {cat.outGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                        {cat.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                        {cat.balanceGrams.toFixed(3)} g
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t border-amber-200 dark:border-amber-800/40 font-bold">
+                    <td className="px-3 py-2.5 text-amber-950 dark:text-amber-100" colSpan={2}>
+                      {language === 'MM' ? 'ကာလ စုစုပေါင်း' : 'Period total'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                      {inventoryDateSummary.totals.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                      {inventoryDateSummary.totals.openingGrams.toFixed(3)} g
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                      {inventoryDateSummary.totals.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                      {inventoryDateSummary.totals.inGrams.toFixed(3)} g
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                      {inventoryDateSummary.totals.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                      {inventoryDateSummary.totals.outGrams.toFixed(3)} g
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                      {inventoryDateSummary.totals.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                      {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Filter Row */}
@@ -1611,89 +2143,6 @@ export const InventoryView: React.FC = () => {
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>{language === 'MM' ? 'ကတ်ပြား ပရင့်ထုတ်' : 'Print Tag'}</span>
-              </button>
-            </div>
-          </div>
-        </ModalOverlay>
-      )}
-
-      {gsItem && (
-        <ModalOverlay>
-          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800">
-            <div className="flex justify-between items-center pb-3 border-b border-gray-200 dark:border-gray-800">
-              <h3 className="font-bold text-sm flex items-center gap-2">
-                <Hammer className="w-4 h-4 text-violet-600" />
-                {language === 'MM' ? 'ပန်းထိမ်အပ်' : 'Send to goldsmith'}
-              </h3>
-              <button type="button" onClick={() => setGsItem(null)} className="p-1 text-gray-400">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="mt-3 space-y-3 text-xs">
-              <div>
-                <p className="font-mono font-bold text-[#996515]">{gsItem.barcode}</p>
-                <p className="font-bold text-gray-900 dark:text-white mt-0.5">
-                  {language === 'MM' ? gsItem.name_mm : gsItem.name}
-                </p>
-                <p className="text-gray-500 mt-1 font-mono">
-                  {gsItem.item_type === 'THAI_GOLD' || gsItem.purity === 'THAI_GOLD'
-                    ? `${Number(gsItem.thai_weight_unit || 0).toFixed(3)} g`
-                    : formatKPYMyanmar({
-                        kyat: gsItem.net_weight_kyat,
-                        pae: gsItem.net_weight_pae,
-                        yway: gsItem.net_weight_yway,
-                      })}
-                  {' · '}
-                  {PURITY_LABELS[gsItem.purity]?.mm || gsItem.purity}
-                </p>
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">
-                  {language === 'MM' ? 'ပြန်လာအပ်ရမည့်ရက်' : 'Expected return date'}
-                </label>
-                <DateInput
-                  required
-                  value={gsReturnDue}
-                  onChange={setGsReturnDue}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono"
-                />
-                <p className="text-[10px] text-gray-400 mt-1">
-                  {language === 'MM'
-                    ? 'ဤရက်ကျော်သေးပြီး ပြန်မလာသေးရင် ပန်းထိမ်အပ်မှာ အကြောင်းကြားပါမည် · လက်ခကို ပြန်လာမှ ထည့်ပါ'
-                    : 'Overdue SENT jobs notify on Goldsmith · craft fee on return'}
-                </p>
-              </div>
-              <input
-                value={gsNote}
-                onChange={(e) => setGsNote(e.target.value)}
-                placeholder={language === 'MM' ? 'မှတ်ချက်' : 'Note'}
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-              />
-              {gsErr && <p className="text-rose-600">{gsErr}</p>}
-              <button
-                type="button"
-                disabled={gsSaving || !gsReturnDue}
-                onClick={async () => {
-                  setGsSaving(true);
-                  setGsErr('');
-                  try {
-                    await createGoldsmithJob({
-                      source_type: 'INVENTORY',
-                      inventory_item_id: gsItem.id,
-                      craft_fee: 0,
-                      return_due_date: gsReturnDue,
-                      notes: gsNote || undefined,
-                    });
-                    setGsItem(null);
-                  } catch (e) {
-                    setGsErr(e instanceof Error ? e.message : 'Failed');
-                  } finally {
-                    setGsSaving(false);
-                  }
-                }}
-                className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50"
-              >
-                {gsSaving ? '...' : language === 'MM' ? 'အပ်မည်' : 'Send'}
               </button>
             </div>
           </div>
