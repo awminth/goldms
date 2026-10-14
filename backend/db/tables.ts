@@ -89,7 +89,7 @@ export const TABLE_STATEMENTS: string[] = [
     customer_id INT UNSIGNED NULL,
     customer_name VARCHAR(150) NOT NULL,
     customer_phone VARCHAR(50) NULL,
-    transaction_type ENUM('SALE', 'PURCHASE', 'ORDER', 'EXCHANGE', 'PAWN', 'SHOP_OUT') NOT NULL,
+    transaction_type ENUM('SALE', 'PURCHASE', 'ORDER', 'EXCHANGE', 'PAWN', 'SHOP_OUT', 'OTHER_IN') NOT NULL,
     gold_price_snapshot DECIMAL(15,2) NOT NULL,
     craftsmanship_total DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     stone_total DECIMAL(15,2) NOT NULL DEFAULT 0.00,
@@ -357,6 +357,143 @@ export const TABLE_STATEMENTS: string[] = [
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (setting_key)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS old_gold_merchant_returns (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    return_no VARCHAR(100) NOT NULL,
+    merchant_name VARCHAR(150) NOT NULL,
+    merchant_phone VARCHAR(50) NULL,
+    description VARCHAR(255) NULL,
+    return_date DATE NOT NULL,
+    gold_category ENUM('THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14') NOT NULL,
+    purity VARCHAR(50) NOT NULL,
+    grams DECIMAL(12,3) NOT NULL,
+    weight_kyat DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_return_no (return_no),
+    KEY idx_return_date (return_date),
+    KEY idx_gold_category (gold_category)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS old_gold_shop_transfers (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    transfer_no VARCHAR(100) NOT NULL,
+    item_name VARCHAR(200) NOT NULL,
+    description VARCHAR(255) NULL,
+    transfer_date DATE NOT NULL,
+    gold_category ENUM('THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14') NOT NULL,
+    purity VARCHAR(50) NOT NULL,
+    grams DECIMAL(12,3) NOT NULL,
+    weight_kyat DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_transfer_no (transfer_no),
+    KEY idx_transfer_date (transfer_date),
+    KEY idx_transfer_gold_category (gold_category)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS old_gold_melts (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    melt_no VARCHAR(100) NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    description VARCHAR(255) NULL,
+    melt_date DATE NOT NULL,
+    gold_category ENUM('THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14') NOT NULL,
+    purity VARCHAR(50) NOT NULL,
+    grams DECIMAL(12,3) NOT NULL,
+    weight_kyat DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    craft_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_melt_no (melt_no),
+    KEY idx_melt_date (melt_date),
+    KEY idx_melt_gold_category (gold_category)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS old_gold_other_outflows (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    outflow_no VARCHAR(100) NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    description VARCHAR(255) NULL,
+    outflow_date DATE NOT NULL,
+    gold_category ENUM('THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14') NOT NULL,
+    purity VARCHAR(50) NOT NULL,
+    grams DECIMAL(12,3) NOT NULL,
+    weight_kyat DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    received_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_other_outflow_no (outflow_no),
+    KEY idx_other_outflow_date (outflow_date),
+    KEY idx_other_outflow_gold_category (gold_category)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS credit_debts (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    debt_no VARCHAR(100) NOT NULL,
+    type ENUM('PAYABLE', 'RECEIVABLE') NOT NULL,
+    asset_type ENUM('MONEY', 'GOLD') NOT NULL,
+    person_name VARCHAR(150) NOT NULL,
+    phone VARCHAR(50) NULL,
+    customer_id INT UNSIGNED NULL,
+    address TEXT NULL,
+    total_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    paid_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    remaining_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    total_gold_k DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    total_gold_p DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    total_gold_y DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    paid_gold_k DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    paid_gold_p DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    paid_gold_y DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    remaining_gold_k DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    remaining_gold_p DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    remaining_gold_y DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    gold_quality VARCHAR(100) NULL,
+    date DATE NOT NULL,
+    due_date DATE NULL,
+    status ENUM('PENDING', 'PARTIAL', 'SETTLED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_credit_debts_no (debt_no),
+    KEY idx_credit_debts_type (type),
+    KEY idx_credit_debts_asset (asset_type),
+    KEY idx_credit_debts_status (status),
+    KEY idx_credit_debts_date (date),
+    KEY idx_credit_debts_customer (customer_id),
+    CONSTRAINT fk_credit_debts_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS credit_debt_payments (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    credit_debt_id INT UNSIGNED NOT NULL,
+    payment_date DATE NOT NULL,
+    amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    gold_k DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    gold_p DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    gold_y DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    payment_method VARCHAR(50) NOT NULL DEFAULT 'CASH',
+    notes VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_cdp_debt_id (credit_debt_id),
+    CONSTRAINT fk_cdp_debt FOREIGN KEY (credit_debt_id) REFERENCES credit_debts (id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 export async function runColumnMigrations(pool: Pool): Promise<void> {
@@ -489,6 +626,11 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addTxn('interest_rate', 'interest_rate DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER remaining_amount');
     await addTxn('credit_due_date', 'credit_due_date DATE NULL AFTER interest_rate');
     await addTxn('is_installment', 'is_installment TINYINT(1) NOT NULL DEFAULT 0 AFTER credit_due_date');
+    try {
+      await pool.query(
+        `ALTER TABLE transactions MODIFY COLUMN transaction_type ENUM('SALE', 'PURCHASE', 'ORDER', 'EXCHANGE', 'PAWN', 'SHOP_OUT', 'OTHER_IN') NOT NULL`
+      );
+    } catch {}
   }
 
   // 6. transaction_items
@@ -550,6 +692,22 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
          category = 'OTHER_EXPENSE'
          AND description LIKE 'ပေါင်နှံပစ္စည်း ချေးငွေ%'
        )`
+    );
+  }
+
+  // 11. old_gold_merchant_returns.description (အကြောင်းအရာ)
+  const mrNames = getCols('old_gold_merchant_returns');
+  if (mrNames.size > 0 && !mrNames.has('description')) {
+    await pool.query(
+      `ALTER TABLE old_gold_merchant_returns ADD COLUMN description VARCHAR(255) NULL AFTER merchant_phone`
+    );
+  }
+
+  // 12. old_gold_melts.craft_fee (အရည်ကျို လက်ခ)
+  const meltNames = getCols('old_gold_melts');
+  if (meltNames.size > 0 && !meltNames.has('craft_fee')) {
+    await pool.query(
+      `ALTER TABLE old_gold_melts ADD COLUMN craft_fee DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER weight_yway`
     );
   }
 }

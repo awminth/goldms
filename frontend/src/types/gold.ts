@@ -92,7 +92,7 @@ export interface Customer {
   outstanding_balance: number;
 }
 
-export type TransactionType = 'SALE' | 'PURCHASE' | 'ORDER' | 'EXCHANGE' | 'PAWN' | 'SHOP_OUT';
+export type TransactionType = 'SALE' | 'PURCHASE' | 'ORDER' | 'EXCHANGE' | 'PAWN' | 'SHOP_OUT' | 'OTHER_IN';
 
 export interface TransactionItem {
   id: string;
@@ -200,6 +200,65 @@ export interface GoldsmithJob {
   inventory_barcode?: string;
 }
 
+export interface OldGoldMerchantReturn {
+  id: string;
+  return_no: string;
+  merchant_name: string;
+  merchant_phone?: string;
+  description?: string;
+  return_date: string;
+  gold_category: 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14';
+  purity: string;
+  grams: number;
+  weight: WeightKPY;
+  notes?: string;
+  created_at: string;
+}
+
+export interface OldGoldShopTransfer {
+  id: string;
+  transfer_no: string;
+  item_name: string;
+  description?: string;
+  transfer_date: string;
+  gold_category: 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14';
+  purity: string;
+  grams: number;
+  weight: WeightKPY;
+  notes?: string;
+  created_at: string;
+}
+
+export interface OldGoldMelt {
+  id: string;
+  melt_no: string;
+  name: string;
+  description?: string;
+  melt_date: string;
+  gold_category: 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14';
+  purity: string;
+  grams: number;
+  weight: WeightKPY;
+  craft_fee?: number;
+  notes?: string;
+  created_at: string;
+}
+
+export interface OldGoldOtherOutflow {
+  id: string;
+  outflow_no: string;
+  name: string;
+  description?: string;
+  outflow_date: string;
+  gold_category: 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14';
+  purity: string;
+  grams: number;
+  weight: WeightKPY;
+  received_amount: number;
+  notes?: string;
+  created_at: string;
+}
+
 export interface PawnRecord {
   id: string;
   pawn_ticket_no: string;
@@ -274,13 +333,21 @@ export interface FinancialLedger {
   type: 'INCOME' | 'EXPENSE';
   category:
     | 'GOLD_SALE'
-    | 'GOLD_PURCHASE'
     | 'CUSTOM_ORDER'
     | 'PAWN_INTEREST'
-    | 'STAFF_SALARY'
-    | 'UTILITIES'
-    | 'RENT'
+    | 'MELTING_PROFIT'
     | 'OTHER_INCOME'
+    | 'CREDIT_IN'
+    | 'GOLD_PURCHASE'
+    | 'PAWN_LOAN'
+    | 'GOLDSMITH_FEE'
+    | 'CREDIT_OUT'
+    | 'STAFF_SALARY'
+    | 'SHOP_RENT'
+    | 'RENT'
+    | 'UTILITIES'
+    | 'EQUIPMENT_ACID'
+    | 'TAX'
     | 'OTHER_EXPENSE'
     | string;
   amount: number;
@@ -289,6 +356,53 @@ export interface FinancialLedger {
   date: string;
   /** MANUAL = entered in Other Income/Expense UI; SYSTEM = auto from sales/pawn/etc. */
   entry_source?: 'MANUAL' | 'SYSTEM' | string;
+}
+
+export type CreditDebtType = 'PAYABLE' | 'RECEIVABLE'; // ပေးရန် (Payable) / ရရန် (Receivable)
+export type CreditDebtAssetType = 'MONEY' | 'GOLD'; // ငွေ / ရွှေ
+export type CreditDebtStatus = 'PENDING' | 'PARTIAL' | 'SETTLED' | 'CANCELLED';
+
+export interface CreditDebtPayment {
+  id: string;
+  credit_debt_id: string;
+  payment_date: string;
+  amount: number;
+  gold_k: number;
+  gold_p: number;
+  gold_y: number;
+  payment_method: string;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface CreditDebt {
+  id: string;
+  debt_no: string;
+  type: CreditDebtType;
+  asset_type: CreditDebtAssetType;
+  person_name: string;
+  phone?: string;
+  customer_id?: string;
+  address?: string;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  total_gold_k: number;
+  total_gold_p: number;
+  total_gold_y: number;
+  paid_gold_k: number;
+  paid_gold_p: number;
+  paid_gold_y: number;
+  remaining_gold_k: number;
+  remaining_gold_p: number;
+  remaining_gold_y: number;
+  gold_quality?: string;
+  date: string;
+  due_date?: string;
+  status: CreditDebtStatus;
+  notes?: string;
+  created_at?: string;
+  payments?: CreditDebtPayment[];
 }
 
 export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER';

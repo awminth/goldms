@@ -235,6 +235,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     deletePawnInterestPayment,
     deletePawnRedeem,
     redeemPawnRecord,
+    confiscatePawnRecord,
     goldPrices,
     language,
     masterCategories,
@@ -1758,23 +1759,48 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
             </button>
             <button
               type="button"
-              className="px-2 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold hover:bg-amber-100"
-              onClick={() => onNavigate('pawn-interest-new')}
+              className="px-2 py-1 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[10px] font-bold hover:bg-rose-100 dark:hover:bg-rose-900/50"
+              title={language === 'MM' ? 'ပေါင်ရှုံးအဖြစ် သတ်မှတ်ပြီး အဟောင်းထည်ထဲသို့ ထည့်မည်' : 'Mark as forfeit / confiscated and send to Old Gold'}
+              onClick={async () => {
+                const ok = await dialog.confirm({
+                  title: language === 'MM' ? 'ပေါင်ရှုံးအဖြစ် သတ်မှတ်ခြင်း' : 'Confiscate Pawn Item',
+                  message:
+                    language === 'MM'
+                      ? `ဘောင်ချာ ${r.vno || r.pawn_ticket_no} (${r.customer_name}) ၏ "${r.item_name}" ကို ပေါင်ရှုံးအဖြစ် သတ်မှတ်ပြီး အဟောင်းထည်စာရင်းထဲသို့ ထည့်သွင်းမှာ သေချာပါသလား?`
+                      : `Are you sure you want to forfeit pawn ${r.vno || r.pawn_ticket_no} (${r.customer_name}) and transfer it into Old Gold stock?`,
+                  danger: true,
+                  confirmLabel: language === 'MM' ? 'ပေါင်ရှုံး သတ်မှတ်မည်' : 'Confiscate',
+                  cancelLabel: language === 'MM' ? 'မလုပ်တော့ပါ' : 'Cancel',
+                });
+                if (!ok) return;
+
+                try {
+                  await confiscatePawnRecord(r.id);
+                  await dialog.alert({
+                    title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+                    message:
+                      language === 'MM'
+                        ? 'ပေါင်ရှုံးအဖြစ် သတ်မှတ်ပြီး အဟောင်းထည်ထဲသို့ ထည့်သွင်းပြီးပါပြီ။'
+                        : 'Pawn marked as confiscated and transferred to Old Gold.',
+                    variant: 'success',
+                  });
+                } catch (err: unknown) {
+                  const e = err as Error;
+                  await dialog.alert({
+                    title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Error',
+                    message: e?.message || 'Failed to confiscate pawn',
+                    variant: 'error',
+                  });
+                }
+              }}
             >
-              {language === 'MM' ? 'အတိုး' : 'Interest'}
-            </button>
-            <button
-              type="button"
-              className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold hover:bg-emerald-100"
-              onClick={() => onNavigate('pawn-redeem-new')}
-            >
-              {language === 'MM' ? 'ရွေး' : 'Redeem'}
+              {language === 'MM' ? 'အပေါင်ရှုံး' : 'Forfeit'}
             </button>
           </div>
         ),
       },
     ],
-    [language, pawnDateHeader, dueHeader, statusHeader, lastInterestHeader, onNavigate]
+    [language, pawnDateHeader, dueHeader, statusHeader, lastInterestHeader, confiscatePawnRecord, dialog]
   );
 
   const searchBar = (

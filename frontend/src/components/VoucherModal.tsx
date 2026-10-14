@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import {
   formatMMK,
+  formatKPYMyanmar,
   kpyToGrams,
   kpyToYway,
   ywayToKpy,
@@ -285,6 +286,7 @@ export const VoucherModal: React.FC = () => {
   const isSale = selectedVoucher.transaction_type === 'SALE';
   const isPurchase = selectedVoucher.transaction_type === 'PURCHASE';
   const isShopOut = selectedVoucher.transaction_type === 'SHOP_OUT';
+  const isOtherIn = selectedVoucher.transaction_type === 'OTHER_IN';
   const itemsSubtotal = selectedVoucher.items.reduce(
     (s, i) => s + Number(i.subtotal || 0),
     0
@@ -361,14 +363,85 @@ export const VoucherModal: React.FC = () => {
                   ? 'အဝယ်ပြေစာ'
                   : isShopOut
                     ? 'ဆိုင်ထုတ်'
-                    : selectedVoucher.transaction_type}
+                    : isOtherIn
+                      ? 'အခြားရွှေအဝင် ပြေစာ'
+                      : selectedVoucher.transaction_type}
             </span>
             <span className="font-mono font-semibold text-gray-600">{selectedVoucher.invoice_no}</span>
           </div>
 
           <div className="voucher-print-body px-4 sm:px-5 py-4">
             <div className="voucher-print-main space-y-3">
-            {isShopOut ? (
+            {isOtherIn ? (
+              <>
+                <div className="space-y-2 text-[12px]">
+                  <div className="flex items-end gap-2">
+                    <span className="shrink-0 font-semibold text-gray-700 w-16">နေ့စွဲ</span>
+                    <span className="flex-1 border-b border-dotted border-gray-400 pb-0.5 font-mono">
+                      {dateStr}
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <span className="shrink-0 font-semibold text-gray-700 w-16">ပေးသွင်းသူ</span>
+                    <span className="flex-1 border-b border-dotted border-gray-400 pb-0.5 font-bold">
+                      {selectedVoucher.customer_name || 'အခြားရွှေအဝင်'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border border-amber-300 rounded-lg overflow-hidden mt-3">
+                  <div className="bg-amber-900 text-amber-100 px-3 py-1.5 text-[11px] font-bold">
+                    အခြားရွှေအဝင် ပစ္စည်းစာရင်း
+                  </div>
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                      <tr className="bg-amber-50">
+                        <th className="border border-amber-200 px-2.5 py-1.5 text-left font-bold">ပစ္စည်းဖော်ပြချက်</th>
+                        <th className="border border-amber-200 px-2.5 py-1.5 text-left font-bold">ရွှေအမျိုးအစား</th>
+                        <th className="border border-amber-200 px-2.5 py-1.5 text-right font-bold">Gram ချိန်</th>
+                        <th className="border border-amber-200 px-2.5 py-1.5 text-right font-bold">ကျပ်-ပဲ-ရွေး</th>
+                        <th className="border border-amber-200 px-2.5 py-1.5 text-left font-bold">မှတ်ချက်</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedVoucher.items.map((item) => {
+                        const nw = item.net_weight || emptyKpy;
+                        const g =
+                          item.thai_weight_unit && Number(item.thai_weight_unit) > 0
+                            ? Number(item.thai_weight_unit)
+                            : kpyToGrams(nw, kyatToGrams);
+                        const purityLbl = PURITY_LABELS[item.purity as GoldPurity]?.mm || item.purity;
+                        return (
+                          <tr key={item.id} className="border-b border-amber-100 last:border-0">
+                            <td className="border border-amber-200 px-2.5 py-2 font-bold text-gray-900">
+                              {item.item_name}
+                            </td>
+                            <td className="border border-amber-200 px-2.5 py-2 font-semibold text-amber-900">
+                              {purityLbl}
+                            </td>
+                            <td className="border border-amber-200 px-2.5 py-2 text-right font-mono font-bold text-amber-800">
+                              {g.toFixed(3)} g
+                            </td>
+                            <td className="border border-amber-200 px-2.5 py-2 text-right font-mono font-bold">
+                              {formatKPYMyanmar(nw)}
+                            </td>
+                            <td className="border border-amber-200 px-2.5 py-2 italic text-gray-600">
+                              {item.line_role || selectedVoucher.notes || '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {selectedVoucher.notes && (
+                  <p className="italic text-gray-600 text-[11px] mt-2">
+                    မှတ်ချက်: {selectedVoucher.notes}
+                  </p>
+                )}
+              </>
+            ) : isShopOut ? (
               <>
                 <div className="space-y-2 text-[12px]">
                   <div className="flex items-end gap-2">

@@ -107,7 +107,10 @@ export const GoldsmithHandoffView: React.FC<Props> = ({ jobId, orderId, onBack }
   const [profitDedPae, setProfitDedPae] = useState(0);
   const [profitDedYway, setProfitDedYway] = useState(0);
   const [grams, setGrams] = useState(seedGrams);
-  const [craftFee, setCraftFee] = useState(order?.craftsmanship_fee || 0);
+  // Prefer goldsmith return craft_fee (entered on ပန်းထိမ်ပြန်); fall back to order
+  const [craftFee, setCraftFee] = useState(
+    () => Number(job?.craft_fee || order?.craftsmanship_fee || 0)
+  );
   const [craftProfit, setCraftProfit] = useState(0);
   const [stonePrice, setStonePrice] = useState(0);
   const [stoneProfit, setStoneProfit] = useState(0);

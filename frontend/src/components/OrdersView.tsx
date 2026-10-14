@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import { useDialog } from '../context/DialogContext';
 import { CustomOrder, GoldPurity } from '../types/gold';
@@ -10,6 +10,8 @@ import {
   gramsToKpy,
   kpyToGrams,
   KYAT_TO_GRAMS,
+  OLD_GOLD_CATEGORY_CONFIG,
+  type OldGoldCategoryKey,
 } from '../utils/goldCalculations';
 import { formatDate } from '../utils/dateFormat';
 import { DateInput } from './DateInput';
@@ -28,6 +30,16 @@ import { useClientPagination } from '../hooks/useClientPagination';
 import { PaginationBar } from './PaginationBar';
 import { ModalOverlay } from './ModalOverlay';
 import { NumberInput } from './NumberInput';
+import { api } from '../services/api';
+
+const OLD_GOLD_CAT_KEYS = Object.keys(OLD_GOLD_CATEGORY_CONFIG) as OldGoldCategoryKey[];
+
+function fallbackPurityForOldGoldCategory(cat: OldGoldCategoryKey): string {
+  if (cat === 'THAI_GOLD') return 'THAI_GOLD';
+  if (cat === 'PAE_16') return 'MEELIN';
+  if (cat === 'PAE_15') return 'PE15A';
+  return 'PE14A';
+}
 
 interface Props {
   onHandoffOrder?: (orderId: string) => void;
@@ -62,6 +74,47 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
   const [gsNote, setGsNote] = useState('');
   const [gsSaving, setGsSaving] = useState(false);
   const [gsErr, setGsErr] = useState('');
+  const [gsCategory, setGsCategory] = useState<OldGoldCategoryKey>('PAE_16');
+  const [gsGrams, setGsGrams] = useState(0);
+  const [gsBalances, setGsBalances] = useState<Record<OldGoldCategoryKey, number>>({
+    THAI_GOLD: 0,
+    PAE_16: 0,
+    PAE_15: 0,
+    PAE_14: 0,
+  });
+  const [gsBalancesLoading, setGsBalancesLoading] = useState(false);
+
+  const gsAvailable = gsBalances[gsCategory] || 0;
+
+  useEffect(() => {
+    if (!gsOrder) return;
+    let cancelled = false;
+    setGsBalancesLoading(true);
+    void (async () => {
+      try {
+        const entries = await Promise.all(
+          OLD_GOLD_CAT_KEYS.map(async (cat) => {
+            const res = await api.oldGoldAvailable(undefined, cat);
+            return [cat, Number(res.available || 0)] as const;
+          })
+        );
+        if (cancelled) return;
+        setGsBalances((prev) => {
+          const next = { ...prev };
+          for (const [cat, avail] of entries) next[cat] = avail;
+          return next;
+        });
+      } catch {
+        /* keep zeros */
+      } finally {
+        if (!cancelled) setGsBalancesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh only when modal opens
+  }, [gsOrder?.id]);
 
   // Form state
   const [formCustomerName, setFormCustomerName] = useState('');
@@ -404,6 +457,8 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
                               setGsReturnDue(d.toISOString().slice(0, 10));
                               setGsNote('');
                               setGsErr('');
+                              setGsCategory('PAE_16');
+                              setGsGrams(0);
                             }}
                             className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition flex items-center space-x-1"
                           >
@@ -414,8 +469,8 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
                         {job?.status === 'SENT' && (
                           <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/30">
                             {language === 'MM'
-                              ? `ပန်းထိမ်အပ်ထား${job.return_due_date ? ` · ပြန်လာရက် ${formatDate(job.return_due_date)}` : ''} — ပြန်လာမှ အပ်ရှင်း`
-                              : `At goldsmith${job.return_due_date ? ` · due ${formatDate(job.return_due_date)}` : ''} — handoff after return`}
+                              ? `ပန်းထိမ်အပ်ထား${Number(job.source_grams || 0) > 0 ? ` · အဟောင်း ${Number(job.source_grams).toFixed(3)}g` : ''}${job.return_due_date ? ` · ပြန်လာရက် ${formatDate(job.return_due_date)}` : ''} — ပြန်လာမှ အပ်ရှင်း`
+                              : `At goldsmith${Number(job.source_grams || 0) > 0 ? ` · old gold ${Number(job.source_grams).toFixed(3)}g` : ''}${job.return_due_date ? ` · due ${formatDate(job.return_due_date)}` : ''} — handoff after return`}
                           </span>
                         )}
                         {job?.status === 'RETURNED' && (
@@ -749,19 +804,78 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
 
       {gsOrder && (
         <ModalOverlay>
-          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800">
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-md w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-3 border-b border-gray-200 dark:border-gray-800">
               <h3 className="font-bold text-sm flex items-center gap-2">
                 <Hammer className="w-4 h-4 text-violet-600" />
-                {language === 'MM' ? 'ပန်းထိမ်အပ်' : 'Send to goldsmith'}
+                {language === 'MM' ? 'ပန်းထိမ်အပ် (အဟောင်းထည်)' : 'Send to goldsmith (old gold)'}
               </h3>
               <button type="button" onClick={() => setGsOrder(null)} className="p-1 text-gray-400">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="mt-3 space-y-3 text-xs">
-              <p className="font-bold">{gsOrder.order_no}</p>
-              <p className="text-gray-500">{gsOrder.description}</p>
+              <div>
+                <p className="font-bold">{gsOrder.order_no}</p>
+                <p className="text-gray-500">{gsOrder.description}</p>
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
+                  {language === 'MM' ? 'အဟောင်းထည် အမျိုးအစား' : 'Old gold category'}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {OLD_GOLD_CAT_KEYS.map((cat) => {
+                    const cfg = OLD_GOLD_CATEGORY_CONFIG[cat];
+                    const bal = gsBalances[cat] || 0;
+                    const sel = gsCategory === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          setGsCategory(cat);
+                          setGsErr('');
+                        }}
+                        className={`text-left px-2.5 py-2 rounded-xl border transition ${
+                          sel
+                            ? 'border-violet-600 bg-violet-50/60 dark:bg-violet-950/30 ring-1 ring-violet-500'
+                            : 'border-gray-200 dark:border-gray-800 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="font-bold text-[11px] text-gray-900 dark:text-white block">
+                          {language === 'MM' ? cfg.nameMm : cfg.nameEn}
+                        </span>
+                        <span className="text-[10px] font-mono text-violet-700 dark:text-violet-300">
+                          {gsBalancesLoading
+                            ? '...'
+                            : `${language === 'MM' ? 'ကျန်' : 'Avail'} ${bal.toFixed(3)} g`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-semibold text-gray-700 dark:text-gray-300">
+                    {language === 'MM' ? 'အပ်မည့် Gram' : 'Grams to send'}
+                  </label>
+                  <span className="text-[10px] font-mono text-violet-700 dark:text-violet-300">
+                    {language === 'MM' ? 'လက်ကျန်' : 'Max'}: {gsAvailable.toFixed(3)} g
+                  </span>
+                </div>
+                <NumberInput
+                  value={gsGrams}
+                  onChange={(v) => {
+                    setGsGrams(v);
+                    setGsErr('');
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono text-sm"
+                />
+              </div>
+
               <div>
                 <label className="block font-semibold mb-1">
                   {language === 'MM'
@@ -776,8 +890,8 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
                 />
                 <p className="text-[10px] text-gray-400 mt-1">
                   {language === 'MM'
-                    ? 'ဤရက်ကျော်သေးပြီး ပြန်မလာသေးရင် ပန်းထိမ်အပ်မှာ အကြောင်းကြားပါမည် · လက်ခကို ပြန်လာမှ ထည့်ပါ'
-                    : 'Overdue SENT jobs notify on Goldsmith · craft fee on return'}
+                    ? 'အဟောင်းထည် အဝင်မှ နှုတ်ပြီး ပန်းထိမ်အပ်မည် · လက်ခကို ပြန်လာမှ ထည့်ပါ'
+                    : 'Deducts from old-gold inbound · craft fee on return'}
                 </p>
               </div>
               <input
@@ -786,17 +900,34 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
                 placeholder={language === 'MM' ? 'မှတ်ချက်' : 'Note'}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
               />
-              {gsErr && <p className="text-rose-600">{gsErr}</p>}
+              {gsErr && <p className="text-rose-600 font-semibold">{gsErr}</p>}
               <button
                 type="button"
-                disabled={gsSaving || !gsReturnDue}
+                disabled={
+                  gsSaving ||
+                  !gsReturnDue ||
+                  gsGrams <= 0 ||
+                  gsGrams > gsAvailable + 0.001 ||
+                  gsBalancesLoading
+                }
                 onClick={async () => {
+                  if (gsGrams > gsAvailable + 0.001) {
+                    setGsErr(
+                      language === 'MM'
+                        ? `လက်ကျန် ${gsAvailable.toFixed(3)}g သာရှိပါသည်`
+                        : `Only ${gsAvailable.toFixed(3)}g available`
+                    );
+                    return;
+                  }
                   setGsSaving(true);
                   setGsErr('');
                   try {
                     await createGoldsmithJob({
                       source_type: 'ORDER',
                       order_id: gsOrder.id,
+                      source_category: gsCategory,
+                      source_purity: fallbackPurityForOldGoldCategory(gsCategory),
+                      source_grams: gsGrams,
                       craft_fee: 0,
                       return_due_date: gsReturnDue,
                       notes: gsNote || undefined,
@@ -810,7 +941,7 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
                 }}
                 className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50"
               >
-                {gsSaving ? '...' : language === 'MM' ? 'အပ်မည်' : 'Send'}
+                {gsSaving ? '...' : language === 'MM' ? 'အဟောင်းထည်မှ အပ်မည်' : 'Send from old gold'}
               </button>
             </div>
           </div>

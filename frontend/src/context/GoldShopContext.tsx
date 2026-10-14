@@ -17,6 +17,12 @@ import {
   UserRole,
   ShopSettings,
   GoldsmithJob,
+  OldGoldMerchantReturn,
+  OldGoldShopTransfer,
+  OldGoldMelt,
+  OldGoldOtherOutflow,
+  CreditDebt,
+  CreditDebtPayment,
 } from '../types/gold';
 import { derivePriceFromMeelin, PURITY_MULTIPLIERS, KYAT_TO_GRAMS } from '../utils/goldCalculations';
 import { api, BootstrapData } from '../services/api';
@@ -29,9 +35,14 @@ interface GoldShopContextType {
   transactions: Transaction[];
   customOrders: CustomOrder[];
   goldsmithJobs: GoldsmithJob[];
+  merchantReturns: OldGoldMerchantReturn[];
+  shopTransfers: OldGoldShopTransfer[];
+  melts: OldGoldMelt[];
+  otherOutflows: OldGoldOtherOutflow[];
   pawnRecords: PawnRecord[];
   pawnInterestPayments: PawnInterestPayment[];
   ledger: FinancialLedger[];
+  creditDebts: CreditDebt[];
   staffUsers: StaffUser[];
   masterCategories: MasterCategory[];
   permissionModules: PermissionModule[];
@@ -103,14 +114,32 @@ interface GoldShopContextType {
     settlementAmount: number,
     extra?: Record<string, unknown>
   ) => Promise<void>;
+  confiscatePawnRecord: (id: string, notes?: string) => Promise<PawnRecord>;
   addLedgerEntry: (entry: Omit<FinancialLedger, 'id'>) => Promise<FinancialLedger>;
   updateLedgerEntry: (id: string, entry: Partial<FinancialLedger>) => Promise<FinancialLedger>;
   deleteLedgerEntry: (id: string) => Promise<void>;
+  addCreditDebt: (data: Record<string, unknown>) => Promise<CreditDebt>;
+  updateCreditDebt: (id: string, data: Record<string, unknown>) => Promise<CreditDebt>;
+  deleteCreditDebt: (id: string) => Promise<void>;
+  addCreditDebtPayment: (id: string, data: Record<string, unknown>) => Promise<CreditDebt>;
+  deleteCreditDebtPayment: (id: string, paymentId: string) => Promise<CreditDebt>;
   addCustomer: (name: string, phone: string, address: string, nrc?: string) => Promise<Customer>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<Customer>;
   deleteCustomer: (id: string) => Promise<void>;
   getLivePriceForPurity: (purity: GoldPurity) => number;
   getBuyPriceForPurity: (purity: GoldPurity) => number;
+  addMerchantReturn: (data: Record<string, unknown>) => Promise<OldGoldMerchantReturn>;
+  updateMerchantReturn: (id: string, data: Record<string, unknown>) => Promise<OldGoldMerchantReturn>;
+  deleteMerchantReturn: (id: string) => Promise<void>;
+  addShopTransfer: (data: Record<string, unknown>) => Promise<OldGoldShopTransfer>;
+  updateShopTransfer: (id: string, data: Record<string, unknown>) => Promise<OldGoldShopTransfer>;
+  deleteShopTransfer: (id: string) => Promise<void>;
+  addMelt: (data: Record<string, unknown>) => Promise<OldGoldMelt>;
+  updateMelt: (id: string, data: Record<string, unknown>) => Promise<OldGoldMelt>;
+  deleteMelt: (id: string) => Promise<void>;
+  addOtherOutflow: (data: Record<string, unknown>) => Promise<OldGoldOtherOutflow>;
+  updateOtherOutflow: (id: string, data: Record<string, unknown>) => Promise<OldGoldOtherOutflow>;
+  deleteOtherOutflow: (id: string) => Promise<void>;
   resetToDemoData: () => Promise<void>;
 
   createMasterCategory: (
@@ -150,9 +179,14 @@ function applyBootstrap(
     setTransactions: (v: Transaction[]) => void;
     setCustomOrders: (v: CustomOrder[]) => void;
     setGoldsmithJobs: (v: GoldsmithJob[]) => void;
+    setMerchantReturns: (v: OldGoldMerchantReturn[]) => void;
+    setShopTransfers: (v: OldGoldShopTransfer[]) => void;
+    setMelts: (v: OldGoldMelt[]) => void;
+    setOtherOutflows: (v: OldGoldOtherOutflow[]) => void;
     setPawnRecords: (v: PawnRecord[]) => void;
     setPawnInterestPayments: (v: PawnInterestPayment[]) => void;
     setLedger: (v: FinancialLedger[]) => void;
+    setCreditDebts: (v: CreditDebt[]) => void;
     setStaffUsers: (v: StaffUser[]) => void;
     setMasterCategories: (v: MasterCategory[]) => void;
     setPermissionModules: (v: PermissionModule[]) => void;
@@ -166,9 +200,14 @@ function applyBootstrap(
   setters.setTransactions(data.transactions);
   setters.setCustomOrders(data.orders);
   setters.setGoldsmithJobs(data.goldsmithJobs || []);
+  setters.setMerchantReturns(data.merchantReturns || []);
+  setters.setShopTransfers(data.shopTransfers || []);
+  setters.setMelts(data.melts || []);
+  setters.setOtherOutflows(data.otherOutflows || []);
   setters.setPawnRecords(data.pawns);
   setters.setPawnInterestPayments(data.interestPayments || []);
   setters.setLedger(data.ledger);
+  setters.setCreditDebts(data.creditDebts || []);
   setters.setStaffUsers(data.staff);
   setters.setMasterCategories(data.categories || []);
   setters.setPermissionModules(data.modules || []);
@@ -214,9 +253,14 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [customOrders, setCustomOrders] = useState<CustomOrder[]>([]);
   const [goldsmithJobs, setGoldsmithJobs] = useState<GoldsmithJob[]>([]);
+  const [merchantReturns, setMerchantReturns] = useState<OldGoldMerchantReturn[]>([]);
+  const [shopTransfers, setShopTransfers] = useState<OldGoldShopTransfer[]>([]);
+  const [melts, setMelts] = useState<OldGoldMelt[]>([]);
+  const [otherOutflows, setOtherOutflows] = useState<OldGoldOtherOutflow[]>([]);
   const [pawnRecords, setPawnRecords] = useState<PawnRecord[]>([]);
   const [pawnInterestPayments, setPawnInterestPayments] = useState<PawnInterestPayment[]>([]);
   const [ledger, setLedger] = useState<FinancialLedger[]>([]);
+  const [creditDebts, setCreditDebts] = useState<CreditDebt[]>([]);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [masterCategories, setMasterCategories] = useState<MasterCategory[]>([]);
   const [permissionModules, setPermissionModules] = useState<PermissionModule[]>([]);
@@ -236,9 +280,14 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setTransactions,
     setCustomOrders,
     setGoldsmithJobs,
+    setMerchantReturns,
+    setShopTransfers,
+    setMelts,
+    setOtherOutflows,
     setPawnRecords,
     setPawnInterestPayments,
     setLedger,
+    setCreditDebts,
     setStaffUsers,
     setMasterCategories,
     setPermissionModules,
@@ -549,6 +598,12 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await invalidateAndRefresh();
   };
 
+  const confiscatePawnRecord = async (id: string, notes?: string) => {
+    const pawn = await api.confiscatePawnRecord(id, notes);
+    await invalidateAndRefresh();
+    return pawn;
+  };
+
   const addLedgerEntry = async (entry: Omit<FinancialLedger, 'id'>) => {
     const row = await api.addLedgerEntry(entry);
     await invalidateAndRefresh();
@@ -564,6 +619,35 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteLedgerEntry = async (id: string) => {
     await api.deleteLedgerEntry(id);
     await invalidateAndRefresh();
+  };
+
+  const addCreditDebt = async (data: Record<string, unknown>) => {
+    const res = await api.createCreditDebt(data);
+    await invalidateAndRefresh();
+    return res;
+  };
+
+  const updateCreditDebt = async (id: string, data: Record<string, unknown>) => {
+    const res = await api.updateCreditDebt(id, data);
+    await invalidateAndRefresh();
+    return res;
+  };
+
+  const deleteCreditDebt = async (id: string) => {
+    await api.deleteCreditDebt(id);
+    await invalidateAndRefresh();
+  };
+
+  const addCreditDebtPayment = async (id: string, data: Record<string, unknown>) => {
+    const res = await api.addCreditDebtPayment(id, data);
+    await invalidateAndRefresh();
+    return res;
+  };
+
+  const deleteCreditDebtPayment = async (id: string, paymentId: string) => {
+    const res = await api.deleteCreditDebtPayment(id, paymentId);
+    await invalidateAndRefresh();
+    return res;
   };
 
   const createMasterCategory = async (
@@ -619,6 +703,86 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const addMerchantReturn = async (data: Record<string, unknown>) => {
+    const created = await api.createMerchantReturn(data);
+    setMerchantReturns((prev) => [created, ...prev]);
+    await invalidateAndRefresh();
+    return created;
+  };
+
+  const deleteMerchantReturn = async (id: string) => {
+    await api.deleteMerchantReturn(id);
+    setMerchantReturns((prev) => prev.filter((r) => r.id !== id));
+    await invalidateAndRefresh();
+  };
+
+  const updateMerchantReturn = async (id: string, data: Record<string, unknown>) => {
+    const updated = await api.updateMerchantReturn(id, data);
+    setMerchantReturns((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    await invalidateAndRefresh();
+    return updated;
+  };
+
+  const addShopTransfer = async (data: Record<string, unknown>) => {
+    const created = await api.createShopTransfer(data);
+    setShopTransfers((prev) => [created, ...prev]);
+    await invalidateAndRefresh();
+    return created;
+  };
+
+  const updateShopTransfer = async (id: string, data: Record<string, unknown>) => {
+    const updated = await api.updateShopTransfer(id, data);
+    setShopTransfers((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    await invalidateAndRefresh();
+    return updated;
+  };
+
+  const deleteShopTransfer = async (id: string) => {
+    await api.deleteShopTransfer(id);
+    setShopTransfers((prev) => prev.filter((r) => r.id !== id));
+    await invalidateAndRefresh();
+  };
+
+  const addMelt = async (data: Record<string, unknown>) => {
+    const created = await api.createMelt(data);
+    setMelts((prev) => [created, ...prev]);
+    await invalidateAndRefresh();
+    return created;
+  };
+
+  const updateMelt = async (id: string, data: Record<string, unknown>) => {
+    const updated = await api.updateMelt(id, data);
+    setMelts((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    await invalidateAndRefresh();
+    return updated;
+  };
+
+  const deleteMelt = async (id: string) => {
+    await api.deleteMelt(id);
+    setMelts((prev) => prev.filter((r) => r.id !== id));
+    await invalidateAndRefresh();
+  };
+
+  const addOtherOutflow = async (data: Record<string, unknown>) => {
+    const created = await api.createOtherOutflow(data);
+    setOtherOutflows((prev) => [created, ...prev]);
+    await invalidateAndRefresh();
+    return created;
+  };
+
+  const updateOtherOutflow = async (id: string, data: Record<string, unknown>) => {
+    const updated = await api.updateOtherOutflow(id, data);
+    setOtherOutflows((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    await invalidateAndRefresh();
+    return updated;
+  };
+
+  const deleteOtherOutflow = async (id: string) => {
+    await api.deleteOtherOutflow(id);
+    setOtherOutflows((prev) => prev.filter((r) => r.id !== id));
+    await invalidateAndRefresh();
+  };
+
   const resetToDemoData = async () => {
     cacheInvalidate();
     const data = await api.resetToDemoData();
@@ -635,9 +799,14 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         transactions,
         customOrders,
         goldsmithJobs,
+        merchantReturns,
+        shopTransfers,
+        melts,
+        otherOutflows,
         pawnRecords,
         pawnInterestPayments,
         ledger,
+        creditDebts,
         staffUsers,
         masterCategories,
         permissionModules,
@@ -673,6 +842,18 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         returnGoldsmithJob,
         cancelGoldsmithJob,
         handoffGoldsmithJob,
+        addMerchantReturn,
+        updateMerchantReturn,
+        deleteMerchantReturn,
+        addShopTransfer,
+        updateShopTransfer,
+        deleteShopTransfer,
+        addMelt,
+        updateMelt,
+        deleteMelt,
+        addOtherOutflow,
+        updateOtherOutflow,
+        deleteOtherOutflow,
         addPawnRecord,
         updatePawnRecord,
         deletePawnRecord,
@@ -680,9 +861,15 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deletePawnRedeem,
         payPawnInterest,
         redeemPawnRecord,
+        confiscatePawnRecord,
         addLedgerEntry,
         updateLedgerEntry,
         deleteLedgerEntry,
+        addCreditDebt,
+        updateCreditDebt,
+        deleteCreditDebt,
+        addCreditDebtPayment,
+        deleteCreditDebtPayment,
         addCustomer,
         updateCustomer,
         deleteCustomer,

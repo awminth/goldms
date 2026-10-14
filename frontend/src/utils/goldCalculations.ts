@@ -388,3 +388,117 @@ export function resolveBahtMmkRate(settings?: {
   if (Number.isFinite(buy) && buy > 0) return 100000 / buy;
   return 100000 / 765;
 }
+
+export type OldGoldCategoryKey = 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14';
+
+export const OLD_GOLD_CATEGORY_CONFIG: Record<
+  OldGoldCategoryKey,
+  {
+    id: OldGoldCategoryKey;
+    nameMm: string;
+    nameEn: string;
+    puritiesMm: string;
+    puritiesEn: string;
+    descriptionMm: string;
+    purities: string[];
+    badgeClass: string;
+    cardBorder: string;
+    cardBg: string;
+  }
+> = {
+  THAI_GOLD: {
+    id: 'THAI_GOLD',
+    nameMm: 'ထိုင်းရွှေ',
+    nameEn: 'Thai Gold',
+    puritiesMm: 'ထိုင်းရွှေ',
+    puritiesEn: 'Thai Gold',
+    descriptionMm: 'ထိုင်းရွှေ',
+    purities: ['THAI_GOLD'],
+    badgeClass:
+      'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 border border-amber-300 dark:border-amber-800',
+    cardBorder: 'border-amber-300 dark:border-amber-800/60',
+    cardBg: 'bg-amber-50/50 dark:bg-amber-950/20',
+  },
+  PAE_16: {
+    id: 'PAE_16',
+    nameMm: '16ပဲ',
+    nameEn: '16 Pae',
+    puritiesMm: 'မီးလင်း၊ 24K',
+    puritiesEn: 'Meelin, 24K',
+    descriptionMm: 'မီးလင်း၊ 24K',
+    purities: ['MEELIN', 'K24'],
+    badgeClass:
+      'bg-yellow-100 text-yellow-950 dark:bg-yellow-950/50 dark:text-yellow-200 border border-yellow-300 dark:border-yellow-800',
+    cardBorder: 'border-yellow-300 dark:border-yellow-800/60',
+    cardBg: 'bg-yellow-50/50 dark:bg-yellow-950/20',
+  },
+  PAE_15: {
+    id: 'PAE_15',
+    nameMm: '15ပဲ',
+    nameEn: '15 Pae',
+    puritiesMm: '15A၊ 15B',
+    puritiesEn: '15A, 15B',
+    descriptionMm: '15A၊ 15B',
+    purities: ['PE15A', 'PE15B'],
+    badgeClass:
+      'bg-emerald-100 text-emerald-950 dark:bg-emerald-950/50 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800',
+    cardBorder: 'border-emerald-300 dark:border-emerald-800/60',
+    cardBg: 'bg-emerald-50/50 dark:bg-emerald-950/20',
+  },
+  PAE_14: {
+    id: 'PAE_14',
+    nameMm: '14ပဲ',
+    nameEn: '14 Pae',
+    puritiesMm: '14A၊ 13A၊ 12A',
+    puritiesEn: '14A, 13A, 12A',
+    descriptionMm: '14A၊ 13A၊ 12A',
+    purities: ['PE14A', 'PE13A', 'PE12A', 'K18'],
+    badgeClass:
+      'bg-blue-100 text-blue-950 dark:bg-blue-950/50 dark:text-blue-200 border border-blue-300 dark:border-blue-800',
+    cardBorder: 'border-blue-300 dark:border-blue-800/60',
+    cardBg: 'bg-blue-50/50 dark:bg-blue-950/20',
+  },
+};
+
+export function getOldGoldCategory(purity?: string, itemType?: string): OldGoldCategoryKey {
+  const p = String(purity || '').toUpperCase();
+  const t = String(itemType || '').toUpperCase();
+  const combined = `${p} ${t}`;
+
+  // 1. Thai Gold (ထိုင်းရွှေ)
+  if (
+    combined.includes('THAI') ||
+    combined.includes('ထိုင်း')
+  ) {
+    return 'THAI_GOLD';
+  }
+
+  // 2. 16-Pae / Meelin / 24K (၁၆ပဲရည် / မီးလင်း / အခေါက်)
+  if (
+    combined.includes('MEELIN') ||
+    combined.includes('မီးလင်း') ||
+    combined.includes('အခေါက်') ||
+    combined.includes('K24') ||
+    combined.includes('24K') ||
+    combined.includes('၂၄K') ||
+    combined.includes('16') ||
+    combined.includes('၁၆') ||
+    combined.includes('PAE_16')
+  ) {
+    return 'PAE_16';
+  }
+
+  // 3. 15-Pae (၁၅ပဲရည် / 15A / 15B)
+  if (
+    combined.includes('15') ||
+    combined.includes('၁၅') ||
+    combined.includes('PE15') ||
+    combined.includes('PAE_15')
+  ) {
+    return 'PAE_15';
+  }
+
+  // 4. 14-Pae (၁၄ပဲရည် / 14A / 13A / 12A / 18K)
+  return 'PAE_14';
+}
+

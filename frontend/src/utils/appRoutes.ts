@@ -10,6 +10,7 @@ export const TAB_TO_PATH: Record<ActiveTab, string> = {
   'pos-history': 'pos-history',
   inventory: 'inventory',
   'old-gold': 'old-gold',
+  'old-gold-outflows': 'old-gold-outflows',
   goldsmith: 'goldsmith',
   'goldsmith-handoff': 'goldsmith-handoff',
   'order-handoff': 'order-handoff',
@@ -24,6 +25,9 @@ export const TAB_TO_PATH: Record<ActiveTab, string> = {
   'pawn-interest-new': 'pawn-interest-new',
   'pawn-redeem-new': 'pawn-redeem-new',
   ledger: 'ledger',
+  'credit-debt': 'credit-debt',
+  'credit-receivable': 'credit-debt',
+  'credit-payable': 'credit-debt',
   customers: 'customers',
   'financial-report': 'financial-report',
   'sales-performance': 'sales-performance',
@@ -42,6 +46,10 @@ const PATH_TO_TAB: Record<string, ActiveTab> = Object.entries(TAB_TO_PATH).reduc
 
 /** Legacy URL aliases → current tabs */
 PATH_TO_TAB['reports'] = 'financial-report';
+PATH_TO_TAB['old-gold-history'] = 'old-gold-outflows';
+PATH_TO_TAB['old-gold-outflow'] = 'old-gold-outflows';
+PATH_TO_TAB['credit-receivable'] = 'credit-debt';
+PATH_TO_TAB['credit-payable'] = 'credit-debt';
 
 export type RouteState = {
   tab: ActiveTab;

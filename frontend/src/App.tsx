@@ -15,6 +15,7 @@ import { PosHistoryView } from './components/PosHistoryView';
 import { OrdersView } from './components/OrdersView';
 import { PawnView } from './components/PawnView';
 import { LedgerView } from './components/LedgerView';
+import { CreditDebtView } from './components/CreditDebtView';
 import { FinancialReportView } from './components/FinancialReportView';
 import { SalesPerformanceReportView } from './components/SalesPerformanceReportView';
 import { SetupView } from './components/SetupView';
@@ -37,6 +38,7 @@ const ALL_TABS: ActiveTab[] = [
   'pos-history',
   'inventory',
   'old-gold',
+  'old-gold-outflows',
   'goldsmith',
   'goldsmith-handoff',
   'order-handoff',
@@ -50,6 +52,9 @@ const ALL_TABS: ActiveTab[] = [
   'pawn-new',
   'pawn-interest-new',
   'pawn-redeem-new',
+  'credit-debt',
+  'credit-receivable',
+  'credit-payable',
   'ledger',
   'financial-report',
   'sales-performance',
@@ -289,7 +294,12 @@ const MainLayout: React.FC = () => {
           {(can('pos_history', 'read') || can('pos', 'read')) &&
             activeTab === 'pos-history' && <PosHistoryView />}
           {activeTab === 'inventory' && can('inventory', 'read') && <InventoryView />}
-          {activeTab === 'old-gold' && can('inventory', 'read') && <OldGoldView />}
+          {activeTab === 'old-gold' && can('inventory', 'read') && (
+            <OldGoldView section="summary" onNavigate={setActiveTab} />
+          )}
+          {activeTab === 'old-gold-outflows' && can('inventory', 'read') && (
+            <OldGoldView section="outflows" onNavigate={setActiveTab} />
+          )}
           {activeTab === 'goldsmith' && can('goldsmith', 'read') && <GoldsmithView />}
           {activeTab === 'goldsmith-handoff' &&
             can('goldsmith', 'read') &&
@@ -339,6 +349,17 @@ const MainLayout: React.FC = () => {
           {can('pawn', 'read') && activeTab === 'pawn-redeem-new' && (
             <PawnView section="form-redeem" onNavigate={pawnNavigate} onClearEdit={clearPawnEdit} />
           )}
+          {(activeTab === 'credit-debt' ||
+            activeTab === 'credit-receivable' ||
+            activeTab === 'credit-payable') &&
+            can('credit_debt', 'read') && (
+              <CreditDebtView
+                key={activeTab}
+                initialDebtType={
+                  activeTab === 'credit-payable' ? 'PAYABLE' : 'RECEIVABLE'
+                }
+              />
+            )}
           {activeTab === 'ledger' && can('ledger', 'read') && <LedgerView />}
           {activeTab === 'financial-report' && can('reports', 'read') && <FinancialReportView />}
           {activeTab === 'sales-performance' && can('reports', 'read') && (

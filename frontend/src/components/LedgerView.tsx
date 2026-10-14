@@ -442,18 +442,23 @@ export const LedgerView: React.FC = () => {
                     <>
                       <option value="GOLD_SALE">ရွှေရောင်းရငွေ (Gold Sales)</option>
                       <option value="CUSTOM_ORDER">အော်ဒါဝင်ငွေ (Custom Order Deposit)</option>
+                      <option value="PAWN_INTEREST">ပေါင်နှံဝင်ငွေ (Pawn Interest / Redeem)</option>
                       <option value="MELTING_PROFIT">ရွှေကျိုအမြတ် (Melting Profit)</option>
-                      <option value="OTHER_INCOME">အခြားဝင်ငွေ (Other Income)</option>
+                      <option value="CREDIT_IN">အကြွေးရရန် လက်ခံငွေ (Credit Collected)</option>
+                      <option value="OTHER_INCOME">အခြားဝင်ငွေ / အဟောင်းထည် ပြန်ရငွေ (Other Income)</option>
                     </>
                   ) : (
                     <>
                       <option value="GOLD_PURCHASE">ရွှေဝယ်ယူငွေ (Gold Purchase)</option>
+                      <option value="PAWN_LOAN">ပေါင်နှံချေးငွေထုတ်ပေး (Pawn Loan)</option>
+                      <option value="GOLDSMITH_FEE">ပန်းထိမ်/အရည်ကျိုလက်ခ (Goldsmith Fee)</option>
+                      <option value="CREDIT_OUT">အကြွေးပေးရန် ပေးချေငွေ (Credit Paid)</option>
                       <option value="STAFF_SALARY">ဝန်ထမ်းလစာ (Staff Payroll)</option>
                       <option value="SHOP_RENT">ဆိုင်ခန်းငှားရမ်းခ (Shop Rent)</option>
+                      <option value="RENT">ငှားရမ်းခ အခြား (Rent)</option>
                       <option value="UTILITIES">မီတာခနှင့် အထွေထွေ (Utilities)</option>
                       <option value="EQUIPMENT_ACID">ပန်းထိမ်သုံးပစ္စည်း/အက်ဆစ် (Tools & Acid)</option>
                       <option value="TAX">အခွန်အခ (Taxes)</option>
-                      <option value="GOLDSMITH_FEE">ပန်းထိမ်လက်ခ (Goldsmith Fee)</option>
                       <option value="OTHER_EXPENSE">အခြားထွက်ငွေ (Other Expenses)</option>
                     </>
                   )}

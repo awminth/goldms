@@ -26,6 +26,7 @@ import {
   ShoppingBag,
   PackageOpen,
   Hammer,
+  WalletCards,
 } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { SOFTWARE_SIDEBAR_LOGO, softwareName, softwareTagline } from '../branding';
@@ -56,14 +57,23 @@ const PAWN_TABS: ActiveTab[] = [
   'pawn-redeem-new',
 ];
 
+const OLD_GOLD_TABS: ActiveTab[] = [
+  'old-gold',
+  'old-gold-outflows',
+];
+
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   isOpenMobile = false,
   setIsOpenMobile,
 }) => {
-  const { customOrders, goldsmithJobs, language, can, pawnRecords } = useGoldShop();
+  const { customOrders, goldsmithJobs, language, can, pawnRecords, creditDebts } = useGoldShop();
   useBodyScrollLock(isOpenMobile);
+
+  const pendingCreditDebts = (creditDebts || []).filter(
+    (d) => d.status !== 'SETTLED' && d.status !== 'CANCELLED'
+  ).length;
 
   const pendingOrders = customOrders.filter((o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED').length;
 
@@ -88,6 +98,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [setupOpen, setSetupOpen] = useState(setupOpenByDefault);
   const pawnOpenByDefault = PAWN_TABS.includes(activeTab);
   const [pawnOpen, setPawnOpen] = useState(pawnOpenByDefault);
+  const oldGoldOpenByDefault = OLD_GOLD_TABS.includes(activeTab);
+  const [oldGoldOpen, setOldGoldOpen] = useState(oldGoldOpenByDefault);
 
   useEffect(() => {
     if (SETUP_TABS.includes(activeTab)) setSetupOpen(true);
@@ -95,6 +107,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   useEffect(() => {
     if (PAWN_TABS.includes(activeTab)) setPawnOpen(true);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (OLD_GOLD_TABS.includes(activeTab)) setOldGoldOpen(true);
   }, [activeTab]);
 
   const mainNavTop = [
@@ -163,6 +179,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 
   const mainNavBottom = [
+    {
+      id: 'credit-debt' as ActiveTab,
+      labelMM: 'အကြွေးပေး / ရရန်ကျန်',
+      labelEN: 'Credit & Debt',
+      icon: WalletCards,
+      badge: pendingCreditDebts > 0 ? pendingCreditDebts : null,
+      badgeColor: 'bg-amber-500',
+      module: 'credit_debt',
+    },
     {
       id: 'ledger' as ActiveTab,
       labelMM: 'အခြားဝင်ငွေ / ထွက်ငွေ',
@@ -275,6 +300,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showPawn = pawnChildren.length > 0;
   const pawnChildActive = PAWN_TABS.includes(activeTab);
 
+  const oldGoldChildren = can('inventory', 'read')
+    ? [
+        {
+          id: 'old-gold' as ActiveTab,
+          labelMM: 'အဟောင်းထည် လက်ကျန်',
+          labelEN: 'Old Gold Summary',
+          icon: Scale,
+        },
+        {
+          id: 'old-gold-outflows' as ActiveTab,
+          labelMM: 'အထွက် အသေးစိတ်မှတ်တမ်း',
+          labelEN: 'Outflow Details',
+          icon: List,
+        },
+      ]
+    : [];
+  const showOldGold = oldGoldChildren.length > 0;
+  const oldGoldChildActive = OLD_GOLD_TABS.includes(activeTab);
+
   const handleSelectTab = (tab: ActiveTab) => {
     setActiveTab(tab);
     setIsOpenMobile?.(false);
@@ -327,6 +371,70 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
           {mainNavTop.map((item) => {
+            if (item.id === 'old-gold') {
+              if (!showOldGold) return null;
+              return (
+                <div key="old-gold-group" className="pt-0.5">
+                  <button
+                    type="button"
+                    id="sidebar-nav-old-gold-group"
+                    onClick={() => setOldGoldOpen((o) => !o)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      oldGoldChildActive
+                        ? 'bg-[#FAF8F2] dark:bg-[#222222] text-[#996515] dark:text-[#FFD700]'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515] dark:hover:text-[#FFD700]'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3 truncate">
+                      <PackageOpen className="w-4 h-4 shrink-0 text-[#D4AF37]" />
+                      <span className="truncate">
+                        {language === 'MM' ? 'အဟောင်းထည်' : 'Old Gold'}
+                      </span>
+                    </div>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 text-gray-400 transition-transform ${
+                        oldGoldOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {oldGoldOpen && (
+                    <div className="mt-0.5 ml-3 pl-2 border-l border-line dark:border-gray-800 space-y-0.5">
+                      {oldGoldChildren.map((child) => {
+                        const Icon = child.icon;
+                        const isActive = activeTab === child.id;
+                        return (
+                          <button
+                            key={child.id}
+                            id={`sidebar-nav-${child.id}`}
+                            type="button"
+                            onClick={() => handleSelectTab(child.id)}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              isActive
+                                ? 'bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white shadow-sm'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515]'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2.5 truncate">
+                              <Icon
+                                className={`w-3.5 h-3.5 shrink-0 ${
+                                  isActive ? 'text-white' : 'text-[#D4AF37]'
+                                }`}
+                              />
+                              <span className="truncate">
+                                {language === 'MM' ? child.labelMM : child.labelEN}
+                              </span>
+                            </div>
+                            {isActive && <ChevronRight className="w-3 h-3 text-white/80" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
             const Icon = item.icon;
             const isActive =
               activeTab === item.id ||

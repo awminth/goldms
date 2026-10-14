@@ -29,6 +29,7 @@ type CardDef = {
 
 /** Known business categories shown as cards (even when total is 0). */
 const CARD_DEFS: CardDef[] = [
+  // —— Income (system cash-in) ——
   { key: 'GOLD_SALE', category: 'GOLD_SALE', type: 'INCOME', labelMM: 'ရွှေရောင်းရငွေ', labelEN: 'Gold sales' },
   {
     key: 'CUSTOM_ORDER',
@@ -36,6 +37,13 @@ const CARD_DEFS: CardDef[] = [
     type: 'INCOME',
     labelMM: 'အော်ဒါဝင်ငွေ',
     labelEN: 'Custom order income',
+  },
+  {
+    key: 'PAWN_INTEREST',
+    category: 'PAWN_INTEREST',
+    type: 'INCOME',
+    labelMM: 'ပေါင်နှံဝင်ငွေ (အတိုး / ရွေးယူ)',
+    labelEN: 'Pawn income (interest / redeem)',
   },
   {
     key: 'MELTING_PROFIT',
@@ -48,22 +56,44 @@ const CARD_DEFS: CardDef[] = [
     key: 'OTHER_INCOME',
     category: 'OTHER_INCOME',
     type: 'INCOME',
-    labelMM: 'အခြားဝင်ငွေ',
-    labelEN: 'Other income',
+    labelMM: 'အခြားဝင်ငွေ / အဟောင်းထည် ပြန်ရငွေ',
+    labelEN: 'Other income / old-gold cash-in',
   },
+  {
+    key: 'CREDIT_IN',
+    category: 'CREDIT_IN',
+    type: 'INCOME',
+    labelMM: 'အကြွေးရရန် လက်ခံငွေ',
+    labelEN: 'Credit receivable collected',
+  },
+  // —— Expense (system cash-out) ——
   {
     key: 'GOLD_PURCHASE',
     category: 'GOLD_PURCHASE',
     type: 'EXPENSE',
-    labelMM: 'ရွှေဝယ်ယူငွေ',
-    labelEN: 'Gold purchase',
+    labelMM: 'ရွှေဝယ်ယူငွေ / အလဲအလှယ်ပြန်ပေး',
+    labelEN: 'Gold purchase / exchange refund',
+  },
+  {
+    key: 'PAWN_LOAN',
+    category: 'PAWN_LOAN',
+    type: 'EXPENSE',
+    labelMM: 'ပေါင်နှံချေးငွေထုတ်ပေး',
+    labelEN: 'Pawn loan disbursement',
   },
   {
     key: 'GOLDSMITH_FEE',
     category: 'GOLDSMITH_FEE',
     type: 'EXPENSE',
-    labelMM: 'ပန်းထိမ်လက်ခ',
-    labelEN: 'Goldsmith fee',
+    labelMM: 'ပန်းထိမ်လက်ခ / အရည်ကျိုလက်ခ',
+    labelEN: 'Goldsmith / melt craft fee',
+  },
+  {
+    key: 'CREDIT_OUT',
+    category: 'CREDIT_OUT',
+    type: 'EXPENSE',
+    labelMM: 'အကြွေးပေးရန် ပေးချေငွေ',
+    labelEN: 'Credit payable paid',
   },
   {
     key: 'STAFF_SALARY',
@@ -78,6 +108,13 @@ const CARD_DEFS: CardDef[] = [
     type: 'EXPENSE',
     labelMM: 'ဆိုင်ခန်းငှားရမ်းခ',
     labelEN: 'Shop rent',
+  },
+  {
+    key: 'RENT',
+    category: 'RENT',
+    type: 'EXPENSE',
+    labelMM: 'ငှားရမ်းခ (အခြား)',
+    labelEN: 'Rent (other)',
   },
   {
     key: 'UTILITIES',
@@ -177,9 +214,8 @@ export const FinancialReportView: React.FC = () => {
     return map;
   }, [entries]);
 
-  /** Cards: known defs first, then any extra categories present in data. */
+  /** Only categories that actually have ledger rows in the selected range. */
   const cards = useMemo(() => {
-    const seen = new Set<string>();
     const list: Array<{
       key: string;
       category: string;
@@ -189,22 +225,8 @@ export const FinancialReportView: React.FC = () => {
       count: number;
     }> = [];
 
-    for (const def of CARD_DEFS) {
-      const key = `${def.type}|${def.category}`;
-      seen.add(key);
-      const hit = amountByKey.get(key);
-      list.push({
-        key,
-        category: def.category,
-        type: def.type,
-        label: language === 'MM' ? def.labelMM : def.labelEN,
-        total: hit?.total ?? 0,
-        count: hit?.count ?? 0,
-      });
-    }
-
     for (const [key, hit] of amountByKey) {
-      if (seen.has(key)) continue;
+      if (hit.count <= 0) continue;
       const type = hit.type === 'INCOME' ? 'INCOME' : 'EXPENSE';
       list.push({
         key,
@@ -216,11 +238,14 @@ export const FinancialReportView: React.FC = () => {
       });
     }
 
-    return list;
+    return list.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'INCOME' ? -1 : 1;
+      return b.total - a.total;
+    });
   }, [amountByKey, language]);
 
   const incomeCards = cards.filter((c) => c.type === 'INCOME');
-  const expenseCards = cards.filter((c) => c.type === 'EXPENSE' && c.count > 0);
+  const expenseCards = cards.filter((c) => c.type === 'EXPENSE');
 
   const detailRows = useMemo(() => {
     if (!selected) return [];
@@ -327,8 +352,8 @@ export const FinancialReportView: React.FC = () => {
           </h2>
           <p className="text-xs text-gray-500 mt-1">
             {language === 'MM'
-              ? 'ကတ်ကို နှိပ်၍ အသေးစိတ်ကြည့်ပါ။ အပေါင်စာရင်း မပါဝင်ပါ။'
-              : 'Tap a card for detail lines. Pawn flows excluded.'}
+              ? 'Software ထဲ တကယ်ထည့်ထားသော ဝင်ငွေ / ထွက်ငွေသာ ပြသည် (၀ ကတ် မပြ)။ ကတ်ကို နှိပ်၍ အသေးစိတ်ကြည့်ပါ။'
+              : 'Shows only income/expense actually recorded in the software (empty categories hidden). Tap a card for details.'}
           </p>
         </div>
 
@@ -413,26 +438,35 @@ export const FinancialReportView: React.FC = () => {
               <ArrowUpRight className="w-3.5 h-3.5" />
               {language === 'MM' ? 'ဝင်ငွေ' : 'Income'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {incomeCards.map((card) => (
-                <button
-                  key={card.key}
-                  type="button"
-                  onClick={() => openCard(card)}
-                  className="text-left p-4 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-emerald-200/80 dark:border-emerald-950 shadow-xs hover:border-emerald-400 hover:shadow-md transition group"
-                >
-                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 block">
-                    {card.label}
-                  </span>
-                  <div className="mt-2 text-xl font-mono font-extrabold text-emerald-800 dark:text-emerald-300">
-                    +{formatMMK(card.total)}
-                  </div>
-                  <p className="mt-1 text-[10px] text-gray-400 group-hover:text-emerald-600">
-                    {card.count} {language === 'MM' ? 'စာရင်း · အသေးစိတ်ကြည့်ရန် နှိပ်ပါ' : 'rows · tap for detail'}
-                  </p>
-                </button>
-              ))}
-            </div>
+            {incomeCards.length === 0 ? (
+              <p className="text-xs text-gray-400 px-1 py-3">
+                {language === 'MM'
+                  ? 'ဤကာလတွင် ဝင်ငွေစာရင်း မရှိပါ'
+                  : 'No income recorded in this period'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {incomeCards.map((card) => (
+                  <button
+                    key={card.key}
+                    type="button"
+                    onClick={() => openCard(card)}
+                    className="text-left p-4 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-emerald-200/80 dark:border-emerald-950 shadow-xs hover:border-emerald-400 hover:shadow-md transition group"
+                  >
+                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 block">
+                      {card.label}
+                    </span>
+                    <div className="mt-2 text-xl font-mono font-extrabold text-emerald-800 dark:text-emerald-300">
+                      +{formatMMK(card.total)}
+                    </div>
+                    <p className="mt-1 text-[10px] text-gray-400 group-hover:text-emerald-600">
+                      {card.count}{' '}
+                      {language === 'MM' ? 'စာရင်း · အသေးစိတ်ကြည့်ရန် နှိပ်ပါ' : 'rows · tap for detail'}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="space-y-2">
@@ -440,26 +474,35 @@ export const FinancialReportView: React.FC = () => {
               <ArrowDownLeft className="w-3.5 h-3.5" />
               {language === 'MM' ? 'ထွက်ငွေ' : 'Expense'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {expenseCards.map((card) => (
-                <button
-                  key={card.key}
-                  type="button"
-                  onClick={() => openCard(card)}
-                  className="text-left p-4 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-rose-200/80 dark:border-rose-950 shadow-xs hover:border-rose-400 hover:shadow-md transition group"
-                >
-                  <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 block">
-                    {card.label}
-                  </span>
-                  <div className="mt-2 text-xl font-mono font-extrabold text-rose-800 dark:text-rose-300">
-                    -{formatMMK(card.total)}
-                  </div>
-                  <p className="mt-1 text-[10px] text-gray-400 group-hover:text-rose-600">
-                    {card.count} {language === 'MM' ? 'စာရင်း · အသေးစိတ်ကြည့်ရန် နှိပ်ပါ' : 'rows · tap for detail'}
-                  </p>
-                </button>
-              ))}
-            </div>
+            {expenseCards.length === 0 ? (
+              <p className="text-xs text-gray-400 px-1 py-3">
+                {language === 'MM'
+                  ? 'ဤကာလတွင် ထွက်ငွေစာရင်း မရှိပါ'
+                  : 'No expense recorded in this period'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {expenseCards.map((card) => (
+                  <button
+                    key={card.key}
+                    type="button"
+                    onClick={() => openCard(card)}
+                    className="text-left p-4 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-rose-200/80 dark:border-rose-950 shadow-xs hover:border-rose-400 hover:shadow-md transition group"
+                  >
+                    <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 block">
+                      {card.label}
+                    </span>
+                    <div className="mt-2 text-xl font-mono font-extrabold text-rose-800 dark:text-rose-300">
+                      -{formatMMK(card.total)}
+                    </div>
+                    <p className="mt-1 text-[10px] text-gray-400 group-hover:text-rose-600">
+                      {card.count}{' '}
+                      {language === 'MM' ? 'စာရင်း · အသေးစိတ်ကြည့်ရန် နှိပ်ပါ' : 'rows · tap for detail'}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="p-5 rounded-2xl bg-[#FAF8F2] dark:bg-[#201D17] border border-[#D4AF37]/40 shadow-xs">

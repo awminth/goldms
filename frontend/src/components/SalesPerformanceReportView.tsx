@@ -279,30 +279,37 @@ export const SalesPerformanceReportView: React.FC = () => {
       language === 'MM'
         ? `ရောင်းအားအစီရင်ခံစာ (${report.month}) — ${rank === 'best' ? 'အကောင်းဆုံး' : 'အနည်းဆုံး'}`
         : `Sales performance (${report.month}) — ${rank === 'best' ? 'Best' : 'Least'}`;
-    exportToExcel({
+    type ExportRow = {
+      group: string;
+      category: string;
+      detail: string;
+      qty: number;
+      total_amount: number;
+    };
+    exportToExcel<ExportRow>({
       filename: `sales_performance_${report.month}_${rank}`,
       sheetName: 'Sales',
       title,
       columns: [
         {
           header: language === 'MM' ? 'အုပ်စု' : 'Group',
-          value: (r: { group: string }) => r.group,
+          value: (r) => r.group,
           width: 14,
         },
         {
           header: language === 'MM' ? 'အမျိုးအစား' : 'Category',
-          value: (r: { category: string }) => r.category,
+          value: (r) => r.category,
           width: 16,
         },
         {
           header: language === 'MM' ? 'ရွှေရည် / Gram' : 'Purity / Gram',
-          value: (r: { detail: string }) => r.detail,
+          value: (r) => r.detail,
           width: 16,
         },
-        { header: language === 'MM' ? 'အရေအတွက်' : 'Qty', value: (r: { qty: number }) => r.qty, width: 10 },
+        { header: language === 'MM' ? 'အရေအတွက်' : 'Qty', value: (r) => r.qty, width: 10 },
         {
           header: language === 'MM' ? 'ရောင်းငွေ' : 'Amount',
-          value: (r: { total_amount: number }) => r.total_amount,
+          value: (r) => r.total_amount,
           width: 14,
         },
       ],

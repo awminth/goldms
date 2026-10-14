@@ -15,6 +15,12 @@ import type {
   UserRole,
   ShopSettings,
   GoldsmithJob,
+  OldGoldMerchantReturn,
+  OldGoldShopTransfer,
+  OldGoldMelt,
+  OldGoldOtherOutflow,
+  CreditDebt,
+  CreditDebtPayment,
 } from '../types/gold';
 
 const API_BASE = '/api';
@@ -77,6 +83,11 @@ export type BootstrapData = {
   rolePermissions?: RolePermission[];
   settings?: ShopSettings;
   goldsmithJobs?: GoldsmithJob[];
+  merchantReturns?: OldGoldMerchantReturn[];
+  shopTransfers?: OldGoldShopTransfer[];
+  melts?: OldGoldMelt[];
+  otherOutflows?: OldGoldOtherOutflow[];
+  creditDebts?: CreditDebt[];
 };
 
 export const api = {
@@ -238,6 +249,86 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
+  listMerchantReturns: () =>
+    request<OldGoldMerchantReturn[]>('/old-gold/merchant-returns'),
+
+  createMerchantReturn: (data: Record<string, unknown>) =>
+    request<OldGoldMerchantReturn>('/old-gold/merchant-returns', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteMerchantReturn: (id: string) =>
+    request<void>(`/old-gold/merchant-returns/${id}`, {
+      method: 'DELETE',
+    }),
+
+  updateMerchantReturn: (id: string, data: Record<string, unknown>) =>
+    request<OldGoldMerchantReturn>(`/old-gold/merchant-returns/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  listShopTransfers: () =>
+    request<OldGoldShopTransfer[]>('/old-gold/shop-transfers'),
+
+  createShopTransfer: (data: Record<string, unknown>) =>
+    request<OldGoldShopTransfer>('/old-gold/shop-transfers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateShopTransfer: (id: string, data: Record<string, unknown>) =>
+    request<OldGoldShopTransfer>(`/old-gold/shop-transfers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteShopTransfer: (id: string) =>
+    request<void>(`/old-gold/shop-transfers/${id}`, {
+      method: 'DELETE',
+    }),
+
+  listMelts: () =>
+    request<OldGoldMelt[]>('/old-gold/melts'),
+
+  createMelt: (data: Record<string, unknown>) =>
+    request<OldGoldMelt>('/old-gold/melts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateMelt: (id: string, data: Record<string, unknown>) =>
+    request<OldGoldMelt>(`/old-gold/melts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteMelt: (id: string) =>
+    request<void>(`/old-gold/melts/${id}`, {
+      method: 'DELETE',
+    }),
+
+  listOtherOutflows: () =>
+    request<OldGoldOtherOutflow[]>('/old-gold/other-outflows'),
+
+  createOtherOutflow: (data: Record<string, unknown>) =>
+    request<OldGoldOtherOutflow>('/old-gold/other-outflows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateOtherOutflow: (id: string, data: Record<string, unknown>) =>
+    request<OldGoldOtherOutflow>(`/old-gold/other-outflows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteOtherOutflow: (id: string) =>
+    request<void>(`/old-gold/other-outflows/${id}`, {
+      method: 'DELETE',
+    }),
+
   handoffGoldsmithJob: (id: string, data: Record<string, unknown>) =>
     request<{ job: GoldsmithJob; transaction: Transaction }>(`/goldsmith-jobs/${id}/handoff`, {
       method: 'POST',
@@ -277,6 +368,12 @@ export const api = {
   deletePawnRedeem: (id: string) =>
     request<{ id: string }>(`/pawns/${id}/redeem`, {
       method: 'DELETE',
+    }),
+
+  confiscatePawnRecord: (id: string, notes?: string) =>
+    request<PawnRecord>(`/pawns/${id}/confiscate`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
     }),
 
   payPawnInterest: (
@@ -321,6 +418,40 @@ export const api = {
 
   deleteLedgerEntry: (id: string) =>
     request<void>(`/ledger/${id}`, { method: 'DELETE' }),
+
+  listCreditDebts: (query?: Record<string, string>) => {
+    const qs = query ? new URLSearchParams(query).toString() : '';
+    return request<CreditDebt[]>(`/credit-debts${qs ? `?${qs}` : ''}`);
+  },
+
+  getCreditDebt: (id: string) =>
+    request<CreditDebt>(`/credit-debts/${id}`),
+
+  createCreditDebt: (data: Record<string, unknown>) =>
+    request<CreditDebt>('/credit-debts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCreditDebt: (id: string, data: Record<string, unknown>) =>
+    request<CreditDebt>(`/credit-debts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCreditDebt: (id: string) =>
+    request<void>(`/credit-debts/${id}`, { method: 'DELETE' }),
+
+  addCreditDebtPayment: (id: string, data: Record<string, unknown>) =>
+    request<CreditDebt>(`/credit-debts/${id}/payments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCreditDebtPayment: (id: string, paymentId: string) =>
+    request<CreditDebt>(`/credit-debts/${id}/payments/${paymentId}`, {
+      method: 'DELETE',
+    }),
 
   calcValuation: (body: Record<string, unknown>) =>
     request<Record<string, unknown>>('/calc/valuation', {

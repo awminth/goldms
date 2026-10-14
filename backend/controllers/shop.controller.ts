@@ -280,6 +280,86 @@ export const shopController = {
     res.json({ success: true, data: { available } });
   }),
 
+  listMerchantReturns: asyncHandler(async (_req, res) => {
+    const data = await shopService.listMerchantReturns();
+    res.json({ success: true, data });
+  }),
+
+  createMerchantReturn: asyncHandler(async (req, res) => {
+    const data = await shopService.createMerchantReturn(req.body || {});
+    res.status(201).json({ success: true, data });
+  }),
+
+  deleteMerchantReturn: asyncHandler(async (req, res) => {
+    const data = await shopService.deleteMerchantReturn(req.params.id);
+    res.json({ success: true, data });
+  }),
+
+  updateMerchantReturn: asyncHandler(async (req, res) => {
+    const data = await shopService.updateMerchantReturn(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  listShopTransfers: asyncHandler(async (_req, res) => {
+    const data = await shopService.listShopTransfers();
+    res.json({ success: true, data });
+  }),
+
+  createShopTransfer: asyncHandler(async (req, res) => {
+    const data = await shopService.createShopTransfer(req.body || {});
+    res.status(201).json({ success: true, data });
+  }),
+
+  updateShopTransfer: asyncHandler(async (req, res) => {
+    const data = await shopService.updateShopTransfer(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  deleteShopTransfer: asyncHandler(async (req, res) => {
+    const data = await shopService.deleteShopTransfer(req.params.id);
+    res.json({ success: true, data });
+  }),
+
+  listMelts: asyncHandler(async (_req, res) => {
+    const data = await shopService.listMelts();
+    res.json({ success: true, data });
+  }),
+
+  createMelt: asyncHandler(async (req, res) => {
+    const data = await shopService.createMelt(req.body || {});
+    res.status(201).json({ success: true, data });
+  }),
+
+  updateMelt: asyncHandler(async (req, res) => {
+    const data = await shopService.updateMelt(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  deleteMelt: asyncHandler(async (req, res) => {
+    const data = await shopService.deleteMelt(req.params.id);
+    res.json({ success: true, data });
+  }),
+
+  listOtherOutflows: asyncHandler(async (_req, res) => {
+    const data = await shopService.listOtherOutflows();
+    res.json({ success: true, data });
+  }),
+
+  createOtherOutflow: asyncHandler(async (req, res) => {
+    const data = await shopService.createOtherOutflow(req.body || {});
+    res.status(201).json({ success: true, data });
+  }),
+
+  updateOtherOutflow: asyncHandler(async (req, res) => {
+    const data = await shopService.updateOtherOutflow(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  deleteOtherOutflow: asyncHandler(async (req, res) => {
+    const data = await shopService.deleteOtherOutflow(req.params.id);
+    res.json({ success: true, data });
+  }),
+
   listPawns: asyncHandler(async (req, res) => {
     const items = await shopService.listPawns();
     res.json({ success: true, data: maybePaginate(req, items) });
@@ -338,6 +418,12 @@ export const shopController = {
     res.json({ success: true, data });
   }),
 
+  confiscatePawn: asyncHandler(async (req, res) => {
+    const notes = req.body?.notes != null ? String(req.body.notes) : undefined;
+    const data = await shopService.confiscatePawn(req.params.id, notes);
+    res.json({ success: true, data });
+  }),
+
   listLedger: asyncHandler(async (req, res) => {
     const items = await shopService.listLedger();
     res.json({ success: true, data: maybePaginate(req, items) });
@@ -356,6 +442,41 @@ export const shopController = {
   deleteLedger: asyncHandler(async (req, res) => {
     await shopService.deleteLedgerEntry(req.params.id);
     res.json({ success: true });
+  }),
+
+  listCreditDebts: asyncHandler(async (req, res) => {
+    const items = await shopService.listCreditDebts(req.query as Record<string, unknown>);
+    res.json({ success: true, data: maybePaginate(req, items) });
+  }),
+
+  getCreditDebt: asyncHandler(async (req, res) => {
+    const data = await shopService.getCreditDebt(req.params.id);
+    res.json({ success: true, data });
+  }),
+
+  addCreditDebt: asyncHandler(async (req, res) => {
+    const data = await shopService.createCreditDebt(req.body);
+    res.status(201).json({ success: true, data });
+  }),
+
+  updateCreditDebt: asyncHandler(async (req, res) => {
+    const data = await shopService.updateCreditDebt(req.params.id, req.body);
+    res.json({ success: true, data });
+  }),
+
+  deleteCreditDebt: asyncHandler(async (req, res) => {
+    await shopService.deleteCreditDebt(req.params.id);
+    res.json({ success: true });
+  }),
+
+  addCreditDebtPayment: asyncHandler(async (req, res) => {
+    const data = await shopService.addCreditDebtPayment(req.params.id, req.body);
+    res.status(201).json({ success: true, data });
+  }),
+
+  deleteCreditDebtPayment: asyncHandler(async (req, res) => {
+    const data = await shopService.deleteCreditDebtPayment(req.params.id, req.params.paymentId);
+    res.json({ success: true, data });
   }),
 
   resetDemo: asyncHandler(async (_req, res) => {

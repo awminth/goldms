@@ -38,6 +38,7 @@ import {
   Trash2,
   Printer,
   PackageMinus,
+  PackagePlus,
   CheckCircle,
   Sparkles,
   Barcode,
@@ -53,7 +54,7 @@ import { CustomerSearchSelect } from './CustomerSearchSelect';
 import { InventorySearchSelect } from './InventorySearchSelect';
 import { formatDate, calendarDaysSince } from '../utils/dateFormat';
 
-type PosMode = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT';
+type PosMode = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT' | 'OTHER_IN';
 
 type Props = {
   /** When set, locks to one mode. When omitted, shows SALE / PURCHASE / EXCHANGE tabs. */
@@ -1283,6 +1284,104 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     }
   };
 
+  // -------------------------------------------------------------
+  // OTHER_IN STATE (အခြားရွှေအဝင်)
+  // -------------------------------------------------------------
+  const [otherPurity, setOtherPurity] = useState<GoldPurity>('MEELIN');
+  const [otherItemName, setOtherItemName] = useState('');
+  const [otherGramsInput, setOtherGramsInput] = useState('');
+  const [otherNotes, setOtherNotes] = useState('');
+  const [otherSaving, setOtherSaving] = useState(false);
+
+  const otherGrams = Number(otherGramsInput) || 0;
+  const otherKpy = useMemo(() => {
+    return gramsToKpy(otherGrams, kyatToGrams);
+  }, [otherGrams, kyatToGrams]);
+
+  const handleCompleteOtherIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!otherItemName.trim()) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'ပစ္စည်းဖော်ပြချက် ထည့်သွင်းပေးပါ'
+          : 'Please enter item description'
+      );
+      return;
+    }
+    if (otherGrams <= 0) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'ဂရမ်ချိန် (Gram) ထည့်သွင်းပေးပါ'
+          : 'Please enter valid gram weight'
+      );
+      return;
+    }
+    setOtherSaving(true);
+    try {
+      const invNo = generateInvoiceNo('OTH');
+      const itemRole = otherNotes.trim() || 'အခြားရွှေအဝင်';
+      const txn = await createTransaction({
+        invoice_no: invNo,
+        customer_id: selectedCustomer?.id || '',
+        customer_name:
+          selectedCustomer?.name ||
+          (language === 'MM' ? 'အခြားရွှေအဝင်' : 'Other Gold Inflow'),
+        customer_phone: selectedCustomer?.phone || '',
+        transaction_type: 'OTHER_IN',
+        items: [
+          {
+            id: `oth-${Date.now()}`,
+            transaction_id: '',
+            item_name: otherItemName.trim(),
+            category: 'OLD_GOLD',
+            weight: otherKpy,
+            gemstone_weight: { kyat: 0, pae: 0, yway: 0 },
+            net_weight: otherKpy,
+            purity: otherPurity,
+            gold_price_snapshot: getLivePriceForPurity(otherPurity),
+            gold_amount: 0,
+            craftsmanship_fee: 0,
+            stone_price: 0,
+            subtotal: 0,
+            item_type: otherPurity === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD',
+            thai_weight_unit: otherGrams > 0 ? otherGrams : undefined,
+            line_role: itemRole,
+          },
+        ],
+        gold_price_snapshot: getLivePriceForPurity(otherPurity),
+        craftsmanship_total: 0,
+        stone_total: 0,
+        discount_amount: 0,
+        tax_amount: 0,
+        total_amount: 0,
+        paid_amount: 0,
+        remaining_amount: 0,
+        payment_method: 'CASH',
+        notes: otherNotes.trim(),
+      } as any);
+
+      setOtherItemName('');
+      setOtherGramsInput('');
+      setOtherNotes('');
+      clearCustomerDraft();
+      setSelectedVoucher(txn);
+      void dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message:
+          language === 'MM'
+            ? `အခြားရွှေအဝင် ဘောင်ချာ ${invNo} စာရင်းသွင်းပြီးပါပြီ`
+            : `Other gold inflow recorded: ${invNo}`,
+        variant: 'success',
+      });
+    } catch (err) {
+      void dialog.alert(
+        err instanceof Error ? err.message : 'Recording other gold inflow failed'
+      );
+    } finally {
+      setOtherSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12">
       <div className="flex items-center justify-between bg-white dark:bg-[#1A1A1A] p-3 sm:p-4 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
@@ -1336,6 +1435,18 @@ export const PosView: React.FC<Props> = ({ mode }) => {
               <PackageMinus className="w-4 h-4" />
               <span>{language === 'MM' ? 'ဆိုင်ထုတ်' : 'Shop Out'}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('OTHER_IN')}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition flex items-center space-x-1.5 ${
+                activeSubTab === 'OTHER_IN'
+                  ? 'bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-xs'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
+            >
+              <PackagePlus className="w-4 h-4" />
+              <span>{language === 'MM' ? 'အခြားရွှေအဝင်' : 'Other Inflow'}</span>
+            </button>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -1343,6 +1454,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
             {activeSubTab === 'PURCHASE' && <ArrowDownLeft className="w-5 h-5 text-blue-600" />}
             {activeSubTab === 'EXCHANGE' && <ArrowLeftRight className="w-5 h-5 text-emerald-600" />}
             {activeSubTab === 'SHOP_OUT' && <PackageMinus className="w-5 h-5 text-rose-600" />}
+            {activeSubTab === 'OTHER_IN' && <PackagePlus className="w-5 h-5 text-amber-600" />}
             <h2 className="text-base font-bold text-gray-900 dark:text-white">
               {activeSubTab === 'SALE'
                 ? language === 'MM'
@@ -1356,9 +1468,13 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                     ? language === 'MM'
                       ? 'အလဲအလှယ်'
                       : 'Exchange'
-                    : language === 'MM'
-                      ? 'ဆိုင်ထုတ်'
-                      : 'Shop Out'}
+                    : activeSubTab === 'SHOP_OUT'
+                      ? language === 'MM'
+                        ? 'ဆိုင်ထုတ်'
+                        : 'Shop Out'
+                      : language === 'MM'
+                        ? 'အခြားရွှေအဝင်'
+                        : 'Other Gold Inflow'}
             </h2>
           </div>
         )}
@@ -1994,6 +2110,252 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                 <Printer className="w-4 h-4" />
                 {language === 'MM' ? 'အရောင်းပြီးစီး / ဘောင်ချာ' : 'Complete Sale & Print'}
               </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. OTHER_IN — အခြားရွှေအဝင် */}
+      {/* ------------------------------------------------------------- */}
+      {activeSubTab === 'OTHER_IN' && (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 min-h-[60vh]">
+          {/* Main Input Form */}
+          <section className="xl:col-span-7 flex flex-col rounded-2xl bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 shadow-xs p-4 sm:p-6 space-y-5">
+            <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
+                <PackagePlus className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                  {language === 'MM' ? 'အခြားရွှေအဝင် စာရင်းသွင်းခြင်း' : 'Record Other Gold Inflow'}
+                </h3>
+                <p className="text-xs text-gray-500">
+                  {language === 'MM'
+                    ? 'ရွှေအမျိုးအစား၊ ပစ္စည်းဖော်ပြချက်၊ ဂရမ်ချိန် (ကျပ်၊ ပဲ၊ ရွေး အလိုအလျောက်တွက်ချက်မှု) နှင့် မှတ်ချက်'
+                    : 'Purity, item description, gram weight with auto KPY conversion, and notes'}
+                </p>
+              </div>
+            </div>
+
+            {/* 1. ရွှေအမျိုးအစား (Gold Purity / Category) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                <span>{language === 'MM' ? '၁။ ရွှေအမျိုးအစား / ရွှေရည်' : '1. Gold Purity / Category'}</span>
+                <span className="text-rose-500">*</span>
+              </label>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                {Object.entries(PURITY_LABELS).map(([k, v]) => {
+                  const isSel = otherPurity === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setOtherPurity(k as GoldPurity)}
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition text-center ${
+                        isSel
+                          ? 'bg-amber-600 border-amber-600 text-white shadow-xs'
+                          : 'bg-gray-50 dark:bg-[#141414] border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:border-amber-400'
+                      }`}
+                    >
+                      <div>{language === 'MM' ? v.mm : v.en}</div>
+                      <div className="text-[10px] font-mono opacity-75">{v.code}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. ပစ္စည်းဖော်ပြချက် (Item Description) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                <span>{language === 'MM' ? '၂။ ပစ္စည်းဖော်ပြချက်' : '2. Item Description'}</span>
+                <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={otherItemName}
+                onChange={(e) => setOtherItemName(e.target.value)}
+                placeholder={
+                  language === 'MM'
+                    ? 'ဥပမာ - လက်ကောက်ဟောင်း၊ ရွှေတုံး၊ ရွှေစ၊ ဆွဲကြိုးအကျိုး စသည်…'
+                    : 'e.g. Old bracelet, gold bar, scrap, broken necklace…'
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-medium"
+              />
+            </div>
+
+            {/* 3. ဂရမ်ချိန် (Gram Weight) with Live Auto-Conversion to ကျပ်၊ ပဲ၊ ရွေး */}
+            <div className="space-y-2 p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/50">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                  <span>{language === 'MM' ? '၃။ ဂရမ်ချိန် (Gram)' : '3. Weight in Grams'}</span>
+                  <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400">
+                  (၁ ကျပ် = {kyatToGrams} g)
+                </span>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={otherGramsInput}
+                  onChange={(e) => setOtherGramsInput(e.target.value)}
+                  placeholder="0.000"
+                  className="w-full pl-3 pr-8 py-2.5 text-base font-mono font-bold rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-500 font-mono">
+                  g
+                </span>
+              </div>
+
+              {/* Converted KPY Banner */}
+              <div className="mt-2 pt-2 border-t border-amber-200/60 dark:border-amber-900/40">
+                <div className="text-[11px] font-bold text-amber-900 dark:text-amber-300 mb-1.5">
+                  {language === 'MM' ? 'အလိုအလျောက် ပြောင်းလဲပြီး (ကျပ်၊ ပဲ၊ ရွေး):' : 'Auto-Converted (Kyat, Pae, Yway):'}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#141414] border border-amber-200 dark:border-amber-900/60 text-center">
+                    <span className="text-[10px] text-gray-500 block">{language === 'MM' ? 'ကျပ်' : 'Kyat'}</span>
+                    <span className="text-sm font-extrabold font-mono text-amber-800 dark:text-amber-300">
+                      {otherKpy.kyat}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#141414] border border-amber-200 dark:border-amber-900/60 text-center">
+                    <span className="text-[10px] text-gray-500 block">{language === 'MM' ? 'ပဲ' : 'Pae'}</span>
+                    <span className="text-sm font-extrabold font-mono text-amber-800 dark:text-amber-300">
+                      {otherKpy.pae}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#141414] border border-amber-200 dark:border-amber-900/60 text-center">
+                    <span className="text-[10px] text-gray-500 block">{language === 'MM' ? 'ရွေး' : 'Yway'}</span>
+                    <span className="text-sm font-extrabold font-mono text-amber-800 dark:text-amber-300">
+                      {otherKpy.yway.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 text-center text-xs font-bold font-mono text-amber-900 dark:text-amber-200 bg-white/70 dark:bg-black/20 py-1.5 px-3 rounded-lg border border-amber-200/50">
+                  {formatKPYMyanmar(otherKpy)}
+                </div>
+              </div>
+            </div>
+
+            {/* 4. မှတ်ချက် (Notes) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                {language === 'MM' ? '၄။ မှတ်ချက်' : '4. Notes / Remarks'}
+              </label>
+              <textarea
+                value={otherNotes}
+                onChange={(e) => setOtherNotes(e.target.value)}
+                rows={2}
+                placeholder={
+                  language === 'MM'
+                    ? 'အကြောင်းအရာ သို့မဟုတ် အသေးစိတ်မှတ်ချက် ရေးရန်…'
+                    : 'Enter details or remarks…'
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] dark:text-white resize-none focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+              />
+            </div>
+
+            {/* 5. ပေးသွင်းသူ / ဖောက်သည် (Optional) */}
+            <div className="space-y-1.5 pt-1 border-t border-gray-100 dark:border-gray-800">
+              <label className="text-xs font-semibold text-gray-600 dark:text-gray-400">
+                {language === 'MM' ? '၅။ ပေးသွင်းသူ / ဖောက်သည် (ရွေးချယ်ရန် - မထည့်လည်းရ)' : '5. Customer / Source (Optional)'}
+              </label>
+              <CustomerSearchSelect
+                customers={customers}
+                value={selectedCustomer}
+                onChange={(c) => {
+                  if (c) setSelectedCustomer(c);
+                  else clearCustomerDraft();
+                }}
+                language={language}
+              />
+            </div>
+
+            {/* Submit Action */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => void handleCompleteOtherIn()}
+                disabled={otherSaving || !otherItemName.trim() || otherGrams <= 0}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-700 hover:to-yellow-700 disabled:opacity-40 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
+              >
+                <PackagePlus className="w-4 h-4" />
+                {otherSaving
+                  ? language === 'MM'
+                    ? 'စာရင်းသွင်းနေသည်…'
+                    : 'Recording…'
+                  : language === 'MM'
+                    ? 'အခြားရွှေအဝင် သိမ်းဆည်းပြီး ဘောင်ချာထုတ်မည်'
+                    : 'Save & Generate Voucher'}
+              </button>
+            </div>
+          </section>
+
+          {/* Right Column: Live Summary / Preview Card */}
+          <section className="xl:col-span-5 flex flex-col rounded-2xl bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 shadow-xs p-4 sm:p-5 h-fit space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                {language === 'MM' ? 'ဘောင်ချာ အကြမ်း ပြသမှု' : 'Inflow Voucher Preview'}
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 font-bold">
+                OTH-PREVIEW
+              </span>
+            </div>
+
+            <div className="p-4 rounded-xl bg-amber-50/40 dark:bg-[#141414] border border-amber-200/60 dark:border-gray-800 space-y-3 text-xs">
+              <div className="flex justify-between items-center text-gray-500">
+                <span>{language === 'MM' ? 'ဘောင်ချာအမျိုးအစား:' : 'Voucher Type:'}</span>
+                <span className="font-bold text-amber-700 dark:text-amber-400">
+                  {language === 'MM' ? 'အခြားရွှေအဝင်' : 'Other Gold Inflow'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-gray-500">
+                <span>{language === 'MM' ? 'ရွှေအမျိုးအစား:' : 'Gold Purity:'}</span>
+                <span className="font-bold text-gray-900 dark:text-white">
+                  {PURITY_LABELS[otherPurity]?.mm || otherPurity}
+                </span>
+              </div>
+              <div className="flex justify-between items-start text-gray-500">
+                <span>{language === 'MM' ? 'ပစ္စည်းဖော်ပြချက်:' : 'Description:'}</span>
+                <span className="font-bold text-gray-900 dark:text-white text-right max-w-[200px] break-words">
+                  {otherItemName || '—'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-gray-500">
+                <span>{language === 'MM' ? 'ဂရမ်ချိန်:' : 'Gram Weight:'}</span>
+                <span className="font-mono font-extrabold text-gray-900 dark:text-white text-sm">
+                  {otherGrams > 0 ? `${otherGrams.toFixed(3)} g` : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-gray-500 pt-1 border-t border-dashed border-amber-200 dark:border-gray-800">
+                <span>{language === 'MM' ? 'ကျပ်-ပဲ-ရွေး:' : 'KPY Equivalent:'}</span>
+                <span className="font-mono font-bold text-amber-800 dark:text-amber-300">
+                  {otherGrams > 0 ? formatKPYMyanmar(otherKpy) : '—'}
+                </span>
+              </div>
+              {otherNotes && (
+                <div className="flex justify-between items-start text-gray-500 pt-1 border-t border-dashed border-amber-200 dark:border-gray-800">
+                  <span>{language === 'MM' ? 'မှတ်ချက်:' : 'Notes:'}</span>
+                  <span className="italic text-gray-700 dark:text-gray-300 text-right max-w-[200px] break-words">
+                    {otherNotes}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#121212] text-[11px] text-gray-500 space-y-1">
+              <div className="font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{language === 'MM' ? 'အလိုအလျောက် ချိတ်ဆက်မှုများ' : 'Automations:'}</span>
+              </div>
+              <p>• {language === 'MM' ? 'ဘောင်ချာမှတ်တမ်းတွင် အခြားမှတ်တမ်းများကဲ့သို့ ကြည့်ရှု/ပရင့်ထုတ်နိုင်ပါမည်' : 'Viewable & printable in Voucher History like other records'}</p>
+              <p>• {language === 'MM' ? 'အဟောင်းထည် စာရင်း (Old Gold) အဝင်ထဲသို့လည်း အလိုအလျောက် သွင်းသွားပါမည်' : 'Automatically recorded in Old Gold Inflow'}</p>
             </div>
           </section>
         </div>

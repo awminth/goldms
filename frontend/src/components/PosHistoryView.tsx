@@ -13,12 +13,13 @@ import {
   ArrowLeftRight,
   Eye,
   PackageMinus,
+  PackagePlus,
   ReceiptText,
   ShoppingBag,
   Trash2,
 } from 'lucide-react';
 
-type HistoryTab = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT';
+type HistoryTab = 'SALE' | 'PURCHASE' | 'EXCHANGE' | 'SHOP_OUT' | 'OTHER_IN';
 
 const isThaiLine = (i: TransactionItem) =>
   i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
@@ -40,6 +41,8 @@ function txnTypeRowClass(type: string | undefined | null): string {
       return 'text-sky-700 dark:text-sky-300';
     case 'SHOP_OUT':
       return 'text-violet-700 dark:text-violet-300';
+    case 'OTHER_IN':
+      return 'text-amber-800 dark:text-amber-300';
     case 'ORDER':
       return 'text-indigo-700 dark:text-indigo-300';
     case 'PAWN':
@@ -109,6 +112,13 @@ export const PosHistoryView: React.FC = () => {
       labelEN: 'Shop Out',
       icon: PackageMinus,
       activeCls: 'bg-gradient-to-r from-rose-600 to-orange-600 text-white',
+    },
+    {
+      id: 'OTHER_IN',
+      labelMM: 'အခြားရွှေအဝင်',
+      labelEN: 'Other Inflow',
+      icon: PackagePlus,
+      activeCls: 'bg-gradient-to-r from-amber-600 to-yellow-600 text-white',
     },
   ];
 
@@ -526,8 +536,8 @@ export const PosHistoryView: React.FC = () => {
             </h2>
             <p className="text-[11px] text-gray-500">
               {language === 'MM'
-                ? 'အရောင်း / အဝယ် / အလဲအလှယ် / ဆိုင်ထုတ် ဘောင်ချာများကို tab အလိုက် ကြည့်ရှုပါ'
-                : 'Browse sales, purchase, exchange and shop-out vouchers by tab'}
+                ? 'အရောင်း / အဝယ် / အလဲအလှယ် / ဆိုင်ထုတ် / အခြားရွှေအဝင် ဘောင်ချာများကို tab အလိုက် ကြည့်ရှုပါ'
+                : 'Browse sales, purchase, exchange, shop-out and other inflow vouchers by tab'}
             </p>
           </div>
         </div>

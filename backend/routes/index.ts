@@ -58,6 +58,26 @@ router.post('/goldsmith-jobs/:id/return', shopController.returnGoldsmithJob);
 router.post('/goldsmith-jobs/:id/handoff', shopController.handoffGoldsmithJob);
 router.post('/goldsmith-jobs/:id/cancel', shopController.cancelGoldsmithJob);
 
+router.get('/old-gold/merchant-returns', shopController.listMerchantReturns);
+router.post('/old-gold/merchant-returns', shopController.createMerchantReturn);
+router.put('/old-gold/merchant-returns/:id', shopController.updateMerchantReturn);
+router.delete('/old-gold/merchant-returns/:id', shopController.deleteMerchantReturn);
+
+router.get('/old-gold/shop-transfers', shopController.listShopTransfers);
+router.post('/old-gold/shop-transfers', shopController.createShopTransfer);
+router.put('/old-gold/shop-transfers/:id', shopController.updateShopTransfer);
+router.delete('/old-gold/shop-transfers/:id', shopController.deleteShopTransfer);
+
+router.get('/old-gold/melts', shopController.listMelts);
+router.post('/old-gold/melts', shopController.createMelt);
+router.put('/old-gold/melts/:id', shopController.updateMelt);
+router.delete('/old-gold/melts/:id', shopController.deleteMelt);
+
+router.get('/old-gold/other-outflows', shopController.listOtherOutflows);
+router.post('/old-gold/other-outflows', shopController.createOtherOutflow);
+router.put('/old-gold/other-outflows/:id', shopController.updateOtherOutflow);
+router.delete('/old-gold/other-outflows/:id', shopController.deleteOtherOutflow);
+
 router.get('/pawns', shopController.listPawns);
 router.get('/pawns/interest-payments', shopController.listPawnInterestPayments);
 router.delete('/pawns/interest-payments/:id', shopController.deletePawnInterestPayment);
@@ -67,11 +87,20 @@ router.delete('/pawns/:id', shopController.deletePawn);
 router.post('/pawns/:id/interest', shopController.payPawnInterest);
 router.post('/pawns/:id/redeem', shopController.redeemPawn);
 router.delete('/pawns/:id/redeem', shopController.deletePawnRedeem);
+router.post('/pawns/:id/confiscate', shopController.confiscatePawn);
 
 router.get('/ledger', shopController.listLedger);
 router.post('/ledger', shopController.addLedger);
 router.put('/ledger/:id', shopController.updateLedger);
 router.delete('/ledger/:id', shopController.deleteLedger);
+
+router.get('/credit-debts', shopController.listCreditDebts);
+router.post('/credit-debts', shopController.addCreditDebt);
+router.get('/credit-debts/:id', shopController.getCreditDebt);
+router.put('/credit-debts/:id', shopController.updateCreditDebt);
+router.delete('/credit-debts/:id', shopController.deleteCreditDebt);
+router.post('/credit-debts/:id/payments', shopController.addCreditDebtPayment);
+router.delete('/credit-debts/:id/payments/:paymentId', shopController.deleteCreditDebtPayment);
 
 router.post('/calc/valuation', shopController.calcValuation);
 router.post('/calc/thai', shopController.calcThai);

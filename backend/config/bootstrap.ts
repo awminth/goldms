@@ -6,11 +6,17 @@ import { seedDatabase } from '../db/seed.js';
 import { ensureMasterAndPermissions } from '../db/masterSeed.js';
 
 async function ensureDatabaseExists(): Promise<void> {
+  const useSsl =
+    Boolean(env.DB_SSL) ||
+    env.DB_HOST.includes('tidbcloud.com') ||
+    env.DB_HOST.includes('aivencloud.com');
+
   const connection = await mysql.createConnection({
     host: env.DB_HOST,
     port: env.DB_PORT,
     user: env.DB_USER,
     password: env.DB_PASSWORD,
+    ssl: useSsl ? { minVersion: 'TLSv1.2', rejectUnauthorized: true } : undefined,
   });
 
   try {

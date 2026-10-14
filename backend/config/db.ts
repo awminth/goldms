@@ -13,6 +13,11 @@ export function getPool(): mysql.Pool {
   }
 
   if (!pool) {
+    const useSsl =
+      Boolean(env.DB_SSL) ||
+      env.DB_HOST.includes('tidbcloud.com') ||
+      env.DB_HOST.includes('aivencloud.com');
+
     pool = mysql.createPool({
       host: env.DB_HOST,
       port: env.DB_PORT,
@@ -23,6 +28,7 @@ export function getPool(): mysql.Pool {
       connectionLimit: 10,
       namedPlaceholders: true,
       dateStrings: true,
+      ssl: useSsl ? { minVersion: 'TLSv1.2', rejectUnauthorized: true } : undefined,
     });
   }
 
