@@ -1,23 +1,45 @@
 import mysql from 'mysql2/promise';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 async function migrateData() {
-  console.log('Connecting to Source (localhost:3306 mt_goldms)...');
+  const srcHost = process.env.MIGRATE_SRC_HOST || '127.0.0.1';
+  const srcPort = Number(process.env.MIGRATE_SRC_PORT) || 3306;
+  const srcUser = process.env.MIGRATE_SRC_USER || 'root';
+  const srcPassword = process.env.MIGRATE_SRC_PASSWORD || '';
+  const srcDb = process.env.MIGRATE_SRC_DB || process.env.DB_NAME || 'mt_goldms';
+
+  const dstHost = process.env.DB_HOST;
+  const dstPort = Number(process.env.DB_PORT) || 4000;
+  const dstUser = process.env.DB_USER;
+  const dstPassword = process.env.DB_PASSWORD || '';
+  const dstDb = process.env.DB_NAME || 'mt_goldms';
+
+  if (!dstHost || !dstUser || !dstDb) {
+    throw new Error('Set DB_HOST, DB_USER, and DB_NAME in backend/.env for the TiDB destination.');
+  }
+
+  console.log(`Connecting to Source (${srcHost}:${srcPort} ${srcDb})...`);
   const src = await mysql.createConnection({
-    host: '127.0.0.1',
-    port: 3306,
-    user: 'root',
-    password: 'root',
-    database: 'mt_goldms',
+    host: srcHost,
+    port: srcPort,
+    user: srcUser,
+    password: srcPassword,
+    database: srcDb,
     dateStrings: true,
   });
 
-  console.log('Connecting to Destination (TiDB Cloud mt_goldms)...');
+  console.log(`Connecting to Destination (${dstHost}:${dstPort} ${dstDb})...`);
   const dst = await mysql.createConnection({
-    host: 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com',
-    port: 4000,
-    user: 'dorVmh3vnSFWZXo.root',
-    password: 'Ox5iBBZ5MLKUlB3U',
-    database: 'mt_goldms',
+    host: dstHost,
+    port: dstPort,
+    user: dstUser,
+    password: dstPassword,
+    database: dstDb,
     ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
     dateStrings: true,
   });
