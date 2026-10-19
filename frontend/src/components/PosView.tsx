@@ -1192,6 +1192,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
         excRefund > 0
           ? `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode} · ဧည့်သည်ပြန်ရ ${excRefund} MMK`
           : `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode}`,
+      related_invoice_no: excSold.invoiceNo,
       add_to_stock: true,
       use_client_total: true,
       refund_amount: excRefund,

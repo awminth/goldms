@@ -1801,6 +1801,32 @@ export const shopService = {
               date: today,
             });
           }
+
+          // Keep original sale voucher; stamp a note that it was exchanged
+          const relatedInv =
+            data.related_invoice_no != null && String(data.related_invoice_no).trim()
+              ? String(data.related_invoice_no).trim()
+              : (() => {
+                  const m = String(data.notes || '').match(
+                    /voucher\s+([A-Za-z0-9\-]+)/i
+                  );
+                  return m ? m[1] : '';
+                })();
+          if (relatedInv) {
+            const stamp = `\n[လဲလှယ်ပြီး → ${invoiceNo}]`;
+            await conn.query(
+              `UPDATE transactions
+               SET notes = CONCAT(COALESCE(notes, ''), :stamp)
+               WHERE invoice_no = :inv
+                 AND transaction_type IN ('SALE', 'EXCHANGE')
+                 AND (notes IS NULL OR notes NOT LIKE :likeStamp)`,
+              {
+                inv: relatedInv,
+                stamp,
+                likeStamp: `%[လဲလှယ်ပြီး → ${invoiceNo}]%`,
+              }
+            );
+          }
         }
 
         if (remainingAmount > 0 && customerId) {

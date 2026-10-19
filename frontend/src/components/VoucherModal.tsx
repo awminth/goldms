@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import {
   formatMMK,
+  formatBaht,
   formatKPYMyanmar,
   kpyToGrams,
   kpyToYway,
@@ -9,6 +10,8 @@ import {
   KYAT_TO_GRAMS,
   PURITY_LABELS,
   calculateGoldValuation,
+  mmkToBaht,
+  resolveBahtMmkRate,
 } from '../utils/goldCalculations';
 import { formatDate } from '../utils/dateFormat';
 import type { GoldPurity, TransactionItem, WeightKPY } from '../types/gold';
@@ -77,11 +80,14 @@ function ItemWeightBlock({
   index,
   kyatToGrams,
   itemCode,
+  formatAmount,
 }: {
   item: TransactionItem;
   index: number;
   kyatToGrams: number;
   itemCode?: string;
+  /** MMK for Myanmar lines; Baht for Thai lines */
+  formatAmount: (n: number) => string;
 }) {
   const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
   const gross = kpyOrEmpty(item.weight);
@@ -126,28 +132,28 @@ function ItemWeightBlock({
     if (isThai && kind === 'thai') {
       return (
         <div className="voucher-money font-bold text-[12px] font-mono whitespace-nowrap">
-          {formatMMK(item.subtotal)}
+          {formatAmount(item.subtotal)}
         </div>
       );
     }
     if (kind === 'gold') {
       return (
         <div className="voucher-money font-mono font-semibold text-[11px] whitespace-nowrap">
-          {formatMMK(goldPureAmount)}
+          {formatAmount(goldPureAmount)}
         </div>
       );
     }
     if (kind === 'waste') {
       return (
         <div className="voucher-money font-mono font-semibold text-[11px] whitespace-nowrap">
-          {formatMMK(wastageValue)}
+          {formatAmount(wastageValue)}
         </div>
       );
     }
     if (kind === 'total') {
       return (
         <div className="voucher-money font-bold text-[12px] font-mono text-gray-900 whitespace-nowrap">
-          {formatMMK(item.subtotal)}
+          {formatAmount(item.subtotal)}
         </div>
       );
     }
@@ -174,6 +180,12 @@ function ItemWeightBlock({
               </td>
               <td rowSpan={rows.length} className="voucher-cell align-middle px-2">
                 <div className="voucher-nowrap font-bold text-[12px] leading-snug text-gray-900 whitespace-nowrap">
+                  {item.line_role === 'NEW_ITEM' && (
+                    <span className="text-emerald-700 font-extrabold">[အသစ်] </span>
+                  )}
+                  {item.line_role === 'TRADE_IN' && (
+                    <span className="text-sky-700 font-extrabold">[ပြန်သွင်း] </span>
+                  )}
                   {item.item_name}
                   <span className="font-semibold text-gray-500">
                     {' '}
@@ -287,20 +299,60 @@ export const VoucherModal: React.FC = () => {
   const isPurchase = selectedVoucher.transaction_type === 'PURCHASE';
   const isShopOut = selectedVoucher.transaction_type === 'SHOP_OUT';
   const isOtherIn = selectedVoucher.transaction_type === 'OTHER_IN';
+  const isExchange = selectedVoucher.transaction_type === 'EXCHANGE';
   const itemsSubtotal = selectedVoucher.items.reduce(
     (s, i) => s + Number(i.subtotal || 0),
     0
   );
+  /** Exchange: new item vs trade-in — never sum both as "total due". */
+  const exchangeNewSum = selectedVoucher.items
+    .filter((i) => i.line_role !== 'TRADE_IN')
+    .reduce((s, i) => s + Number(i.subtotal || 0), 0);
+  const exchangeTradeSum = selectedVoucher.items
+    .filter((i) => i.line_role === 'TRADE_IN')
+    .reduce((s, i) => s + Number(i.subtotal || 0), 0);
+  const exchangeBalance = exchangeNewSum - exchangeTradeSum;
+  const exchangeCustomerPays = Math.max(0, Number(selectedVoucher.total_amount || 0) || Math.max(0, exchangeBalance));
+  const exchangeRefund = Math.max(
+    0,
+    Number((selectedVoucher as { refund_amount?: number }).refund_amount || 0) ||
+      Math.max(0, -exchangeBalance)
+  );
+  const isThaiSale =
+    selectedVoucher.items.length > 0 &&
+    selectedVoucher.items.every(
+      (i) => i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD'
+    );
+  /** Thai txn may store BAHT (snapshot ~65k) or MMK (snapshot in millions). */
+  const thaiSnapMax = selectedVoucher.items.reduce(
+    (m, i) => Math.max(m, Number(i.gold_price_snapshot || 0)),
+    0
+  );
+  const thaiAmountsInBaht = isThaiSale && thaiSnapMax > 0 && thaiSnapMax < 500_000;
   /** Per-item craft / stone for footer (0 when missing). Prefer line values, else inventory. */
-  const itemFeeRows = selectedVoucher.items.map((item, idx) => {
+  const itemFeeRows = (isExchange
+    ? selectedVoucher.items.filter((i) => i.line_role !== 'TRADE_IN')
+    : selectedVoucher.items
+  ).map((item, idx) => {
     const inv = item.item_id ? inventory.find((i) => i.id === item.item_id) : undefined;
-    const craftFromInv = inv
+    const thai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+    const craftFromInvMmk = inv
       ? Number(inv.craftsmanship_fee || 0) + Number(inv.craftsmanship_profit_fee || 0)
+      : 0;
+    const craftFromInvBaht = inv
+      ? Number(inv.craftsmanship_fee_baht || 0) +
+        Number(inv.craftsmanship_profit_fee_baht || 0)
       : 0;
     const stoneFromInv = inv
       ? Number(inv.stone_price || 0) + Number(inv.stone_profit_price || 0)
       : 0;
-    const craft = Number(item.craftsmanship_fee || 0) || craftFromInv || 0;
+    const lineCraft = Number(item.craftsmanship_fee || 0);
+    const craft =
+      lineCraft ||
+      (thai && isThaiSale && thaiAmountsInBaht && craftFromInvBaht > 0
+        ? craftFromInvBaht
+        : craftFromInvMmk) ||
+      0;
     const stone = Number(item.stone_price || 0) || stoneFromInv || 0;
     const label =
       String(item.item_name || '').trim() ||
@@ -315,11 +367,39 @@ export const VoucherModal: React.FC = () => {
     itemFeeRows.reduce((s, r) => s + r.stone, 0) ||
     Number(selectedVoucher.stone_total || 0) ||
     0;
-  const isThaiSale =
-    selectedVoucher.items.length > 0 &&
-    selectedVoucher.items.every(
-      (i) => i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD'
-    );
+  const bahtMmkRate = (() => {
+    for (const item of selectedVoucher.items) {
+      const inv = item.item_id ? inventory.find((i) => i.id === item.item_id) : undefined;
+      const r = Number(inv?.baht_mmk_rate || 0);
+      if (r > 0) return r;
+    }
+    return resolveBahtMmkRate(shopSettings);
+  })();
+  /** Voucher money: Thai gold → ฿ only; Myanmar → MMK only. */
+  const formatVoucherMoney = (amount: number) => {
+    if (isThaiSale) {
+      const baht = thaiAmountsInBaht
+        ? Number(amount || 0)
+        : mmkToBaht(Number(amount || 0), bahtMmkRate);
+      return formatBaht(baht);
+    }
+    return formatMMK(amount);
+  };
+  const formatItemMoney = (item: TransactionItem, amount: number) => {
+    const thai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+    if (thai) {
+      const snap = Number(item.gold_price_snapshot || 0);
+      const inBaht = snap > 0 && snap < 500_000;
+      const inv = item.item_id ? inventory.find((i) => i.id === item.item_id) : undefined;
+      const rate =
+        Number(inv?.baht_mmk_rate || 0) > 0
+          ? Number(inv?.baht_mmk_rate)
+          : bahtMmkRate;
+      const baht = inBaht ? Number(amount || 0) : mmkToBaht(Number(amount || 0), rate);
+      return formatBaht(baht);
+    }
+    return formatMMK(amount);
+  };
   const shopOutThai = selectedVoucher.items.filter(
     (i) => i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD'
   );
@@ -331,10 +411,12 @@ export const VoucherModal: React.FC = () => {
     if (unit > 0) return s + unit;
     return s + kpyToGrams(i.net_weight || emptyKpy, kyatToGrams);
   }, 0);
-  const totalBeforeDiscount = Math.max(
-    itemsSubtotal,
-    Number(selectedVoucher.total_amount || 0) + Number(selectedVoucher.discount_amount || 0)
-  );
+  const totalBeforeDiscount = isExchange
+    ? exchangeNewSum
+    : Math.max(
+        itemsSubtotal,
+        Number(selectedVoucher.total_amount || 0) + Number(selectedVoucher.discount_amount || 0)
+      );
   const dateStr = formatDate(selectedVoucher.created_at);
 
   const handlePrint = () => {
@@ -646,7 +728,13 @@ export const VoucherModal: React.FC = () => {
                         {row.label}
                       </td>
                       <td className="voucher-money border border-[#D4AF37]/40 px-2 py-1.5 font-mono font-bold text-right whitespace-nowrap">
-                        {formatMMK(row.price || 0)}
+                        {isThaiSale
+                          ? formatBaht(
+                              thaiAmountsInBaht
+                                ? Number(row.price || 0)
+                                : mmkToBaht(Number(row.price || 0), bahtMmkRate)
+                            )
+                          : formatMMK(row.price || 0)}
                       </td>
                     </tr>
                   ))}
@@ -680,6 +768,7 @@ export const VoucherModal: React.FC = () => {
                       index={idx}
                       kyatToGrams={kyatToGrams}
                       itemCode={resolveItemCode(item)}
+                      formatAmount={(n) => formatItemMoney(item, n)}
                     />
                   ))}
                   {/* pad empty look if few items */}
@@ -714,7 +803,74 @@ export const VoucherModal: React.FC = () => {
 
               <table className="voucher-totals-table w-full text-[11px] border border-[#D4AF37]/50 border-collapse self-start">
                 <tbody>
-                  {isThaiSale ? (
+                  {isExchange ? (
+                    <>
+                      <tr>
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                          အသစ်ပစ္စည်း တန်ဖိုး
+                        </td>
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                          {formatVoucherMoney(exchangeNewSum)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold text-sky-800 whitespace-nowrap">
+                          ပြန်သွင်းပစ္စည်း (လဲခ)
+                        </td>
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-sky-800 whitespace-nowrap">
+                          −{formatVoucherMoney(exchangeTradeSum)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                          ခြားနားချက်
+                        </td>
+                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                          {exchangeBalance >= 0
+                            ? formatVoucherMoney(exchangeBalance)
+                            : `−${formatVoucherMoney(Math.abs(exchangeBalance))}`}
+                        </td>
+                      </tr>
+                      {Number(selectedVoucher.discount_amount || 0) > 0 && (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold text-rose-700 whitespace-nowrap">
+                            လျော့ငွေ
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
+                            −{formatVoucherMoney(selectedVoucher.discount_amount)}
+                          </td>
+                        </tr>
+                      )}
+                      {exchangeRefund > 0 ? (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-emerald-900 text-emerald-50 font-bold whitespace-nowrap">
+                            ဧည့်သည်ပြန်ရမည်
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-emerald-800 bg-emerald-50 whitespace-nowrap">
+                            {formatVoucherMoney(exchangeRefund)}
+                          </td>
+                        </tr>
+                      ) : exchangeCustomerPays > 0 ? (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#1A1208] text-[#F5E6C8] font-bold whitespace-nowrap">
+                            ဧည့်သည်ပေးရမည်
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7] whitespace-nowrap">
+                            {formatVoucherMoney(exchangeCustomerPays)}
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#1A1208] text-[#F5E6C8] font-bold whitespace-nowrap">
+                            ငွေပေးရန် / ပြန်ရန်
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7] whitespace-nowrap">
+                            {formatVoucherMoney(0)} (တူညီ)
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  ) : isThaiSale ? (
                     <>
                       {itemFeeRows.map((row) => (
                         <tr key={`craft-${row.id}`}>
@@ -722,7 +878,7 @@ export const VoucherModal: React.FC = () => {
                             လက်ခ · {row.label}
                           </td>
                           <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
-                            {formatMMK(row.craft)}
+                            {formatVoucherMoney(row.craft)}
                           </td>
                         </tr>
                       ))}
@@ -732,7 +888,7 @@ export const VoucherModal: React.FC = () => {
                             လက်ခ စုစုပေါင်း
                           </td>
                           <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
-                            {formatMMK(craftTotalDisplay)}
+                            {formatVoucherMoney(craftTotalDisplay)}
                           </td>
                         </tr>
                       )}
@@ -741,7 +897,7 @@ export const VoucherModal: React.FC = () => {
                           စုစုပေါင်းကျငွေ
                         </td>
                         <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
-                          {formatMMK(totalBeforeDiscount)}
+                          {formatVoucherMoney(totalBeforeDiscount)}
                         </td>
                       </tr>
                       <tr>
@@ -750,8 +906,8 @@ export const VoucherModal: React.FC = () => {
                         </td>
                         <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
                           {Number(selectedVoucher.discount_amount || 0) > 0
-                            ? `−${formatMMK(selectedVoucher.discount_amount)}`
-                            : formatMMK(0)}
+                            ? `−${formatVoucherMoney(selectedVoucher.discount_amount)}`
+                            : formatVoucherMoney(0)}
                         </td>
                       </tr>
                       <tr>
@@ -759,7 +915,7 @@ export const VoucherModal: React.FC = () => {
                           ကျသင့်ငွေ
                         </td>
                         <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-extrabold text-[#996515] bg-[#FFF8E7] whitespace-nowrap">
-                          {formatMMK(selectedVoucher.total_amount)}
+                          {formatVoucherMoney(selectedVoucher.total_amount)}
                         </td>
                       </tr>
                     </>
