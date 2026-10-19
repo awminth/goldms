@@ -6,6 +6,7 @@ import {
   gramsToKpy,
   KYAT_TO_GRAMS,
 } from './goldCalculations';
+import { exportToExcel } from './excelExport';
 
 /** Canonical English keys used in the template header row. */
 export const PAWN_IMPORT_HEADERS = [
@@ -312,66 +313,67 @@ function mapItemType(raw: string): string {
   return aliases[u] || aliases[s] || u.replace(/\s+/g, '_');
 }
 
+type PawnImportSampleRow = Record<(typeof PAWN_IMPORT_HEADERS)[number], string | number>;
+
+/** Sample Excel via project `xlsx-js-style` helper (`exportToExcel`). */
 export function downloadPawnImportTemplate(): void {
-  const wb = XLSX.utils.book_new();
-  const headers = [...PAWN_IMPORT_HEADERS];
-  const mmRow = headers.map((h) => PAWN_IMPORT_HEADERS_MM[h]);
-  const sample1 = [
-    'V-001',
-    'ဒေါ်ခင်လှိုင်',
-    '09450012345',
-    'နဂါးလိမ်ဆွဲကြိုး',
-    'NECKLACE',
-    'MYANMAR',
-    'MEELIN',
-    16.6,
-    1,
-    0,
-    0,
-    5000000,
-    0,
-    5,
-    3,
-    '2026-10-01',
-    '2026-10-01',
-    'နမူနာ အပေါင်',
-    '',
+  const samples: PawnImportSampleRow[] = [
+    {
+      vno: 'V-001',
+      customer_name: 'ဒေါ်ခင်လှိုင်',
+      customer_phone: '09450012345',
+      item_name: 'နဂါးလိမ်ဆွဲကြိုး',
+      item_type: 'NECKLACE',
+      gold_kind: 'MYANMAR',
+      purity: 'MEELIN',
+      weight_grams: 16.6,
+      weight_kyat: 1,
+      weight_pae: 0,
+      weight_yway: 0,
+      loan_amount: 5000000,
+      loan_amount_baht: 0,
+      monthly_interest_rate: 5,
+      loss_months: 3,
+      start_date: '2026-10-01',
+      last_interest_date: '2026-10-01',
+      notes: 'နမူနာ အပေါင်',
+      pawn_ticket_no: '',
+    },
+    {
+      vno: 'V-002',
+      customer_name: 'ဦးကျော်ဇင်',
+      customer_phone: '09795678901',
+      item_name: 'Thai chain',
+      item_type: 'NECKLACE',
+      gold_kind: 'THAI',
+      purity: 'THAI_GOLD',
+      weight_grams: 7.5,
+      weight_kyat: '',
+      weight_pae: '',
+      weight_yway: '',
+      loan_amount: 0,
+      loan_amount_baht: 35000,
+      monthly_interest_rate: 5,
+      loss_months: 3,
+      start_date: '05/10/2026',
+      last_interest_date: '',
+      notes: 'ရက်စွဲ DD/MM/YYYY နမူနာ',
+      pawn_ticket_no: '',
+    },
   ];
-  const sample2 = [
-    'V-002',
-    'ဦးကျော်ဇင်',
-    '09795678901',
-    'Thai chain',
-    'NECKLACE',
-    'THAI',
-    'THAI_GOLD',
-    7.5,
-    '',
-    '',
-    '',
-    0,
-    35000,
-    5,
-    3,
-    '05/10/2026',
-    '',
-    'ရက်စွဲ DD/MM/YYYY နမူနာ',
-    '',
-  ];
-  const guide = [
-    ['အပေါင် Excel Import နမူနာ'],
-    ['အတန်း ၁ = မြန်မာလမ်းညွှန်၊ အတန်း ၂ = English keys (မပြောင်းပါနှင့်)၊ အတန်း ၃+ = ဒေတာ'],
-    ['* လိုအပ်ချက် — vno (unique), customer_name, customer_phone, item_name, start_date၊ ချေးငွေ'],
-    ['ရက်စွဲ — YYYY-MM-DD သို့မဟုတ် DD/MM/YYYY (DB သို့ အလိုအလျောက် ပြောင်းမည်)'],
-    ['Format တစ်ခုခု မမှန်ရင် တစ်ကြောင်းမှ မသွင်းပါ (rollback)'],
-    ['VNO ထပ်နေရင် / DB မှာ ရှိပြီးသားဖြစ်ရင် import မလုပ်ပါ'],
-    [],
-  ];
-  const aoa = [...guide, mmRow, headers, sample1, sample2];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = headers.map(() => ({ wch: 18 }));
-  XLSX.utils.book_append_sheet(wb, ws, 'PawnImport');
-  XLSX.writeFile(wb, 'pawn_import_sample.xlsx');
+
+  exportToExcel<PawnImportSampleRow>({
+    filename: 'pawn_import_sample',
+    sheetName: 'PawnImport',
+    title:
+      'အပေါင် Excel Import နမူနာ — header English keys မပြောင်းပါနှင့် · vno unique * · ရက်စွဲ YYYY-MM-DD သို့မဟုတ် DD/MM/YYYY · format မမှန်ရင် တစ်ကြောင်းမှ မသွင်း (rollback)',
+    columns: PAWN_IMPORT_HEADERS.map((key) => ({
+      header: key,
+      width: Math.max(14, Math.min(22, PAWN_IMPORT_HEADERS_MM[key].length + 2)),
+      value: (row) => row[key],
+    })),
+    rows: samples,
+  });
 }
 
 function resolveHeaderMap(headerCells: unknown[]): Map<number, (typeof PAWN_IMPORT_HEADERS)[number]> {
