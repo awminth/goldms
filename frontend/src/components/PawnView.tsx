@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import { useDialog } from '../context/DialogContext';
 import { GoldPurity, PawnInterestPayment, PawnRecord } from '../types/gold';
@@ -16,17 +16,24 @@ import {
   ArrowLeft,
   CalendarDays,
   Coins,
+  Download,
   Eye,
   Pencil,
   Plus,
   Search,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { PaginationBar } from './PaginationBar';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
+import {
+  downloadPawnImportTemplate,
+  makePawnTicketNo,
+  parsePawnImportFile,
+} from '../utils/pawnExcelImport';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { formatDate, inDateRange } from '../utils/dateFormat';
@@ -306,7 +313,9 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const [discountKyat, setDiscountKyat] = useState(0);
   const [discountBaht, setDiscountBaht] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState('');
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const productCats = masterCategories.filter(
     (c) => c.category_group === 'PRODUCT' && c.is_active && c.code !== 'MIXED'
@@ -1128,6 +1137,96 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePawnExcelImport = async (file: File) => {
+    setImporting(true);
+    setMsg('');
+    try {
+      const buffer = await file.arrayBuffer();
+      const pure16 = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+      const { rows, errors: parseErrors } = parsePawnImportFile(buffer, {
+        pure16Price: pure16,
+        priceForPurity: (p) => goldPrices.find((x) => x.gold_type === p)?.price_per_kyat,
+        kyatToGrams,
+      });
+
+      if (rows.length === 0 && parseErrors.length === 0) {
+        await dialog.alert({
+          title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
+          message: language === 'MM' ? 'သွင်းရန် အတန်း မတွေ့ပါ' : 'No data rows found',
+        });
+        return;
+      }
+
+      let ok = 0;
+      const failMsgs: string[] = [...parseErrors.map((e) => `Row ${e.row}: ${e.message}`)];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const ticketNo = row.pawn_ticket_no || makePawnTicketNo(row.start_date, i);
+        try {
+          await addPawnRecord({
+            pawn_ticket_no: ticketNo,
+            vno: row.vno || `V-${ticketNo}`,
+            customer_id: '',
+            customer_name: row.customer_name,
+            customer_phone: row.customer_phone,
+            item_name: row.item_name,
+            item_type: row.item_type,
+            gold_kind: row.gold_kind,
+            weight: row.weight,
+            weight_grams: row.weight_grams,
+            purity: row.purity,
+            evaluated_value: row.evaluated_value,
+            loan_amount: row.loan_amount,
+            loan_amount_baht: row.loan_amount_baht,
+            monthly_interest_rate: row.monthly_interest_rate,
+            loss_months: row.loss_months,
+            start_date: row.start_date,
+            due_date: row.due_date,
+            last_interest_date: row.last_interest_date,
+            next_interest_date: row.next_interest_date,
+            status: 'ACTIVE',
+            accrued_interest: row.accrued_interest,
+            notes: row.notes,
+          });
+          ok += 1;
+        } catch (err) {
+          failMsgs.push(
+            `${ticketNo}: ${err instanceof Error ? err.message : 'failed'}`
+          );
+        }
+      }
+
+      const summary =
+        language === 'MM'
+          ? `အောင်မြင် ${ok} ခု` +
+            (failMsgs.length ? ` · မအောင်မြင် ${failMsgs.length} ခု\n${failMsgs.slice(0, 8).join('\n')}` : '')
+          : `Imported ${ok}` +
+            (failMsgs.length
+              ? ` · Failed ${failMsgs.length}\n${failMsgs.slice(0, 8).join('\n')}`
+              : '');
+
+      setMsg(
+        language === 'MM'
+          ? `Excel Import — အောင်မြင် ${ok} ခု`
+          : `Excel Import — ${ok} saved`
+      );
+      await dialog.alert({
+        title: language === 'MM' ? 'Excel Import' : 'Excel Import',
+        message: summary,
+        variant: failMsgs.length && ok === 0 ? 'error' : 'success',
+      });
+    } catch (err) {
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Import failed',
+        variant: 'error',
+      });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -2729,6 +2828,49 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                 onClick={exportCurrentList}
                 disabled={exportRowsCount === 0}
               />
+              {section === 'list' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => downloadPawnImportTemplate()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-600/40 bg-sky-50 dark:bg-sky-950/30 text-sky-800 dark:text-sky-300 text-xs font-bold hover:bg-sky-100 dark:hover:bg-sky-950/50 print:hidden"
+                    title={
+                      language === 'MM'
+                        ? 'Excel Import နမူနာ ဒေါင်းလုပ်'
+                        : 'Download sample Excel for import'
+                    }
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {language === 'MM' ? 'နမူနာ Excel' : 'Sample Excel'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={importing}
+                    onClick={() => importFileRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-600/40 bg-violet-50 dark:bg-violet-950/30 text-violet-800 dark:text-violet-300 text-xs font-bold hover:bg-violet-100 dark:hover:bg-violet-950/50 disabled:opacity-40 print:hidden"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    {importing
+                      ? language === 'MM'
+                        ? 'သွင်းနေ…'
+                        : 'Importing…'
+                      : language === 'MM'
+                        ? 'Excel Import'
+                        : 'Excel Import'}
+                  </button>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (file) void handlePawnExcelImport(file);
+                    }}
+                  />
+                </>
+              )}
               {section !== 'overdue-list' && (
               <button
                   type="button"
