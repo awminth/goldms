@@ -23,7 +23,8 @@
   }
 
   body {
-    font-family: 'Outfit', 'Noto Sans Myanmar', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    /* Noto Sans Myanmar first so Burmese never falls back to missing system fonts */
+    font-family: 'Noto Sans Myanmar', 'Outfit', 'Myanmar Text', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background-color: var(--color-page);
     overflow-x: hidden;
   }
@@ -33,7 +34,7 @@
   }
 
   h1, h2, h3, .font-serif {
-    font-family: 'Cinzel', 'Noto Sans Myanmar', serif;
+    font-family: 'Noto Sans Myanmar', 'Cinzel', 'Myanmar Text', serif;
   }
 
   /* System-wide: interactive controls use pointer only (no grab/move/etc.) */
