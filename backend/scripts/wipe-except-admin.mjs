@@ -13,6 +13,7 @@ const {
   DB_USER = 'root',
   DB_PASSWORD = '',
   DB_NAME = '',
+  DB_SSL = '',
 } = process.env;
 
 if (!DB_NAME) {
@@ -20,9 +21,18 @@ if (!DB_NAME) {
   process.exit(1);
 }
 
+const useSsl =
+  String(DB_SSL).toLowerCase() === 'true' ||
+  String(DB_SSL) === '1' ||
+  DB_HOST.includes('tidbcloud.com') ||
+  DB_HOST.includes('aivencloud.com');
+
+/** Child / dependent tables first where TRUNCATE order matters with FK checks off. */
 const BUSINESS_TABLES = [
   'customer_tracking',
   'financial_ledger',
+  'credit_debt_payments',
+  'credit_debts',
   'pawn_interest_payments',
   'pawn_records',
   'goldsmith_jobs',
@@ -38,6 +48,8 @@ const BUSINESS_TABLES = [
 ];
 
 async function main() {
+  console.log(`Wiping business data on ${DB_NAME}@${DB_HOST}:${DB_PORT} (ssl=${useSsl})`);
+
   const pool = mysql.createPool({
     host: DB_HOST,
     port: Number(DB_PORT),
@@ -45,6 +57,7 @@ async function main() {
     password: DB_PASSWORD,
     database: DB_NAME,
     namedPlaceholders: true,
+    ssl: useSsl ? { minVersion: 'TLSv1.2', rejectUnauthorized: true } : undefined,
   });
 
   const conn = await pool.getConnection();
@@ -58,7 +71,6 @@ async function main() {
         console.log(`TRUNCATED ${table}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        // Table may not exist on older DBs
         if (msg.includes("doesn't exist")) {
           console.log(`SKIP (missing) ${table}`);
         } else {

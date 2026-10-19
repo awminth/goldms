@@ -489,7 +489,6 @@ export const InventoryView: React.FC = () => {
 
   // Form State
   const [formBarcode, setFormBarcode] = useState('');
-  const [formName, setFormName] = useState('');
   const [formNameMM, setFormNameMM] = useState('');
   const [formCategory, setFormCategory] = useState<string>('NECKLACE');
   const [formItemType, setFormItemType] = useState<ItemType>('MYANMAR_GOLD');
@@ -547,7 +546,6 @@ export const InventoryView: React.FC = () => {
   const resetNewItemForm = (kind: 'MYANMAR' | 'THAI' = 'MYANMAR') => {
     setEditingItemId(null);
     setFormBarcode(generateBarcode());
-    setFormName('');
     setFormNameMM('');
     setFormCategory('NECKLACE');
     if (kind === 'THAI') {
@@ -595,8 +593,7 @@ export const InventoryView: React.FC = () => {
   const openEditModal = (item: InventoryItem) => {
     setEditingItemId(item.id);
     setFormBarcode(item.barcode);
-    setFormName(item.name);
-    setFormNameMM(item.name_mm);
+    setFormNameMM(item.name_mm || item.name || '');
     setFormCategory(item.category);
     setFormItemType(item.item_type);
     setFormPurity(item.purity);
@@ -802,7 +799,8 @@ export const InventoryView: React.FC = () => {
       window.setTimeout(() => resolve(), 0);
     });
 
-    if (!formName && !formNameMM) return;
+    const itemName = formNameMM.trim();
+    if (!itemName) return;
 
     const craftBaht = isThaiEntry ? Number(formCraftsmanship || 0) : 0;
     const craftProfitBaht = isThaiEntry ? Number(formCraftProfit || 0) : 0;
@@ -820,8 +818,8 @@ export const InventoryView: React.FC = () => {
     const itemPayload = {
       barcode: formBarcode || generateBarcode(),
       category: isThaiEntry ? 'THAI_GOLD' : formCategory,
-      name: formName || formNameMM,
-      name_mm: formNameMM || formName,
+      name: itemName,
+      name_mm: itemName,
       weight_kyat: Number(formGrossKyat || 0),
       weight_pae: Number(formGrossPae || 0),
       weight_yway: Number(formGrossYway || 0),
@@ -906,8 +904,7 @@ export const InventoryView: React.FC = () => {
       title: language === 'MM' ? 'ရွှေထည် စာရင်း (Inventory)' : 'Gold Inventory Report',
       columns: [
         { header: 'Barcode', value: (i) => i.barcode, width: 16 },
-        { header: language === 'MM' ? 'အမည် (MM)' : 'Name (MM)', value: (i) => i.name_mm, width: 22 },
-        { header: 'Name (EN)', value: (i) => i.name, width: 22 },
+        { header: language === 'MM' ? 'ပစ္စည်းအမည်' : 'Product Name', value: (i) => i.name_mm || i.name, width: 24 },
         { header: 'Category', value: (i) => i.category, width: 14 },
         { header: 'Purity', value: (i) => PURITY_LABELS[i.purity]?.en || i.purity, width: 14 },
         { header: 'Type', value: (i) => i.item_type, width: 14 },
@@ -949,11 +946,11 @@ export const InventoryView: React.FC = () => {
         id: 'name',
         header: language === 'MM' ? 'ပစ္စည်းအမည်' : 'Product',
         slot: 'primary',
-        accessor: (i) => (language === 'MM' ? i.name_mm : i.name),
+        accessor: (i) => i.name_mm || i.name,
         cell: (item) => (
           <div className="min-w-0">
             <div className="font-semibold truncate max-w-[160px]">
-              {language === 'MM' ? item.name_mm : item.name}
+              {item.name_mm || item.name}
             </div>
             <span className="text-[10px] uppercase font-bold opacity-60">
               {item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD'
@@ -1000,13 +997,6 @@ export const InventoryView: React.FC = () => {
                 : item.status}
           </span>
         ),
-      },
-      {
-        id: 'name_alt',
-        header: language === 'MM' ? 'အမည် (အခြား)' : 'Alt name',
-        slot: 'detail',
-        accessor: (i) => (language === 'MM' ? i.name : i.name_mm),
-        cell: (item) => (language === 'MM' ? item.name || '—' : item.name_mm || '—'),
       },
       {
         id: 'category',
@@ -1655,34 +1645,19 @@ export const InventoryView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Row 2: Names (Myanmar and English) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                    {language === 'MM' ? 'မြန်မာအမည် (ဥပမာ- နဂါးလိမ်ဆွဲကြိုး):' : 'Item Name (Myanmar):'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="ရွှေဆွဲကြိုး"
-                    value={formNameMM}
-                    onChange={(e) => setFormNameMM(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                    {language === 'MM' ? 'အင်္ဂလိပ်အမည် (English Name):' : 'English Name:'}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Gold Necklace"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
-                  />
-                </div>
+              {/* Row 2: Item name */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  {language === 'MM' ? 'ပစ္စည်းအမည် (ဥပမာ- နဂါးလိမ်ဆွဲကြိုး):' : 'Product name:'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={language === 'MM' ? 'ရွှေဆွဲကြိုး' : 'Gold necklace'}
+                  value={formNameMM}
+                  onChange={(e) => setFormNameMM(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
+                />
               </div>
 
               {/* Row 3: Locked gold path + Myanmar purity */}

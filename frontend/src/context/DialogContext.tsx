@@ -1,6 +1,8 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, XCircle } from 'lucide-react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from 'lucide-react';
 import { ModalOverlay } from '../components/ModalOverlay';
+import { subscribeMutationBusy } from '../utils/mutationBusy';
+import { useGoldShop } from './GoldShopContext';
 
 export type DialogConfirmOptions = {
   title?: string;
@@ -39,8 +41,23 @@ type Pending = PendingConfirm | PendingAlert;
 const DialogContext = createContext<DialogApi | null>(null);
 
 export function DialogProvider({ children }: { children: React.ReactNode }) {
+  const { language } = useGoldShop();
   const [pending, setPending] = useState<Pending | null>(null);
   const queueRef = useRef<Pending[]>([]);
+  const [mutationDepth, setMutationDepth] = useState(0);
+  const [showMutationBusy, setShowMutationBusy] = useState(false);
+
+  useEffect(() => subscribeMutationBusy(setMutationDepth), []);
+
+  useEffect(() => {
+    if (mutationDepth <= 0) {
+      setShowMutationBusy(false);
+      return;
+    }
+    // Avoid spinner flash on very fast requests
+    const t = window.setTimeout(() => setShowMutationBusy(true), 120);
+    return () => window.clearTimeout(t);
+  }, [mutationDepth]);
 
   const showNext = useCallback(() => {
     const next = queueRef.current.shift() || null;
@@ -96,6 +113,21 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
   return (
     <DialogContext.Provider value={api}>
       {children}
+      {showMutationBusy && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/35 dark:bg-black/50 backdrop-blur-[1px]"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="flex flex-col items-center gap-3 rounded-2xl bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 px-6 py-5 shadow-2xl">
+            <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin" />
+            <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+              {language === 'MM' ? 'လုပ်ဆောင်နေပါသည်…' : 'Processing…'}
+            </p>
+          </div>
+        </div>
+      )}
       {pending?.kind === 'confirm' && (
         <ModalOverlay onBackdropClick={() => closeConfirm(false)}>
           <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800">

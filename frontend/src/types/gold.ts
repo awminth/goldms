@@ -323,7 +323,9 @@ export interface PawnInterestPayment {
   vno?: string;
   pawn_ticket_no?: string;
   due_date?: string;
+  /** Per-payment snapshot of last interest date after this payment */
   last_interest_date?: string;
+  covered_until_date?: string;
   next_interest_date?: string;
   created_at?: string;
 }

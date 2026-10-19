@@ -10,6 +10,7 @@ import {
   kpyToGrams,
   gramsToKpy,
   KYAT_TO_GRAMS,
+  PURITY_LABELS,
 } from '../utils/goldCalculations';
 import {
   ArrowLeft,
@@ -124,6 +125,23 @@ function fmtPeriodMonthsDays(months?: number | null, days?: number | null): stri
   if (m > 0) parts.push(`${m} လ`);
   if (d > 0) parts.push(`${d} ရက်`);
   return parts.join(' ');
+}
+
+/** Add calendar months to yyyy-mm-dd (local, no UTC shift) — matches backend. */
+function addMonthsISO(isoDate: string, months: number): string {
+  const parts = String(isoDate || '')
+    .slice(0, 10)
+    .split('-')
+    .map(Number);
+  const y = parts[0] || 1970;
+  const m = parts[1] || 1;
+  const d = parts[2] || 1;
+  const dt = new Date(y, m - 1, d);
+  dt.setMonth(dt.getMonth() + months);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
 function isOverduePawn(
@@ -263,6 +281,12 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const [formPurity, setFormPurity] = useState<GoldPurity>('MEELIN');
   const [formStart, setFormStart] = useState(() => new Date().toISOString().slice(0, 10));
   const [formDue, setFormDue] = useState('');
+  /** Create/edit: last interest date (equals pawn date until interest is paid). */
+  const [formLastInterest, setFormLastInterest] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  /** Pawn start date shown on interest/redeem forms (formStart is payment/redeem date there). */
+  const [formPawnStart, setFormPawnStart] = useState('');
   const [formGrams, setFormGrams] = useState(0);
   const [formKyat, setFormKyat] = useState(0);
   const [formPae, setFormPae] = useState(0);
@@ -395,8 +419,11 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     setFormGoldKind('MYANMAR');
     setFormItemType('RING');
     setFormPurity('MEELIN');
-    setFormStart(new Date().toISOString().slice(0, 10));
+    const today = new Date().toISOString().slice(0, 10);
+    setFormStart(today);
     setFormDue('');
+    setFormLastInterest(today);
+    setFormPawnStart('');
     setFormGrams(0);
     setFormKyat(0);
     setFormPae(0);
@@ -428,6 +455,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     setFormPurity(r.purity);
     setFormStart(r.start_date);
     setFormDue(r.due_date);
+    setFormLastInterest(r.last_interest_date || r.start_date);
+    setFormPawnStart(r.start_date);
     const loanKyat = Number(r.loan_amount || 0);
     const loanBaht = Number(r.loan_amount_baht || 0);
     const currency: 'MMK' | 'BAHT' = loanBaht > 0 && loanKyat <= 0 ? 'BAHT' : 'MMK';
@@ -461,14 +490,12 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         });
       const lastPaid = prevPays[0]?.payment_date || '';
       setFormLastInterestPaid(lastPaid);
-      // Period starts from last interest covered date (or start), not payment-entry date
-      const periodBase = r.last_interest_date || r.start_date;
-      const days = daysBetween(periodBase, today);
-      const months = Math.max(1, Math.round(days / 30) || 1);
-      setFormMonths(months);
+      // Months blank until user enters; last interest stays at original until then
+      setFormMonths(0);
       setFormDaysPaid(0);
       setFormStart(today);
-      syncInterestFromLoan(loanKyat, loanBaht, rate, months, currency);
+      setFormInterestKyat(0);
+      setFormInterestBaht(0);
     } else if (section === 'form-redeem') {
       const prevPays = pawnInterestPayments
         .filter((p) => String(p.pawn_id) === String(r.id))
@@ -524,12 +551,34 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     setDateTo('');
   }, [section]);
 
+  /** due_date = last_interest_date + အရှုံးလ (hidden; used for overdue). */
   const duePreview = (() => {
-    if (formDue) return formDue;
-    const d = new Date(formStart);
-    d.setMonth(d.getMonth() + Number(formMonths || 3));
-    return d.toISOString().slice(0, 10);
+    const base = formLastInterest || formStart;
+    if (!base) return formDue || '';
+    return addMonthsISO(base, Math.max(1, Number(formMonths || 3)));
   })();
+
+  /** Edit: interest already paid → do not overwrite last interest when pawn date changes. */
+  const editHasInterestPaid = useMemo(() => {
+    if (!editId) return false;
+    return pawnInterestPayments.some((p) => String(p.pawn_id) === String(editId));
+  }, [editId, pawnInterestPayments]);
+
+  const recomputeDueFromLastInterest = (lastInterest: string, lossMonths: number) => {
+    if (!lastInterest) return;
+    setFormDue(addMonthsISO(lastInterest, Math.max(1, lossMonths || 3)));
+  };
+
+  const onPawnDateChange = (start: string) => {
+    setFormStart(start);
+    // New pawn, or edit with no interest paid yet → last interest follows pawn date
+    if (!editId || !editHasInterestPaid) {
+      setFormLastInterest(start);
+      recomputeDueFromLastInterest(start, Number(formMonths || 3));
+    } else {
+      recomputeDueFromLastInterest(formLastInterest || start, Number(formMonths || 3));
+    }
+  };
 
   const redeemTotalKyat = Math.max(0, formLoanKyat + formInterestKyat - Number(discountKyat || 0));
   const redeemTotalBaht = Math.max(0, formLoanBaht + formInterestBaht - Number(discountBaht || 0));
@@ -586,6 +635,14 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     () => pawnRecords.filter((r) => r.status === 'ACTIVE' || r.status === 'OVERDUE'),
     [pawnRecords]
   );
+  /** Main pawn list: active + overdue + redeemed (status shows ရွေးပြီး). */
+  const listAllPawns = useMemo(
+    () =>
+      pawnRecords.filter(
+        (r) => r.status === 'ACTIVE' || r.status === 'OVERDUE' || r.status === 'REDEEMED'
+      ),
+    [pawnRecords]
+  );
   const redeemedPawns = useMemo(
     () => pawnRecords.filter((r) => r.status === 'REDEEMED'),
     [pawnRecords]
@@ -597,25 +654,86 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     return m;
   }, [pawnRecords]);
 
-  const interestRowsWithStatus = useMemo(
-    () =>
-      pawnInterestPayments.map((p) => ({
-        ...p,
-        status: pawnById.get(String(p.pawn_id))?.status,
-      })),
-    [pawnInterestPayments, pawnById]
-  );
+  /**
+   * Prefer DB covered_until_date (per-payment snapshot). Fallback: recompute from history
+   * so old rows still display correctly before migration backfill finishes.
+   */
+  const interestRowsWithHistory = useMemo(() => {
+    const byPawn = new Map<string, PawnInterestPayment[]>();
+    for (const p of pawnInterestPayments) {
+      const key = String(p.pawn_id);
+      if (!byPawn.has(key)) byPawn.set(key, []);
+      byPawn.get(key)!.push(p);
+    }
+    const coveredById = new Map<string, string>();
+    for (const [pawnId, pays] of byPawn) {
+      const pawn = pawnById.get(pawnId);
+      let cursor = String(pawn?.start_date || '').slice(0, 10);
+      const sorted = [...pays].sort((a, b) => {
+        const byDate = String(a.payment_date).localeCompare(String(b.payment_date));
+        if (byDate !== 0) return byDate;
+        return Number(a.id) - Number(b.id);
+      });
+      for (const pay of sorted) {
+        const fromDb = pay.covered_until_date || pay.last_interest_date || '';
+        if (fromDb) {
+          coveredById.set(String(pay.id), String(fromDb).slice(0, 10));
+          cursor = String(fromDb).slice(0, 10);
+          continue;
+        }
+        const months = Math.max(
+          1,
+          Number(pay.months_paid || Math.round(Number(pay.days_paid || 30) / 30) || 1)
+        );
+        cursor = cursor ? addMonthsISO(cursor, months) : '';
+        coveredById.set(String(pay.id), cursor);
+      }
+    }
+    return pawnInterestPayments.map((p) => ({
+      ...p,
+      status: pawnById.get(String(p.pawn_id))?.status,
+      covered_last_interest_date:
+        p.covered_until_date || p.last_interest_date || coveredById.get(String(p.id)) || '',
+    }));
+  }, [pawnInterestPayments, pawnById]);
 
   const listPawnRows = filterBySearch(
-    filterByDateRange(activePawns as unknown as Record<string, unknown>[], (r) =>
+    filterByDateRange(listAllPawns as unknown as Record<string, unknown>[], (r) =>
       String(r.start_date || '')
     )
   ) as unknown as PawnRecord[];
-  const listInterestRows = filterBySearch(
-    filterByDateRange(interestRowsWithStatus as unknown as Record<string, unknown>[], (r) =>
-      String(r.payment_date || '')
-    )
-  ) as unknown as PawnInterestPayment[];
+  const listInterestRows = (() => {
+    const filtered = filterBySearch(
+      filterByDateRange(interestRowsWithHistory as unknown as Record<string, unknown>[], (r) =>
+        String(r.payment_date || '')
+      )
+    ) as unknown as Array<
+      PawnInterestPayment & { covered_last_interest_date?: string; status?: string }
+    >;
+    // Group by customer name, then same pawn, then payment date ascending
+    return [...filtered].sort((a, b) => {
+      const nameCmp = String(a.customer_name || '').localeCompare(
+        String(b.customer_name || ''),
+        undefined,
+        { sensitivity: 'base' }
+      );
+      if (nameCmp !== 0) return nameCmp;
+      const pawnCmp = String(a.pawn_id).localeCompare(String(b.pawn_id));
+      if (pawnCmp !== 0) return pawnCmp;
+      const dateCmp = String(a.payment_date || '').localeCompare(String(b.payment_date || ''));
+      if (dateCmp !== 0) return dateCmp;
+      return Number(a.id) - Number(b.id);
+    });
+  })();
+  const interestNameGroupTone = useMemo(() => {
+    const map = new Map<string, number>();
+    let i = 0;
+    for (const r of listInterestRows) {
+      const name = String(r.customer_name || '').trim() || '—';
+      if (!map.has(name)) map.set(name, i++);
+    }
+    return map;
+  }, [listInterestRows]);
   const listRedeemRows = filterBySearch(
     filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
       String(r.redeem_date || '')
@@ -627,7 +745,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   );
   const listOverdueRows = filterBySearch(
     filterByDateRange(overduePawns as unknown as Record<string, unknown>[], (r) =>
-      String(r.due_date || '')
+      String(r.start_date || '')
     )
   ) as unknown as PawnRecord[];
   const selectList = filterBySearch(
@@ -642,9 +760,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     }
     if (section === 'redeem-list') {
       return language === 'MM' ? 'ရွေးရက်' : 'Redeem date';
-    }
-    if (section === 'overdue-list') {
-      return language === 'MM' ? 'စာချုပ်နောက်ဆုံးရက်' : 'Due date';
     }
     return language === 'MM' ? 'အပေါင်ရက်' : 'Pawn date';
   }, [section, language]);
@@ -671,7 +786,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   }, [listRedeemRows]);
 
   const statusHeader = language === 'MM' ? 'အခြေအနေ' : 'Status';
-  const dueHeader = language === 'MM' ? 'စာချုပ်နောက်ဆုံးရက်' : 'Contract Due';
   const pawnDateHeader = language === 'MM' ? 'အပေါင်ရက်' : 'Pawn Date';
   const lastInterestHeader =
     language === 'MM' ? 'နောက်ဆုံးအတိုးရက်' : 'Last Interest';
@@ -771,7 +885,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
             value: (r) => (r.last_interest_date ? formatDate(r.last_interest_date) : '—'),
             width: 12,
           },
-          { header: dueHeader, value: (r) => formatDate(r.due_date), width: 12 },
           {
             header: statusHeader,
             value: (r) => pawnStatusLabel(effectivePawnStatus(r), language),
@@ -790,13 +903,29 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         columns: [
           { header: 'VNO', value: (r) => r.vno || r.pawn_ticket_no || '', width: 14 },
           { header: 'Payment Date', value: (r) => formatDate(r.payment_date), width: 12 },
+          {
+            header: pawnDateHeader,
+            value: (r) => {
+              const p = pawnById.get(String(r.pawn_id));
+              return p?.start_date ? formatDate(p.start_date) : '—';
+            },
+            width: 12,
+          },
+          {
+            header: lastInterestHeader,
+            value: (r) => {
+              const d =
+                (r as { covered_last_interest_date?: string }).covered_last_interest_date || '';
+              return d ? formatDate(d) : '—';
+            },
+            width: 14,
+          },
           { header: 'Name', value: (r) => r.customer_name, width: 18 },
           { header: 'Item', value: (r) => r.item_name, width: 22 },
           { header: 'Loan', value: (r) => fmtPawnLoan(r), width: 14 },
           { header: 'Rate%', value: (r) => r.interest_rate, width: 8 },
           { header: 'Months', value: (r) => r.months_paid || 0, width: 8 },
           { header: 'Interest', value: (r) => fmtPawnInterestAmount(r), width: 14 },
-          { header: dueHeader, value: (r) => formatDate(r.due_date), width: 12 },
           {
             header: statusHeader,
             value: (r) => {
@@ -852,7 +981,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                 : formatMMK(Number(r.redeem_total_kyat || 0)),
             width: 14,
           },
-          { header: dueHeader, value: (r) => formatDate(r.due_date), width: 12 },
           {
             header: statusHeader,
             value: (r) => pawnStatusLabel(effectivePawnStatus(r), language),
@@ -872,7 +1000,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         columns: [
           { header: 'VNO', value: (r) => r.vno || r.pawn_ticket_no, width: 16 },
           { header: pawnDateHeader, value: (r) => formatDate(r.start_date), width: 12 },
-          { header: dueHeader, value: (r) => formatDate(r.due_date), width: 12 },
           { header: 'Name', value: (r) => r.customer_name, width: 18 },
           { header: 'Phone', value: (r) => r.customer_phone, width: 14 },
           { header: 'Item', value: (r) => r.item_name, width: 22 },
@@ -919,6 +1046,12 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       const val = calculateGoldValuation(net, effectivePurity, pure16Price, specificPrice);
       const lossMonths = Number(formMonths || 3);
       const principal = formLoanCurrency === 'BAHT' ? loanBaht : loanKyat;
+      const lastInterest = formLastInterest || formStart;
+      const nextInterest = (() => {
+        const d = new Date(lastInterest);
+        d.setMonth(d.getMonth() + 1);
+        return d.toISOString().slice(0, 10);
+      })();
       const payload = {
         customer_name: formName.trim(),
         customer_phone: formPhone.trim(),
@@ -937,7 +1070,9 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         monthly_interest_rate: Number(formRate || 5),
         loss_months: lossMonths,
         start_date: formStart,
-        due_date: formDue || duePreview,
+        due_date: duePreview,
+        last_interest_date: lastInterest,
+        next_interest_date: nextInterest,
         notes: formNotes,
         vno: formVno.trim() || undefined,
       };
@@ -969,7 +1104,9 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           monthly_interest_rate: payload.monthly_interest_rate,
           loss_months: lossMonths,
           start_date: formStart,
-          due_date: formDue || duePreview,
+          due_date: duePreview,
+          last_interest_date: lastInterest,
+          next_interest_date: nextInterest,
           status: 'ACTIVE',
           accrued_interest: calcInterest(principal, formRate, 1),
           notes: formNotes,
@@ -1003,13 +1140,22 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       });
       return;
     }
+    const monthsPaid = Number(formMonths || 0);
+    if (monthsPaid < 1) {
+      await dialog.alert({
+        title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
+        message:
+          language === 'MM' ? 'သွင်းရက်စာ (လ) ထည့်ပါ' : 'Enter months covered',
+      });
+      return;
+    }
     setSaving(true);
     setMsg('');
     try {
       await payPawnInterest(selectedId, {
         payment_date: formStart,
-        months_paid: Number(formMonths || 1),
-        days_paid: Number(formMonths || 1) * 30,
+        months_paid: monthsPaid,
+        days_paid: monthsPaid * 30,
         interest_kyat: loanIsBaht ? 0 : Number(formInterestKyat || 0),
         interest_baht: loanIsBaht ? Number(formInterestBaht || 0) : 0,
         interest_rate: Number(formRate || 5),
@@ -1161,20 +1307,87 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     if (!detailView) return [];
     if (detailView.kind === 'pawn') {
       const r = detailView.record;
-      return [
+      const itemTypeOpt = itemTypeOptions.find((o) => o.code === r.item_type);
+      const itemTypeLabel = itemTypeOpt
+        ? language === 'MM'
+          ? itemTypeOpt.mm
+          : itemTypeOpt.en
+        : r.item_type || '—';
+      const purityLabel =
+        (r.purity &&
+          (language === 'MM'
+            ? PURITY_LABELS[r.purity as GoldPurity]?.mm
+            : PURITY_LABELS[r.purity as GoldPurity]?.en)) ||
+        r.purity ||
+        '—';
+      const w = r.weight;
+      const weightParts = [
+        w ? `${fmtNum(w.kyat, 0)} ကျပ်` : null,
+        w ? `${fmtNum(w.pae, 0)} ပဲ` : null,
+        w ? `${fmtNum(w.yway, 3)} ရွေး` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const fields: DetailField[] = [
         { label: 'VNO', value: r.vno || r.pawn_ticket_no },
-        { label: language === 'MM' ? 'အမည်' : 'Name', value: r.customer_name },
-        { label: language === 'MM' ? 'ဖုန်း' : 'Phone', value: r.customer_phone || '—' },
-        { label: language === 'MM' ? 'ပစ္စည်း' : 'Item', value: r.item_name },
-        { label: language === 'MM' ? 'အမျိုးအစား' : 'Type', value: goldKindLabel(r.gold_kind) },
-        { label: language === 'MM' ? 'အလေးချိန်' : 'Weight', value: fmtNum(weightDecimal(r), 4) },
+        {
+          label: language === 'MM' ? 'ဘောင်ချာနံပါတ်' : 'Ticket No',
+          value: r.pawn_ticket_no || '—',
+        },
+        { label: language === 'MM' ? 'လူအမည်' : 'Name', value: r.customer_name },
+        { label: language === 'MM' ? 'ဖုန်းနံပါတ်' : 'Phone', value: r.customer_phone || '—' },
+        {
+          label: language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Type',
+          value: itemTypeLabel,
+        },
+        { label: language === 'MM' ? 'ပစ္စည်းအမည်' : 'Item', value: r.item_name },
+        {
+          label: language === 'MM' ? 'အမျိုးအစား (ရွှေ)' : 'Gold Kind',
+          value: goldKindLabel(r.gold_kind),
+        },
+        { label: language === 'MM' ? 'အရည်အသွေး' : 'Purity', value: purityLabel },
+        {
+          label: language === 'MM' ? 'အလေးချိန် (g)' : 'Weight (g)',
+          value: fmtNum(weightDecimal(r), 4),
+        },
+        {
+          label: language === 'MM' ? 'အလေးချိန် (ကျပ်/ပဲ/ရွေး)' : 'Weight (K/P/Y)',
+          value: weightParts || '—',
+        },
+        {
+          label: language === 'MM' ? 'ခန့်မှန်းတန်ဖိုး' : 'Evaluated Value',
+          value: formatMMK(Number(r.evaluated_value || 0)),
+        },
+        {
+          label: language === 'MM' ? 'ယူငွေ ငွေကြေး' : 'Loan Currency',
+          value: pawnLoanIsBaht(r) ? (language === 'MM' ? 'ဘတ် (Baht)' : 'Baht') : 'MMK',
+        },
         { label: language === 'MM' ? 'ယူငွေ' : 'Loan', value: fmtPawnLoan(r) },
-        { label: language === 'MM' ? 'အတိုး%' : 'Rate%', value: r.monthly_interest_rate },
-        { label: language === 'MM' ? 'အပေါင်ရက်' : 'Pawn Date', value: formatDate(r.start_date) },
-        { label: dueHeader, value: formatDate(r.due_date) },
+        {
+          label: language === 'MM' ? 'အတိုးနှုန်း %' : 'Interest Rate %',
+          value: r.monthly_interest_rate,
+        },
+        {
+          label: language === 'MM' ? 'အရှုံးလ' : 'Loss Months',
+          value: r.loss_months != null ? r.loss_months : '—',
+        },
+        {
+          label: language === 'MM' ? 'ပေါင်ရက်' : 'Pawn Date',
+          value: formatDate(r.start_date),
+        },
         {
           label: lastInterestHeader,
           value: r.last_interest_date ? formatDate(r.last_interest_date) : '—',
+        },
+        {
+          label: language === 'MM' ? 'ပေးပြီးအတိုး' : 'Interest Paid',
+          value: (() => {
+            const k = Number(r.interest_paid_kyat || 0);
+            const b = Number(r.interest_paid_baht || 0);
+            if (b > 0 && k <= 0) return `${fmtNum(b, 0)} ฿`;
+            if (k > 0) return formatMMK(k);
+            return '—';
+          })(),
         },
         {
           label: statusHeader,
@@ -1182,6 +1395,37 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         },
         { label: language === 'MM' ? 'မှတ်ချက်' : 'Notes', value: r.notes || '—' },
       ];
+      if (r.status === 'REDEEMED' || r.redeem_date) {
+        fields.push(
+          {
+            label: language === 'MM' ? 'ရွေးရက်' : 'Redeem Date',
+            value: r.redeem_date ? formatDate(r.redeem_date) : '—',
+          },
+          {
+            label: language === 'MM' ? 'သွင်းရက်စာ' : 'Redeem Period',
+            value: fmtPeriodMonthsDays(r.redeem_months, r.redeem_days),
+          },
+          {
+            label: language === 'MM' ? 'ရွေးအတိုး' : 'Redeem Interest',
+            value: pawnLoanIsBaht(r)
+              ? `${fmtNum(r.redeem_interest_baht, 0)} ฿`
+              : formatMMK(Number(r.redeem_interest_kyat || 0)),
+          },
+          {
+            label: 'Discount',
+            value: pawnLoanIsBaht(r)
+              ? `${fmtNum(r.discount_baht, 0)} ฿`
+              : formatMMK(Number(r.discount_kyat || 0)),
+          },
+          {
+            label: language === 'MM' ? 'စုစုပေါင်း' : 'Total',
+            value: pawnLoanIsBaht(r)
+              ? `${fmtNum(r.redeem_total_baht, 0)} ฿`
+              : formatMMK(Number(r.redeem_total_kyat || 0)),
+          }
+        );
+      }
+      return fields;
     }
     if (detailView.kind === 'interest') {
       const r = detailView.record;
@@ -1189,6 +1433,33 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       return [
         { label: 'VNO', value: r.vno || r.pawn_ticket_no || r.voucher_no },
         { label: language === 'MM' ? 'သွင်းရက်' : 'Payment Date', value: formatDate(r.payment_date) },
+        {
+          label: language === 'MM' ? 'ပေါင်ရက်' : 'Pawn Date',
+          value: related?.start_date ? formatDate(related.start_date) : '—',
+        },
+        {
+          label: lastInterestHeader,
+          value: (() => {
+            const covered = (r as { covered_last_interest_date?: string })
+              .covered_last_interest_date;
+            if (covered) return formatDate(covered);
+            // Fallback: recompute from payment history up to this row
+            const pays = pawnInterestPayments
+              .filter((p) => String(p.pawn_id) === String(r.pawn_id))
+              .sort((a, b) => {
+                const byDate = String(a.payment_date).localeCompare(String(b.payment_date));
+                if (byDate !== 0) return byDate;
+                return Number(a.id) - Number(b.id);
+              });
+            let cursor = String(related?.start_date || '').slice(0, 10);
+            for (const pay of pays) {
+              const months = Math.max(1, Number(pay.months_paid || 1));
+              cursor = cursor ? addMonthsISO(cursor, months) : '';
+              if (String(pay.id) === String(r.id)) break;
+            }
+            return cursor ? formatDate(cursor) : '—';
+          })(),
+        },
         { label: language === 'MM' ? 'အမည်' : 'Name', value: r.customer_name || '—' },
         { label: language === 'MM' ? 'ပစ္စည်း' : 'Item', value: r.item_name || '—' },
         { label: language === 'MM' ? 'ယူငွေ' : 'Loan', value: fmtPawnLoan(r) },
@@ -1198,7 +1469,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           value: `${r.months_paid || 0} လ`,
         },
         { label: language === 'MM' ? 'အတိုး' : 'Interest', value: fmtPawnInterestAmount(r) },
-        { label: dueHeader, value: formatDate(r.due_date || '') },
         {
           label: statusHeader,
           value: (
@@ -1215,6 +1485,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     return [
       { label: 'VNO', value: r.vno || r.pawn_ticket_no },
       { label: language === 'MM' ? 'ရွေးရက်' : 'Redeem Date', value: formatDate(r.redeem_date || '') },
+      { label: language === 'MM' ? 'ပေါင်ရက်' : 'Pawn Date', value: formatDate(r.start_date) },
       { label: language === 'MM' ? 'အမည်' : 'Name', value: r.customer_name },
       { label: language === 'MM' ? 'ပစ္စည်း' : 'Item', value: r.item_name },
       { label: language === 'MM' ? 'ယူငွေ' : 'Loan', value: fmtPawnLoan(r) },
@@ -1241,7 +1512,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           ? `${fmtNum(r.redeem_total_baht, 0)} ฿`
           : formatMMK(Number(r.redeem_total_kyat || 0)),
       },
-      { label: dueHeader, value: formatDate(r.due_date) },
       {
         label: statusHeader,
         value: <PawnStatusBadge status={effectivePawnStatus(r)} language={language} />,
@@ -1348,13 +1618,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         cell: (r) => (r.last_interest_date ? formatDate(r.last_interest_date) : '—'),
       },
       {
-        id: 'due',
-        header: dueHeader,
-        slot: 'detail',
-        accessor: (r) => r.due_date,
-        cell: (r) => formatDate(r.due_date),
-      },
-      {
         id: 'notes',
         header: language === 'MM' ? 'မှတ်ချက်' : 'Notes',
         slot: 'detail',
@@ -1399,7 +1662,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         ),
       },
     ],
-    [language, pawnDateHeader, statusHeader, lastInterestHeader, dueHeader, onEdit]
+    [language, pawnDateHeader, statusHeader, lastInterestHeader, onEdit]
   );
 
   const interestListColumns = useMemo<DataTableColumn<PawnInterestPayment>[]>(
@@ -1425,11 +1688,47 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         ),
       },
       {
+        id: 'pawn_date',
+        header: pawnDateHeader,
+        slot: 'primary',
+        accessor: (r) => {
+          const p = pawnById.get(String(r.pawn_id));
+          return p?.start_date || '';
+        },
+        cell: (r) => {
+          const p = pawnById.get(String(r.pawn_id));
+          const d = p?.start_date || '';
+          return (
+            <span className="font-mono text-[11px] whitespace-nowrap">
+              {d ? formatDate(d) : '—'}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'last_interest',
+        header: lastInterestHeader,
+        slot: 'primary',
+        accessor: (r) =>
+          (r as { covered_last_interest_date?: string }).covered_last_interest_date || '',
+        cell: (r) => {
+          const d =
+            (r as { covered_last_interest_date?: string }).covered_last_interest_date || '';
+          return (
+            <span className="font-mono text-[11px] whitespace-nowrap">
+              {d ? formatDate(d) : '—'}
+            </span>
+          );
+        },
+      },
+      {
         id: 'name',
         header: language === 'MM' ? 'အမည်' : 'Name',
         slot: 'primary',
         accessor: (r) => r.customer_name,
-        cell: (r) => <span className="font-semibold truncate block max-w-[120px]">{r.customer_name}</span>,
+        cell: (r) => (
+          <span className="font-semibold truncate block max-w-[120px]">{r.customer_name}</span>
+        ),
       },
       {
         id: 'item',
@@ -1487,13 +1786,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         cell: (r) => `${r.months_paid || 0} လ`,
       },
       {
-        id: 'due',
-        header: dueHeader,
-        slot: 'detail',
-        accessor: (r) => r.due_date || '',
-        cell: (r) => formatDate(r.due_date || ''),
-      },
-      {
         id: 'notes',
         header: language === 'MM' ? 'မှတ်ချက်' : 'Notes',
         slot: 'detail',
@@ -1534,7 +1826,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         },
       },
     ],
-    [language, statusHeader, dueHeader, pawnById]
+    [language, statusHeader, pawnDateHeader, lastInterestHeader, pawnById]
   );
 
   const redeemListColumns = useMemo<DataTableColumn<PawnRecord>[]>(
@@ -1643,13 +1935,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
             : formatMMK(Number(r.discount_kyat || 0)),
       },
       {
-        id: 'due',
-        header: dueHeader,
-        slot: 'detail',
-        accessor: (r) => r.due_date,
-        cell: (r) => formatDate(r.due_date),
-      },
-      {
         id: 'notes',
         header: language === 'MM' ? 'မှတ်ချက်' : 'Notes',
         slot: 'detail',
@@ -1686,7 +1971,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         ),
       },
     ],
-    [language, statusHeader, dueHeader]
+    [language, statusHeader]
   );
 
   const overdueListColumns = useMemo<DataTableColumn<PawnRecord>[]>(
@@ -1715,17 +2000,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         slot: 'primary',
         accessor: (r) => r.customer_name,
         cell: (r) => <span className="font-semibold truncate block max-w-[140px]">{r.customer_name}</span>,
-      },
-      {
-        id: 'due',
-        header: dueHeader,
-        slot: 'primary',
-        accessor: (r) => r.due_date,
-        cell: (r) => (
-          <span className="font-mono text-[11px] font-bold whitespace-nowrap">
-            {formatDate(r.due_date)}
-          </span>
-        ),
       },
       {
         id: 'status',
@@ -1844,7 +2118,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         ),
       },
     ],
-    [language, pawnDateHeader, dueHeader, statusHeader, lastInterestHeader, confiscatePawnRecord, dialog]
+    [language, pawnDateHeader, statusHeader, lastInterestHeader, confiscatePawnRecord, dialog]
   );
 
   const searchBar = (
@@ -2037,14 +2311,14 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           </div>
           <div className="min-w-0 w-full">
             <label className={labelCls}>
-              {language === 'MM' ? 'စာချုပ် နောက်ဆုံးရက်' : 'Contract due'}
+              {language === 'MM' ? 'ပေါင်ရက်' : 'Pawn date'}
             </label>
-            <DateInput className={inputCls} value={formDue} onChange={() => {}} readOnly />
-            <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
-              {language === 'MM'
-                ? 'အပေါင်စာရင်းမှ — ဒီမှာ ပြင်၍မရပါ'
-                : 'From pawn record — not editable here'}
-            </p>
+            <DateInput
+              className={inputCls}
+              value={formPawnStart || formLastInterest}
+              onChange={() => {}}
+              readOnly
+            />
           </div>
         </div>
       ) : null}
@@ -2195,20 +2469,22 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               <label className={labelCls}>
                 {language === 'MM' ? 'နောက်ဆုံးအတိုးပေးရက်' : 'Last interest paid'}
               </label>
-              {formLastInterestPaid ? (
-                <DateInput
-                  className={inputCls}
-                  value={formLastInterestPaid}
-                  onChange={() => {}}
-                  readOnly
-                />
-              ) : (
-                <input
-                  className={inputCls}
-                  readOnly
-                  value={language === 'MM' ? 'မရှိသေးပါ (ပထမအကြိမ်)' : 'None yet (first payment)'}
-                />
-              )}
+              <DateInput
+                className={inputCls}
+                value={
+                  section === 'form-interest'
+                    ? (() => {
+                        const base = formLastInterest || formPawnStart;
+                        if (!base) return '';
+                        // Original until months entered; then base + months
+                        if (Number(formMonths || 0) < 1) return base;
+                        return addMonthsISO(base, Number(formMonths));
+                      })()
+                    : formLastInterest || formPawnStart
+                }
+                onChange={() => {}}
+                readOnly
+              />
             </div>
             <div className="min-w-0 w-full">
               <label className={labelCls}>
@@ -2237,12 +2513,23 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               <label className={labelCls}>
                 {language === 'MM' ? 'သွင်းရက်စာ (လ)' : 'Months covered'}
               </label>
-              <NumberInput
-                min={1}
+              <input
+                type="text"
+                inputMode="numeric"
                 className={inputCls}
-                value={formMonths}
-                onChange={(v) => {
-                  const months = Math.max(1, v || 1);
+                value={formMonths > 0 ? String(formMonths) : ''}
+                placeholder=""
+                onChange={(e) => {
+                  const raw = e.target.value.trim();
+                  if (raw === '') {
+                    setFormMonths(0);
+                    setFormDaysPaid(0);
+                    setFormInterestKyat(0);
+                    setFormInterestBaht(0);
+                    return;
+                  }
+                  if (!/^\d+$/.test(raw)) return;
+                  const months = Math.max(1, Number(raw));
                   setFormMonths(months);
                   setFormDaysPaid(0);
                   syncInterestFromLoan(formLoanKyat, formLoanBaht, formRate, months);
@@ -2250,8 +2537,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               />
               <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
                 {language === 'MM'
-                  ? 'နောက်ဆုံးအတိုးပေးရက်မှ ယခုအထိ လစာ (လစဉ်နှုန်း)'
-                  : 'Months from last interest paid (monthly rate)'}
+                  ? 'လစာထည့်မှ နောက်ဆုံးအတိုးပေးရက် လိုက်ပြောင်းသည်'
+                  : 'Last interest date updates after months are entered'}
               </p>
             </div>
           ) : (
@@ -2361,17 +2648,25 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full">
           <div className="min-w-0 w-full">
             <label className={labelCls}>ပေါင်ရက်</label>
+            <DateInput className={inputCls} value={formStart} onChange={onPawnDateChange} />
+          </div>
+          <div className="min-w-0 w-full">
+            <label className={labelCls}>နောက်ဆုံးအတိုးရက်</label>
             <DateInput
               className={inputCls}
-              value={formStart}
-              onChange={(start) => {
-                setFormStart(start);
-                if (!start) return;
-                const d = new Date(start);
-                d.setMonth(d.getMonth() + Number(formMonths || 3));
-                setFormDue(d.toISOString().slice(0, 10));
-              }}
+              value={formLastInterest || formStart}
+              onChange={setFormLastInterest}
+              readOnly
             />
+            {editId && editHasInterestPaid ? (
+              <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                အတိုးပေးပြီး — အပေါင်ရက်ပြောင်းလဲ ဤရက် မပြောင်းပါ
+              </p>
+            ) : (
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                အပေါင်ရက်နှင့် တူညီသည် (အတိုးမပေးရသေး)
+              </p>
+            )}
           </div>
           <div className="min-w-0 w-full">
             <label className={labelCls}>အရှုံးလ</label>
@@ -2383,18 +2678,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                 const months = Math.max(1, v || 1);
                 setFormMonths(months);
                 syncInterestFromLoan(formLoanKyat, formLoanBaht, formRate, months);
-                const d = new Date(formStart);
-                d.setMonth(d.getMonth() + months);
-                setFormDue(d.toISOString().slice(0, 10));
+                recomputeDueFromLastInterest(formLastInterest || formStart, months);
               }}
-            />
-          </div>
-          <div className="min-w-0 w-full">
-            <label className={labelCls}>နောက်ဆုံးရက် / Due</label>
-            <DateInput
-              className={inputCls}
-              value={formDue || duePreview}
-              onChange={setFormDue}
             />
           </div>
         </div>
@@ -2501,7 +2786,13 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => {
             const p = pawnById.get(String(r.pawn_id));
-            return pawnStatusRowClass(p ? effectivePawnStatus(p) : undefined);
+            const statusCls = pawnStatusRowClass(p ? effectivePawnStatus(p) : undefined);
+            const tone = interestNameGroupTone.get(String(r.customer_name || '').trim() || '—') ?? 0;
+            const groupCls =
+              tone % 2 === 1
+                ? 'bg-slate-50/80 dark:bg-slate-900/30'
+                : undefined;
+            return [statusCls, groupCls].filter(Boolean).join(' ') || undefined;
           }}
         />
       )}

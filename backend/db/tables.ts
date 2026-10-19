@@ -267,6 +267,7 @@ export const TABLE_STATEMENTS: string[] = [
     interest_kyat DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     interest_baht DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     interest_rate DECIMAL(8,2) NOT NULL DEFAULT 5.00,
+    covered_until_date DATE NULL,
     notes TEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -587,6 +588,56 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await pool.query(
       `UPDATE pawn_interest_payments SET days_paid = GREATEST(1, COALESCE(months_paid, 1) * 30)`
     );
+  }
+  // Per-payment snapshot of last interest date (not overwritten by later payments)
+  const pipColsNow = getCols('pawn_interest_payments');
+  if (pipColsNow.size > 0 && !pipColsNow.has('covered_until_date')) {
+    await pool.query(
+      `ALTER TABLE pawn_interest_payments ADD COLUMN covered_until_date DATE NULL AFTER interest_rate`
+    );
+  }
+  // Backfill any NULL covered_until_date from start_date + cumulative months
+  if (getCols('pawn_interest_payments').has('covered_until_date')) {
+    const [nullCountRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS c FROM pawn_interest_payments WHERE covered_until_date IS NULL`
+    );
+    if (Number(nullCountRows[0]?.c || 0) > 0) {
+      const [pawnStarts] = await pool.query<RowDataPacket[]>(
+        `SELECT id, start_date FROM pawn_records`
+      );
+      for (const pawn of pawnStarts) {
+        const [pays] = await pool.query<RowDataPacket[]>(
+          `SELECT id, months_paid, days_paid, covered_until_date FROM pawn_interest_payments
+           WHERE pawn_id = ? ORDER BY payment_date ASC, id ASC`,
+          [pawn.id]
+        );
+        let cursor = String(pawn.start_date).slice(0, 10);
+        for (const pay of pays) {
+          if (pay.covered_until_date) {
+            cursor = String(pay.covered_until_date).slice(0, 10);
+            continue;
+          }
+          const months = Math.max(
+            1,
+            Number(pay.months_paid || Math.round(Number(pay.days_paid || 30) / 30) || 1)
+          );
+          const d = new Date(
+            Number(cursor.slice(0, 4)),
+            Number(cursor.slice(5, 7)) - 1,
+            Number(cursor.slice(8, 10))
+          );
+          d.setMonth(d.getMonth() + months);
+          const yy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          cursor = `${yy}-${mm}-${dd}`;
+          await pool.query(
+            `UPDATE pawn_interest_payments SET covered_until_date = ? WHERE id = ?`,
+            [cursor, pay.id]
+          );
+        }
+      }
+    }
   }
 
   // Refresh overdue day counters on open tracking rows

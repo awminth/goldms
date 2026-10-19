@@ -22,10 +22,11 @@ import type {
   CreditDebt,
   CreditDebtPayment,
 } from '../types/gold';
+import { shouldTrackMutationBusy, trackMutation } from '../utils/mutationBusy';
 
 const API_BASE = '/api';
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function requestRaw<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
     ...options,
@@ -36,6 +37,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(body.message || body.error || `Request failed (${res.status})`);
   }
   return body.data as T;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = String(options?.method || 'GET').toUpperCase();
+  const pending = requestRaw<T>(path, options);
+  if (shouldTrackMutationBusy(path, method)) {
+    return trackMutation(pending);
+  }
+  return pending;
 }
 
 /** Retry when API is still booting (ECONNREFUSED / empty proxy response). */

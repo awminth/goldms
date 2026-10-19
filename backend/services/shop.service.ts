@@ -388,6 +388,13 @@ function mapPawn(row: RowDataPacket) {
 }
 
 function mapPawnInterest(row: RowDataPacket) {
+  // Prefer per-payment covered_until_date (snapshot); do not use pawn's current last_interest_date
+  const covered =
+    row.covered_until_date != null
+      ? String(row.covered_until_date).slice(0, 10)
+      : row.payment_last_interest_date != null
+        ? String(row.payment_last_interest_date).slice(0, 10)
+        : undefined;
   return {
     id: strId(row.id),
     pawn_id: strId(row.pawn_id),
@@ -418,9 +425,8 @@ function mapPawnInterest(row: RowDataPacket) {
     vno: row.vno != null ? String(row.vno) : undefined,
     pawn_ticket_no: row.pawn_ticket_no != null ? String(row.pawn_ticket_no) : undefined,
     due_date: row.due_date ? String(row.due_date).slice(0, 10) : undefined,
-    last_interest_date: row.last_interest_date
-      ? String(row.last_interest_date).slice(0, 10)
-      : undefined,
+    last_interest_date: covered,
+    covered_until_date: covered,
     next_interest_date: row.next_interest_date
       ? String(row.next_interest_date).slice(0, 10)
       : undefined,
@@ -3912,9 +3918,11 @@ export const shopService = {
   async listPawnInterestPayments() {
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT p.*,
+              p.covered_until_date AS payment_last_interest_date,
               r.customer_name, r.customer_phone, r.item_name, r.item_type, r.gold_kind, r.purity,
               r.weight_kyat, r.weight_pae, r.weight_yway, r.weight_grams,
-              r.loan_amount, r.loan_amount_baht, r.last_interest_date, r.next_interest_date,
+              r.loan_amount, r.loan_amount_baht,
+              r.next_interest_date,
               r.vno, r.pawn_ticket_no, r.due_date
        FROM pawn_interest_payments p
        LEFT JOIN pawn_records r ON r.id = p.pawn_id
@@ -3956,6 +3964,27 @@ export const shopService = {
       if (data[key] !== undefined) {
         sets.push(`\`${key}\` = :${key}`);
         params[key] = data[key];
+      }
+    }
+    // Keep due_date = last_interest_date + loss_months when either changes
+    if (data.last_interest_date !== undefined || data.loss_months !== undefined) {
+      const [cur] = await getPool().query<RowDataPacket[]>(
+        `SELECT last_interest_date, start_date, loss_months FROM pawn_records WHERE id = :id`,
+        { id: pawnId }
+      );
+      if (cur[0]) {
+        const last =
+          data.last_interest_date !== undefined
+            ? String(data.last_interest_date).slice(0, 10)
+            : String(cur[0].last_interest_date || cur[0].start_date).slice(0, 10);
+        const loss = Math.max(
+          1,
+          data.loss_months !== undefined ? num(data.loss_months, 3) : num(cur[0].loss_months, 3)
+        );
+        params.due_date = addMonthsISO(last, loss);
+        if (!sets.some((s) => s.includes('`due_date`'))) {
+          sets.push('`due_date` = :due_date');
+        }
       }
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
@@ -4060,6 +4089,8 @@ export const shopService = {
         lastInterest = addMonthsISO(lastInterest, months);
       }
       const nextInterest = addMonthsISO(lastInterest, 1);
+      const lossMonths = Math.max(1, num(pawnRows[0].loss_months, 3));
+      const newDueDate = addMonthsISO(lastInterest, lossMonths);
 
       await conn.query(
         `UPDATE pawn_records SET
@@ -4067,6 +4098,7 @@ export const shopService = {
            interest_paid_baht = GREATEST(0, interest_paid_baht - :baht),
            last_interest_date = :last_date,
            next_interest_date = :next_date,
+           due_date = :due_date,
            accrued_interest = accrued_interest + :kyat
          WHERE id = :id`,
         {
@@ -4075,6 +4107,7 @@ export const shopService = {
           baht: interestBaht,
           last_date: lastInterest,
           next_date: nextInterest,
+          due_date: newDueDate,
         }
       );
 
@@ -4096,22 +4129,14 @@ export const shopService = {
       const customerId = parseOptionalId(data.customer_id);
       const w = (data.weight as Record<string, number>) || {};
       const startDate = String(data.start_date);
-      const lossMonths = num(data.loss_months, 3);
-      let dueDate = data.due_date != null ? String(data.due_date) : '';
-      if (!dueDate) {
-        const d = new Date(startDate);
-        d.setMonth(d.getMonth() + lossMonths);
-        dueDate = d.toISOString().slice(0, 10);
-      }
+      const lossMonths = Math.max(1, num(data.loss_months, 3));
       const initialLastInterest =
         data.last_interest_date != null && String(data.last_interest_date).trim()
           ? String(data.last_interest_date).slice(0, 10)
           : startDate;
-      const nextInterest = (() => {
-        const d = new Date(initialLastInterest);
-        d.setMonth(d.getMonth() + 1);
-        return d.toISOString().slice(0, 10);
-      })();
+      // due_date = last_interest_date + အရှုံးလ (ပထမအကြိမ်တွင် ပေါင်ရက်နှင့် တူညီ)
+      const dueDate = addMonthsISO(initialLastInterest, lossMonths);
+      const nextInterest = addMonthsISO(initialLastInterest, 1);
 
       const [result] = await conn.query<ResultSetHeader>(
         `INSERT INTO pawn_records (
@@ -4218,15 +4243,20 @@ export const shopService = {
           : `INT-${paymentDate.replace(/-/g, '')}-${pawnId}`;
 
       // နောက်ဆုံးအတိုးရက် = ယခင် last_interest_date (သို့ start_date) + သွင်းရက်စာ လအရေအတွက်
+      // စာချုပ်နောက်ဆုံးရက် = နောက်ဆုံးအတိုးရက် + အရှုံးလ (ရက်လွန်စာရင်းအတွက်)
       const prevLast = String(rows[0].last_interest_date || rows[0].start_date).slice(0, 10);
       const newLastInterest = addMonthsISO(prevLast, monthsPaid);
       const nextDate = addMonthsISO(newLastInterest, 1);
+      const lossMonths = Math.max(1, num(rows[0].loss_months, 3));
+      const newDueDate = addMonthsISO(newLastInterest, lossMonths);
 
       await conn.query<ResultSetHeader>(
         `INSERT INTO pawn_interest_payments (
-          pawn_id, voucher_no, payment_date, months_paid, days_paid, interest_kyat, interest_baht, interest_rate, notes
+          pawn_id, voucher_no, payment_date, months_paid, days_paid, interest_kyat, interest_baht, interest_rate,
+          covered_until_date, notes
         ) VALUES (
-          :pawn_id, :voucher_no, :payment_date, :months_paid, :days_paid, :interest_kyat, :interest_baht, :interest_rate, :notes
+          :pawn_id, :voucher_no, :payment_date, :months_paid, :days_paid, :interest_kyat, :interest_baht, :interest_rate,
+          :covered_until_date, :notes
         )`,
         {
           pawn_id: pawnId,
@@ -4237,6 +4267,7 @@ export const shopService = {
           interest_kyat: interestKyat,
           interest_baht: interestBaht,
           interest_rate: rate,
+          covered_until_date: newLastInterest,
           notes: data.notes != null ? String(data.notes) : null,
         }
       );
@@ -4247,6 +4278,7 @@ export const shopService = {
            interest_paid_baht = interest_paid_baht + :baht,
            last_interest_date = :last_date,
            next_interest_date = :next_date,
+           due_date = :due_date,
            accrued_interest = GREATEST(0, accrued_interest - :kyat)
          WHERE id = :id`,
         {
@@ -4255,6 +4287,7 @@ export const shopService = {
           baht: interestBaht,
           last_date: newLastInterest,
           next_date: nextDate,
+          due_date: newDueDate,
         }
       );
 
@@ -4283,9 +4316,11 @@ export const shopService = {
       await conn.commit();
       const [payments] = await pool.query<RowDataPacket[]>(
         `SELECT p.*,
+                p.covered_until_date AS payment_last_interest_date,
                 r.customer_name, r.customer_phone, r.item_name, r.item_type, r.gold_kind, r.purity,
                 r.weight_kyat, r.weight_pae, r.weight_yway, r.weight_grams,
-                r.loan_amount, r.loan_amount_baht, r.last_interest_date, r.next_interest_date,
+                r.loan_amount, r.loan_amount_baht,
+                r.next_interest_date,
                 r.vno, r.pawn_ticket_no, r.due_date
          FROM pawn_interest_payments p
          LEFT JOIN pawn_records r ON r.id = p.pawn_id

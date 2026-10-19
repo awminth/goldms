@@ -248,30 +248,30 @@ export const VoucherModal: React.FC = () => {
     return labels.join('၊ ');
   }, [selectedVoucher]);
 
-  /** Sold item(s) purity price — not PE15A default */
-  const soldGoldPrice = useMemo(() => {
+  /** Per-purity gold prices on this voucher (for header summary). */
+  const soldGoldPriceRows = useMemo(() => {
     if (!selectedVoucher?.items?.length) {
-      return Number(selectedVoucher?.gold_price_snapshot || 0);
+      const fallback = Number(selectedVoucher?.gold_price_snapshot || 0);
+      return [{ label: 'ရွှေဈေး', price: fallback }];
     }
-    const snapshots = selectedVoucher.items
-      .map((i) => Number(i.gold_price_snapshot || 0))
-      .filter((n) => n > 0);
-    if (snapshots.length > 0) return snapshots[0];
-    const firstPurity = selectedVoucher.items[0]?.purity;
-    const live = goldPrices.find((p) => p.gold_type === firstPurity)?.price_per_kyat;
-    return live || Number(selectedVoucher.gold_price_snapshot || 0);
+    const byPurity = new Map<string, number>();
+    for (const item of selectedVoucher.items) {
+      const key = String(item.purity || '');
+      const label = PURITY_LABELS[item.purity as GoldPurity]?.mm || key || 'ရွှေ';
+      let price = Number(item.gold_price_snapshot || 0);
+      if (price <= 0) {
+        price =
+          goldPrices.find((p) => p.gold_type === item.purity)?.price_per_kyat ||
+          Number(selectedVoucher.gold_price_snapshot || 0) ||
+          0;
+      }
+      if (!byPurity.has(label)) byPurity.set(label, price);
+    }
+    return Array.from(byPurity.entries()).map(([label, price]) => ({
+      label: `${label} ရွှေဈေး`,
+      price,
+    }));
   }, [selectedVoucher, goldPrices]);
-
-  const goldPriceLabel = useMemo(() => {
-    if (!selectedVoucher?.items?.length) return 'ရွှေဈေး';
-    const labels = Array.from(
-      new Set(
-        selectedVoucher.items.map((i) => PURITY_LABELS[i.purity]?.mm || i.purity)
-      )
-    );
-    if (labels.length === 1) return `${labels[0]} ရွှေဈေး`;
-    return 'ရွှေဈေး';
-  }, [selectedVoucher]);
 
   const resolveItemCode = (item: TransactionItem): string => {
     const fromItem = (item.barcode || '').trim();
@@ -291,6 +291,30 @@ export const VoucherModal: React.FC = () => {
     (s, i) => s + Number(i.subtotal || 0),
     0
   );
+  /** Per-item craft / stone for footer (0 when missing). Prefer line values, else inventory. */
+  const itemFeeRows = selectedVoucher.items.map((item, idx) => {
+    const inv = item.item_id ? inventory.find((i) => i.id === item.item_id) : undefined;
+    const craftFromInv = inv
+      ? Number(inv.craftsmanship_fee || 0) + Number(inv.craftsmanship_profit_fee || 0)
+      : 0;
+    const stoneFromInv = inv
+      ? Number(inv.stone_price || 0) + Number(inv.stone_profit_price || 0)
+      : 0;
+    const craft = Number(item.craftsmanship_fee || 0) || craftFromInv || 0;
+    const stone = Number(item.stone_price || 0) || stoneFromInv || 0;
+    const label =
+      String(item.item_name || '').trim() ||
+      `ပစ္စည်း ${idx + 1}`;
+    return { id: item.id, label, craft, stone };
+  });
+  const craftTotalDisplay =
+    itemFeeRows.reduce((s, r) => s + r.craft, 0) ||
+    Number(selectedVoucher.craftsmanship_total || 0) ||
+    0;
+  const stoneTotalDisplay =
+    itemFeeRows.reduce((s, r) => s + r.stone, 0) ||
+    Number(selectedVoucher.stone_total || 0) ||
+    0;
   const isThaiSale =
     selectedVoucher.items.length > 0 &&
     selectedVoucher.items.every(
@@ -616,14 +640,16 @@ export const VoucherModal: React.FC = () => {
                       {purityDisplay}
                     </td>
                   </tr>
-                  <tr>
-                    <td className="voucher-nowrap border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
-                      {goldPriceLabel}
-                    </td>
-                    <td className="voucher-money border border-[#D4AF37]/40 px-2 py-1.5 font-mono font-bold text-right whitespace-nowrap">
-                      {formatMMK(soldGoldPrice)}
-                    </td>
-                  </tr>
+                  {soldGoldPriceRows.map((row) => (
+                    <tr key={row.label}>
+                      <td className="voucher-nowrap border border-[#D4AF37]/40 px-2 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                        {row.label}
+                      </td>
+                      <td className="voucher-money border border-[#D4AF37]/40 px-2 py-1.5 font-mono font-bold text-right whitespace-nowrap">
+                        {formatMMK(row.price || 0)}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -690,14 +716,26 @@ export const VoucherModal: React.FC = () => {
                 <tbody>
                   {isThaiSale ? (
                     <>
-                      <tr>
-                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
-                          လက်ခ
-                        </td>
-                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
-                          {formatMMK(selectedVoucher.craftsmanship_total || 0)}
-                        </td>
-                      </tr>
+                      {itemFeeRows.map((row) => (
+                        <tr key={`craft-${row.id}`}>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                            လက်ခ · {row.label}
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                            {formatMMK(row.craft)}
+                          </td>
+                        </tr>
+                      ))}
+                      {itemFeeRows.length > 1 && (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                            လက်ခ စုစုပေါင်း
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                            {formatMMK(craftTotalDisplay)}
+                          </td>
+                        </tr>
+                      )}
                       <tr>
                         <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           စုစုပေါင်းကျငွေ
@@ -727,22 +765,46 @@ export const VoucherModal: React.FC = () => {
                     </>
                   ) : (
                     <>
-                      <tr>
-                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
-                          လက်ခ
-                        </td>
-                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
-                          {formatMMK(selectedVoucher.craftsmanship_total || 0)}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
-                          ကျောက်ဖိုး
-                        </td>
-                        <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
-                          {formatMMK(selectedVoucher.stone_total || 0)}
-                        </td>
-                      </tr>
+                      {itemFeeRows.map((row) => (
+                        <tr key={`craft-${row.id}`}>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                            လက်ခ · {row.label}
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                            {formatMMK(row.craft)}
+                          </td>
+                        </tr>
+                      ))}
+                      {itemFeeRows.length > 1 && (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                            လက်ခ စုစုပေါင်း
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                            {formatMMK(craftTotalDisplay)}
+                          </td>
+                        </tr>
+                      )}
+                      {itemFeeRows.map((row) => (
+                        <tr key={`stone-${row.id}`}>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                            ကျောက်ဖိုး · {row.label}
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                            {formatMMK(row.stone)}
+                          </td>
+                        </tr>
+                      ))}
+                      {itemFeeRows.length > 1 && (
+                        <tr>
+                          <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
+                            ကျောက်ဖိုး စုစုပေါင်း
+                          </td>
+                          <td className="voucher-money border border-[#D4AF37]/35 px-2.5 py-1.5 text-right font-mono font-bold whitespace-nowrap">
+                            {formatMMK(stoneTotalDisplay)}
+                          </td>
+                        </tr>
+                      )}
                       <tr>
                         <td className="voucher-nowrap border border-[#D4AF37]/35 px-2.5 py-1.5 bg-[#FAF3E0] font-semibold whitespace-nowrap">
                           စုစုပေါင်းကျငွေ

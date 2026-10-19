@@ -27,6 +27,7 @@ import {
   bahtToMmk,
   mmkToBaht,
   resolveBahtMmkRate,
+  calculateThaiGoldPrice,
 } from '../utils/goldCalculations';
 import {
   ReceiptText,
@@ -726,12 +727,17 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const [purPaymentMethod, setPurPaymentMethod] = useState<'CASH' | 'KPAY' | 'WAVEPAY' | 'BANK_TRANSFER'>('CASH');
   const [purNotes, setPurNotes] = useState('ကျောက်ချိန် နုတ်ပြီး ဝယ်ဈေးအတိုင်း ရှင်းပေးသည်။');
   const [purManualAmount, setPurManualAmount] = useState<string>('');
-  /** Editable buy price (MMK per kyat) — drives payout; can clear 0 while typing */
+  /** Editable buy price (MMK per kyat) — Myanmar purchase */
   const [purBuyPriceInput, setPurBuyPriceInput] = useState<number>(() => getBuyPriceForPurity('PE15A'));
+  /** Editable Thai buy price (Baht per kyat) — Thai purchase */
+  const [purBuyPriceBahtInput, setPurBuyPriceBahtInput] = useState<number>(
+    () => Number(shopSettings?.thai_gold_baht || 65000)
+  );
 
   const isPurThai = purPurity === 'THAI_GOLD';
   const fxRate = resolveBahtMmkRate(shopSettings);
-  const purMarketRate = getBuyPriceForPurity(purPurity);
+  const purMarketRateMmk = getBuyPriceForPurity(purPurity);
+  const purThaiMarketBaht = Number(shopSettings?.thai_gold_baht || 65000);
 
   // Purchase Net = Gross − Gem (no wastage)
   const purNetKpy = calculateNetFromParts(
@@ -742,20 +748,35 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   );
   const purNetGrams = kpyToGrams(purNetKpy, kyatToGrams);
 
-  const purBuyRateMmk = Number(purBuyPriceInput) || 0;
-  const purBuyRateBaht = mmkToBaht(purBuyRateMmk, fxRate);
+  const purBuyRateBaht = isPurThai
+    ? Number(purBuyPriceBahtInput) || 0
+    : mmkToBaht(Number(purBuyPriceInput) || 0, fxRate);
+  const purBuyRateMmk = isPurThai
+    ? Math.round(bahtToMmk(purBuyRateBaht, fxRate))
+    : Number(purBuyPriceInput) || 0;
 
   const purNetYway = kpyToYway(purNetKpy.kyat, purNetKpy.pae, purNetKpy.yway);
-  const purCalcPayoutMmk = Math.round((purNetYway / 128) * purBuyRateMmk);
-  const purCalcPayoutBaht = Number(mmkToBaht(purCalcPayoutMmk, fxRate).toFixed(2));
+  const purCalcPayoutBaht = isPurThai
+    ? calculateThaiGoldPrice(purNetGrams, purBuyRateBaht, 0).baseGoldPrice
+    : Number(mmkToBaht(Math.round((purNetYway / 128) * purBuyRateMmk), fxRate).toFixed(2));
+  const purCalcPayoutMmk = isPurThai
+    ? Math.round(bahtToMmk(purCalcPayoutBaht, fxRate))
+    : Math.round((purNetYway / 128) * purBuyRateMmk);
   const purTotalPayout =
     purManualAmount === '' ? purCalcPayoutMmk : Math.max(0, Number(purManualAmount) || 0);
-  const purTotalPayoutBaht = Number(mmkToBaht(purTotalPayout, fxRate).toFixed(2));
+  const purTotalPayoutBaht =
+    purManualAmount === ''
+      ? purCalcPayoutBaht
+      : Number(mmkToBaht(Number(purManualAmount) || 0, fxRate).toFixed(2));
 
   useEffect(() => {
-    setPurBuyPriceInput(getBuyPriceForPurity(purPurity));
+    if (purPurity === 'THAI_GOLD') {
+      setPurBuyPriceBahtInput(Number(shopSettings?.thai_gold_baht || 65000));
+    } else {
+      setPurBuyPriceInput(getBuyPriceForPurity(purPurity));
+    }
     setPurManualAmount('');
-  }, [purPurity]);
+  }, [purPurity, shopSettings?.thai_gold_baht]);
 
   const applyPurGrossFromGrams = (grams: number) => {
     setPurGrossGrams(grams);
@@ -805,6 +826,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     setPurNotes('ကျောက်ချိန် နုတ်ပြီး ဝယ်ဈေးအတိုင်း ရှင်းပေးသည်။');
     setPurManualAmount('');
     setPurBuyPriceInput(getBuyPriceForPurity('PE15A'));
+    setPurBuyPriceBahtInput(Number(shopSettings?.thai_gold_baht || 65000));
   };
 
   const handleCompletePurchase = async () => {
@@ -2610,51 +2632,114 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                   </div>
                 </div>
 
-                <div className="border-t border-blue-200 dark:border-blue-800 pt-3">
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="min-w-[10rem] flex-1">
-                      <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
-                        {language === 'MM' ? 'ယနေ့ပေါက်ဈေး (ကျပ်တန်)' : 'Today market rate (per kyat)'}
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={formatMMK(purMarketRate)}
-                        className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-[#121212] text-blue-900 dark:text-blue-200"
-                      />
-                    </div>
-                    <div className="min-w-[10rem] flex-1">
-                      <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
-                        {language === 'MM' ? 'ဝယ်ဈေး (ကျပ်တန်)' : 'Buy price (per kyat)'}
-                      </label>
-                      <NumberInput
-                        min={0}
-                        step={1000}
-                        value={purBuyPriceInput}
-                        onChange={(v) => {
-                          setPurBuyPriceInput(v);
-                          setPurManualAmount('');
-                        }}
-                        className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-[#121212]"
-                      />
-                    </div>
-                    {isPurThai && (
-                      <div className="min-w-[8rem]">
-                        <label className="text-[10px] text-gray-500 block mb-0.5">Baht (ဝယ်ဈေး)</label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={formatBaht(purBuyRateBaht)}
-                          className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-300 dark:border-blue-700 bg-blue-50/80 dark:bg-[#121212] text-blue-800 dark:text-blue-300"
-                        />
+                <div className="border-t border-blue-200 dark:border-blue-800 pt-3 space-y-3">
+                  {isPurThai ? (
+                    <>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="min-w-[10rem] flex-1">
+                          <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                            {language === 'MM'
+                              ? 'ထိုင်းရွှေပေါက်ဈေး (ဘတ်တန်)'
+                              : 'Thai market price (฿ / kyat)'}
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={formatBaht(purThaiMarketBaht)}
+                            className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-[#121212] text-blue-900 dark:text-blue-200"
+                          />
+                        </div>
+                        <div className="min-w-[10rem] flex-1">
+                          <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                            {language === 'MM'
+                              ? 'တကယ်ဝယ်မည့် ထိုင်းရွှေပေါက်ဈေး (ဘတ်တန်)'
+                              : 'Actual Thai buy price (฿ / kyat)'}
+                          </label>
+                          <NumberInput
+                            min={0}
+                            step={100}
+                            value={purBuyPriceBahtInput}
+                            onChange={(v) => {
+                              setPurBuyPriceBahtInput(v);
+                              setPurManualAmount('');
+                            }}
+                            className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-[#121212]"
+                          />
+                        </div>
                       </div>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-1">
-                    {language === 'MM'
-                      ? 'ဝယ်ဈေးဖြင့်သာ တွက်မည် — 0 ဖျက်ပြီး ရိုက်ပြင်နိုင်သည်'
-                      : 'Payout uses buy price — clear 0 and type freely'}
-                  </p>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="min-w-[10rem] flex-1">
+                          <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                            {language === 'MM'
+                              ? 'ပေါက်ဈေး MMK တန်ဖိုး (readonly)'
+                              : 'Market price in MMK (readonly)'}
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={formatMMK(Math.round(bahtToMmk(purThaiMarketBaht, fxRate)))}
+                            className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-[#121212] text-blue-900 dark:text-blue-200"
+                          />
+                        </div>
+                        <div className="min-w-[10rem] flex-1">
+                          <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                            {language === 'MM'
+                              ? 'ဝယ်ဈေး MMK တန်ဖိုး (readonly)'
+                              : 'Buy price in MMK (readonly)'}
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={formatMMK(purBuyRateMmk)}
+                            className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-[#121212] text-blue-900 dark:text-blue-200"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-500">
+                        {language === 'MM'
+                          ? 'ဘတ်ဈေးနှစ်ခုကို MMK သို့ ပြန်ပြောင်းပြသည် — ဝယ်ဈေးဖြင့်သာ တွက်မည်၊ 0 ဖျက်ပြီး ရိုက်ပြင်နိုင်သည်'
+                          : 'Both Baht rates shown as MMK — payout uses buy price; clear 0 and type freely'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="min-w-[10rem] flex-1">
+                          <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                            {language === 'MM'
+                              ? 'ယနေ့ပေါက်ဈေး (ကျပ်တန်)'
+                              : 'Today market rate (per kyat)'}
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={formatMMK(purMarketRateMmk)}
+                            className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-[#121212] text-blue-900 dark:text-blue-200"
+                          />
+                        </div>
+                        <div className="min-w-[10rem] flex-1">
+                          <label className="text-xs font-bold text-blue-800 dark:text-blue-300 block mb-1.5">
+                            {language === 'MM' ? 'ဝယ်ဈေး (ကျပ်တန်)' : 'Buy price (per kyat)'}
+                          </label>
+                          <NumberInput
+                            min={0}
+                            step={1000}
+                            value={purBuyPriceInput}
+                            onChange={(v) => {
+                              setPurBuyPriceInput(v);
+                              setPurManualAmount('');
+                            }}
+                            className="w-full px-3 py-2 text-sm font-extrabold font-mono rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-[#121212]"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-500">
+                        {language === 'MM'
+                          ? 'ဝယ်ဈေးဖြင့်သာ တွက်မည် — 0 ဖျက်ပြီး ရိုက်ပြင်နိုင်သည်'
+                          : 'Payout uses buy price — clear 0 and type freely'}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -2676,32 +2761,11 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                         className="w-full px-3 py-2 text-xl font-extrabold font-mono rounded-xl border border-[#D4AF37]/40 bg-white dark:bg-[#121212] text-[#996515] dark:text-amber-300"
                       />
                     </div>
-                    {isPurThai && (
-                      <div className="min-w-[10rem]">
-                        <label className="text-[10px] text-gray-500 block mb-0.5">
-                          Baht (MMK→Baht · ဝယ်ဈေး)
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={formatBaht(
-                            purManualAmount === ''
-                              ? purCalcPayoutBaht
-                              : mmkToBaht(Number(purManualAmount) || 0, fxRate)
-                          )}
-                          className="w-full px-3 py-2 text-xl font-extrabold font-mono rounded-xl border border-blue-300 bg-blue-50 dark:bg-[#121212] text-blue-800 dark:text-blue-300"
-                        />
-                      </div>
-                    )}
                   </div>
                   <span className="text-[10px] text-gray-500 block">
                     {language === 'MM'
-                      ? `တွက်ချက် = ${formatMMK(purCalcPayoutMmk)}${
-                          isPurThai ? ` · ${formatBaht(purCalcPayoutBaht)}` : ''
-                        }`
-                      : `Calculated = ${formatMMK(purCalcPayoutMmk)}${
-                          isPurThai ? ` · ${formatBaht(purCalcPayoutBaht)}` : ''
-                        }`}
+                      ? `တွက်ချက် = ${formatMMK(purCalcPayoutMmk)}`
+                      : `Calculated = ${formatMMK(purCalcPayoutMmk)}`}
                   </span>
                 </div>
                 <div className="flex items-center space-x-1.5">
@@ -2736,7 +2800,6 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                 <span>Type: {isPurThai ? 'Thai' : 'Myanmar'}</span>
                 <span>Gram: {purNetGrams.toFixed(3)} g</span>
                 <span>Amount: {formatMMK(purTotalPayout)}</span>
-                {isPurThai && <span>{formatBaht(purTotalPayoutBaht)}</span>}
               </div>
             </div>
 
