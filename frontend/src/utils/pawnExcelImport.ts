@@ -365,8 +365,6 @@ export function downloadPawnImportTemplate(): void {
   exportToExcel<PawnImportSampleRow>({
     filename: 'pawn_import_sample',
     sheetName: 'PawnImport',
-    title:
-      'အပေါင် Excel Import နမူနာ — header English keys မပြောင်းပါနှင့် · vno unique * · ရက်စွဲ YYYY-MM-DD သို့မဟုတ် DD/MM/YYYY · format မမှန်ရင် တစ်ကြောင်းမှ မသွင်း (rollback)',
     columns: PAWN_IMPORT_HEADERS.map((key) => ({
       header: key,
       width: Math.max(14, Math.min(22, PAWN_IMPORT_HEADERS_MM[key].length + 2)),
