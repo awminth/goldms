@@ -92,6 +92,7 @@ interface GoldShopContextType {
     data: Record<string, unknown>
   ) => Promise<{ job: GoldsmithJob; transaction: Transaction }>;
   addPawnRecord: (pawn: Omit<PawnRecord, 'id'>) => Promise<PawnRecord>;
+  addPawnRecordsBulk: (pawns: Omit<PawnRecord, 'id'>[]) => Promise<PawnRecord[]>;
   updatePawnRecord: (id: string, updates: Partial<PawnRecord> | Record<string, unknown>) => Promise<PawnRecord>;
   deletePawnRecord: (id: string) => Promise<void>;
   deletePawnInterestPayment: (id: string) => Promise<void>;
@@ -547,6 +548,12 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return pawn;
   };
 
+  const addPawnRecordsBulk = async (pawnData: Omit<PawnRecord, 'id'>[]) => {
+    const pawns = await api.addPawnRecordsBulk(pawnData);
+    await invalidateAndRefresh();
+    return pawns;
+  };
+
   const updatePawnRecord = async (
     id: string,
     updates: Partial<PawnRecord> | Record<string, unknown>
@@ -855,6 +862,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateOtherOutflow,
         deleteOtherOutflow,
         addPawnRecord,
+        addPawnRecordsBulk,
         updatePawnRecord,
         deletePawnRecord,
         deletePawnInterestPayment,

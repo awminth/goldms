@@ -375,6 +375,13 @@ export const shopController = {
     res.status(201).json({ success: true, data });
   }),
 
+  addPawnsBulk: asyncHandler(async (req, res) => {
+    const body = req.body as { items?: Record<string, unknown>[] };
+    const items = Array.isArray(body?.items) ? body.items : Array.isArray(req.body) ? req.body : [];
+    const data = await shopService.addPawnsBulk(items as Record<string, unknown>[]);
+    res.status(201).json({ success: true, data, count: data.length });
+  }),
+
   updatePawn: asyncHandler(async (req, res) => {
     const data = await shopService.updatePawn(req.params.id, req.body);
     res.json({ success: true, data });

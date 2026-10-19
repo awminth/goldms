@@ -359,6 +359,13 @@ export const api = {
       body: JSON.stringify(pawn),
     }),
 
+  /** All-or-nothing bulk create (Excel import). Server rolls back on any failure. */
+  addPawnRecordsBulk: (items: Omit<PawnRecord, 'id'>[]) =>
+    request<PawnRecord[]>('/pawns/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+
   updatePawnRecord: (id: string, updates: Partial<PawnRecord> | Record<string, unknown>) =>
     request<PawnRecord>(`/pawns/${id}`, {
       method: 'PUT',

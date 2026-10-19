@@ -253,6 +253,7 @@ export const TABLE_STATEMENTS: string[] = [
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_pawn_ticket (pawn_ticket_no),
+    UNIQUE KEY uk_pawn_vno (vno),
     KEY idx_pawn_status (status),
     CONSTRAINT fk_pawn_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -577,6 +578,32 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
     await addPawnCol('redeem_total_baht', 'redeem_total_baht DECIMAL(15,2) NULL AFTER redeem_total_kyat');
     await addPawnCol('customer_signature', 'customer_signature VARCHAR(255) NULL AFTER notes');
     await addPawnCol('owner_signature', 'owner_signature VARCHAR(255) NULL AFTER customer_signature');
+
+    // vno must be unique when present (NULL allowed for legacy empty)
+    await pool.query(
+      `UPDATE pawn_records SET vno = NULL WHERE vno IS NOT NULL AND TRIM(vno) = ''`
+    );
+    await pool.query(
+      `UPDATE pawn_records p
+       INNER JOIN (
+         SELECT vno, MIN(id) AS keep_id
+         FROM pawn_records
+         WHERE vno IS NOT NULL AND TRIM(vno) <> ''
+         GROUP BY vno
+         HAVING COUNT(*) > 1
+       ) d ON p.vno = d.vno AND p.id <> d.keep_id
+       SET p.vno = CONCAT(p.vno, '-dup', p.id)`
+    );
+    const [vnoIdx] = await pool.query<RowDataPacket[]>(
+      `SELECT 1 AS ok FROM information_schema.statistics
+       WHERE table_schema = DATABASE()
+         AND table_name = 'pawn_records'
+         AND index_name = 'uk_pawn_vno'
+       LIMIT 1`
+    );
+    if (!vnoIdx[0]) {
+      await pool.query(`ALTER TABLE pawn_records ADD UNIQUE KEY uk_pawn_vno (vno)`);
+    }
   }
 
   // pawn_interest_payments — days covered by a payment

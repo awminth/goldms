@@ -31,6 +31,7 @@ import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import {
   downloadPawnImportTemplate,
+  formatPawnImportIssues,
   makePawnTicketNo,
   parsePawnImportFile,
 } from '../utils/pawnExcelImport';
@@ -255,6 +256,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     pawnRecords,
     pawnInterestPayments,
     addPawnRecord,
+    addPawnRecordsBulk,
     updatePawnRecord,
     deletePawnRecord,
     payPawnInterest,
@@ -1086,6 +1088,26 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         vno: formVno.trim() || undefined,
       };
 
+      const vnoTrim = formVno.trim();
+      if (vnoTrim) {
+        const clash = pawnRecords.find(
+          (p) =>
+            (p.vno || '').trim().toLowerCase() === vnoTrim.toLowerCase() &&
+            p.id !== (editId || '')
+        );
+        if (clash) {
+          await dialog.alert({
+            title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
+            message:
+              language === 'MM'
+                ? `VNO "${vnoTrim}" ရှိပြီးသားဖြစ်သည် (${clash.pawn_ticket_no})`
+                : `VNO "${vnoTrim}" already used (${clash.pawn_ticket_no})`,
+            variant: 'error',
+          });
+          return;
+        }
+      }
+
       if (editId) {
         await updatePawnRecord(editId, payload);
         await dialog.alert({
@@ -1097,7 +1119,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         const ticketNo = `PWN-${formStart.replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
         await addPawnRecord({
           pawn_ticket_no: ticketNo,
-          vno: formVno.trim() || `V-${ticketNo}`,
+          vno: vnoTrim || `V-${ticketNo}`,
           customer_id: '',
           customer_name: payload.customer_name,
           customer_phone: payload.customer_phone,
@@ -1146,13 +1168,19 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     try {
       const buffer = await file.arrayBuffer();
       const pure16 = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
-      const { rows, errors: parseErrors } = parsePawnImportFile(buffer, {
+      const existingVnos = new Set(
+        pawnRecords
+          .map((p) => (p.vno || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      const { rows, errors, warnings } = parsePawnImportFile(buffer, {
         pure16Price: pure16,
         priceForPurity: (p) => goldPrices.find((x) => x.gold_type === p)?.price_per_kyat,
         kyatToGrams,
+        existingVnos,
       });
 
-      if (rows.length === 0 && parseErrors.length === 0) {
+      if (rows.length === 0 && errors.length === 0) {
         await dialog.alert({
           title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
           message: language === 'MM' ? 'သွင်းရန် အတန်း မတွေ့ပါ' : 'No data rows found',
@@ -1160,69 +1188,77 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         return;
       }
 
-      let ok = 0;
-      const failMsgs: string[] = [...parseErrors.map((e) => `Row ${e.row}: ${e.message}`)];
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const ticketNo = row.pawn_ticket_no || makePawnTicketNo(row.start_date, i);
-        try {
-          await addPawnRecord({
-            pawn_ticket_no: ticketNo,
-            vno: row.vno || `V-${ticketNo}`,
-            customer_id: '',
-            customer_name: row.customer_name,
-            customer_phone: row.customer_phone,
-            item_name: row.item_name,
-            item_type: row.item_type,
-            gold_kind: row.gold_kind,
-            weight: row.weight,
-            weight_grams: row.weight_grams,
-            purity: row.purity,
-            evaluated_value: row.evaluated_value,
-            loan_amount: row.loan_amount,
-            loan_amount_baht: row.loan_amount_baht,
-            monthly_interest_rate: row.monthly_interest_rate,
-            loss_months: row.loss_months,
-            start_date: row.start_date,
-            due_date: row.due_date,
-            last_interest_date: row.last_interest_date,
-            next_interest_date: row.next_interest_date,
-            status: 'ACTIVE',
-            accrued_interest: row.accrued_interest,
-            notes: row.notes,
-          });
-          ok += 1;
-        } catch (err) {
-          failMsgs.push(
-            `${ticketNo}: ${err instanceof Error ? err.message : 'failed'}`
-          );
-        }
+      // Any hard error → show all row warnings/errors, import NOTHING (rollback N/A)
+      if (errors.length > 0) {
+        const warnBlock = warnings.length
+          ? `\n\n—— ${language === 'MM' ? 'ပြောင်းလဲမှု သတိပေးချက်' : 'Conversion notes'} ——\n${formatPawnImportIssues(warnings)}`
+          : '';
+        await dialog.alert({
+          title: language === 'MM' ? 'Excel Import မအောင်မြင်' : 'Import blocked',
+          message:
+            (language === 'MM'
+              ? `Format မကိုက်ညီသော အတန်းများရှိသည် — တစ်ကြောင်းမှ မသွင်းပါ။\n\n${formatPawnImportIssues(errors)}`
+              : `Invalid rows found — nothing imported.\n\n${formatPawnImportIssues(errors)}`) +
+            warnBlock,
+          variant: 'error',
+        });
+        return;
       }
 
-      const summary =
-        language === 'MM'
-          ? `အောင်မြင် ${ok} ခု` +
-            (failMsgs.length ? ` · မအောင်မြင် ${failMsgs.length} ခု\n${failMsgs.slice(0, 8).join('\n')}` : '')
-          : `Imported ${ok}` +
-            (failMsgs.length
-              ? ` · Failed ${failMsgs.length}\n${failMsgs.slice(0, 8).join('\n')}`
-              : '');
+      const payloads = rows.map((row, i) => {
+        const ticketNo = row.pawn_ticket_no || makePawnTicketNo(row.start_date, i);
+        return {
+          pawn_ticket_no: ticketNo,
+          vno: row.vno,
+          customer_id: '',
+          customer_name: row.customer_name,
+          customer_phone: row.customer_phone,
+          item_name: row.item_name,
+          item_type: row.item_type,
+          gold_kind: row.gold_kind,
+          weight: row.weight,
+          weight_grams: row.weight_grams,
+          purity: row.purity,
+          evaluated_value: row.evaluated_value,
+          loan_amount: row.loan_amount,
+          loan_amount_baht: row.loan_amount_baht,
+          monthly_interest_rate: row.monthly_interest_rate,
+          loss_months: row.loss_months,
+          start_date: row.start_date,
+          due_date: row.due_date,
+          last_interest_date: row.last_interest_date,
+          next_interest_date: row.next_interest_date,
+          status: 'ACTIVE' as const,
+          accrued_interest: row.accrued_interest,
+          notes: row.notes,
+        };
+      });
 
+      const saved = await addPawnRecordsBulk(payloads);
+      const warnNote = warnings.length
+        ? `\n\n${language === 'MM' ? 'ရက်စွဲ ပြောင်းထားသည်' : 'Dates converted'}:\n${formatPawnImportIssues(warnings)}`
+        : '';
       setMsg(
         language === 'MM'
-          ? `Excel Import — အောင်မြင် ${ok} ခု`
-          : `Excel Import — ${ok} saved`
+          ? `Excel Import — အောင်မြင် ${saved.length} ခု`
+          : `Excel Import — ${saved.length} saved`
       );
       await dialog.alert({
-        title: language === 'MM' ? 'Excel Import' : 'Excel Import',
-        message: summary,
-        variant: failMsgs.length && ok === 0 ? 'error' : 'success',
+        title: language === 'MM' ? 'Excel Import အောင်မြင်' : 'Import success',
+        message:
+          (language === 'MM'
+            ? `${saved.length} ခု သွင်းပြီးပါပြီ (transaction တစ်ခုတည်း)`
+            : `${saved.length} records imported (single transaction)`) + warnNote,
+        variant: 'success',
       });
     } catch (err) {
       await dialog.alert({
-        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
-        message: err instanceof Error ? err.message : 'Import failed',
+        title: language === 'MM' ? 'မအောင်မြင်ပါ (rollback)' : 'Failed (rolled back)',
+        message:
+          (err instanceof Error ? err.message : 'Import failed') +
+          (language === 'MM'
+            ? '\n\nတစ်ခုမှားလို့ အားလုံး ပြန်ဖျက်ပြီးပါပြီ။'
+            : '\n\nNothing was saved — full rollback.'),
         variant: 'error',
       });
     } finally {

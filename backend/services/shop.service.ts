@@ -4014,6 +4014,17 @@ export const shopService = {
       }
     }
     if (!sets.length) throw new HttpError(400, 'No fields to update');
+    if (data.vno !== undefined) {
+      const vnoVal = data.vno != null && String(data.vno).trim() ? String(data.vno).trim() : null;
+      params.vno = vnoVal;
+      const pool = getPool();
+      const conn = await pool.getConnection();
+      try {
+        await this.assertPawnVnoUnique(conn, vnoVal, pawnId);
+      } finally {
+        conn.release();
+      }
+    }
     await getPool().query(`UPDATE pawn_records SET ${sets.join(', ')} WHERE id = :id`, params as any);
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM pawn_records WHERE id = :id`,
@@ -4147,93 +4158,190 @@ export const shopService = {
     }
   },
 
+  async assertPawnVnoUnique(
+    conn: PoolConnection,
+    vno: string | null | undefined,
+    excludeId?: number
+  ) {
+    const trimmed = vno != null ? String(vno).trim() : '';
+    if (!trimmed) return null;
+    const [rows] = await conn.query<RowDataPacket[]>(
+      excludeId != null
+        ? `SELECT id, pawn_ticket_no FROM pawn_records WHERE vno = :vno AND id <> :id LIMIT 1`
+        : `SELECT id, pawn_ticket_no FROM pawn_records WHERE vno = :vno LIMIT 1`,
+      excludeId != null ? { vno: trimmed, id: excludeId } : { vno: trimmed }
+    );
+    if (rows[0]) {
+      throw new HttpError(
+        400,
+        `VNO "${trimmed}" ရှိပြီးသားဖြစ်သည် (လက်မှတ် ${rows[0].pawn_ticket_no})`
+      );
+    }
+    return trimmed;
+  },
+
+  async insertPawnOnConnection(conn: PoolConnection, data: Record<string, unknown>) {
+    const customerId = parseOptionalId(data.customer_id);
+    const w = (data.weight as Record<string, number>) || {};
+    const startDate = String(data.start_date);
+    const lossMonths = Math.max(1, num(data.loss_months, 3));
+    const initialLastInterest =
+      data.last_interest_date != null && String(data.last_interest_date).trim()
+        ? String(data.last_interest_date).slice(0, 10)
+        : startDate;
+    const dueDate = addMonthsISO(initialLastInterest, lossMonths);
+    const nextInterest = addMonthsISO(initialLastInterest, 1);
+
+    const rawVno = data.vno != null ? String(data.vno).trim() : '';
+    const vno = await this.assertPawnVnoUnique(conn, rawVno || null);
+
+    const ticketNo = String(data.pawn_ticket_no || '').trim();
+    if (!ticketNo) throw new HttpError(400, 'pawn_ticket_no လိုအပ်သည်');
+
+    const [dupTicket] = await conn.query<RowDataPacket[]>(
+      `SELECT id FROM pawn_records WHERE pawn_ticket_no = :t LIMIT 1`,
+      { t: ticketNo }
+    );
+    if (dupTicket[0]) {
+      throw new HttpError(400, `ပေါင်လက်မှတ်နံပါတ် "${ticketNo}" ရှိပြီးသားဖြစ်သည်`);
+    }
+
+    const [result] = await conn.query<ResultSetHeader>(
+      `INSERT INTO pawn_records (
+        pawn_ticket_no, vno, customer_id, customer_name, customer_phone, item_name, item_type, gold_kind,
+        weight_kyat, weight_pae, weight_yway, weight_grams, purity, evaluated_value,
+        loan_amount, loan_amount_baht, monthly_interest_rate, loss_months, start_date, due_date,
+        last_interest_date, next_interest_date, status, accrued_interest,
+        notes, customer_signature, owner_signature
+      ) VALUES (
+        :pawn_ticket_no, :vno, :customer_id, :customer_name, :customer_phone, :item_name, :item_type, :gold_kind,
+        :weight_kyat, :weight_pae, :weight_yway, :weight_grams, :purity, :evaluated_value,
+        :loan_amount, :loan_amount_baht, :monthly_interest_rate, :loss_months, :start_date, :due_date,
+        :last_interest_date, :next_interest_date, :status, :accrued_interest,
+        :notes, :customer_signature, :owner_signature
+      )`,
+      {
+        pawn_ticket_no: ticketNo,
+        vno,
+        customer_id: customerId,
+        customer_name: data.customer_name,
+        customer_phone: data.customer_phone,
+        item_name: data.item_name,
+        item_type: data.item_type != null ? String(data.item_type) : null,
+        gold_kind: data.gold_kind != null ? String(data.gold_kind) : null,
+        weight_kyat: num(w.kyat),
+        weight_pae: num(w.pae),
+        weight_yway: num(w.yway),
+        weight_grams: num(data.weight_grams),
+        purity: data.purity,
+        evaluated_value: num(data.evaluated_value),
+        loan_amount: num(data.loan_amount),
+        loan_amount_baht: num(data.loan_amount_baht),
+        monthly_interest_rate: num(data.monthly_interest_rate, 5),
+        loss_months: lossMonths,
+        start_date: startDate,
+        due_date: dueDate,
+        last_interest_date: initialLastInterest,
+        next_interest_date: nextInterest,
+        status: data.status ?? 'ACTIVE',
+        accrued_interest: num(data.accrued_interest),
+        notes: data.notes != null ? String(data.notes) : null,
+        customer_signature:
+          data.customer_signature != null ? String(data.customer_signature) : null,
+        owner_signature: data.owner_signature != null ? String(data.owner_signature) : null,
+      } as any
+    );
+
+    const loanMmk = num(data.loan_amount);
+    const loanBaht = num(data.loan_amount_baht);
+    let ledgerLoanAmount = loanMmk;
+    if (ledgerLoanAmount <= 0 && loanBaht > 0) {
+      const settings = await this.getShopSettings();
+      ledgerLoanAmount = Math.round(loanBaht * (settings.baht_mmk_rate || 130));
+    }
+
+    await insertLedger(conn, {
+      type: 'EXPENSE',
+      category: 'PAWN_LOAN',
+      amount: ledgerLoanAmount,
+      description:
+        loanMmk > 0
+          ? `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${ticketNo} - ${data.customer_name})`
+          : `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${loanBaht} ฿) (${ticketNo} - ${data.customer_name})`,
+      reference_no: ticketNo,
+      date: startDate,
+    });
+
+    return result.insertId;
+  },
+
   async addPawn(data: Record<string, unknown>) {
     const pool = getPool();
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      const customerId = parseOptionalId(data.customer_id);
-      const w = (data.weight as Record<string, number>) || {};
-      const startDate = String(data.start_date);
-      const lossMonths = Math.max(1, num(data.loss_months, 3));
-      const initialLastInterest =
-        data.last_interest_date != null && String(data.last_interest_date).trim()
-          ? String(data.last_interest_date).slice(0, 10)
-          : startDate;
-      // due_date = last_interest_date + အရှုံးလ (ပထမအကြိမ်တွင် ပေါင်ရက်နှင့် တူညီ)
-      const dueDate = addMonthsISO(initialLastInterest, lossMonths);
-      const nextInterest = addMonthsISO(initialLastInterest, 1);
-
-      const [result] = await conn.query<ResultSetHeader>(
-        `INSERT INTO pawn_records (
-          pawn_ticket_no, vno, customer_id, customer_name, customer_phone, item_name, item_type, gold_kind,
-          weight_kyat, weight_pae, weight_yway, weight_grams, purity, evaluated_value,
-          loan_amount, loan_amount_baht, monthly_interest_rate, loss_months, start_date, due_date,
-          last_interest_date, next_interest_date, status, accrued_interest,
-          notes, customer_signature, owner_signature
-        ) VALUES (
-          :pawn_ticket_no, :vno, :customer_id, :customer_name, :customer_phone, :item_name, :item_type, :gold_kind,
-          :weight_kyat, :weight_pae, :weight_yway, :weight_grams, :purity, :evaluated_value,
-          :loan_amount, :loan_amount_baht, :monthly_interest_rate, :loss_months, :start_date, :due_date,
-          :last_interest_date, :next_interest_date, :status, :accrued_interest,
-          :notes, :customer_signature, :owner_signature
-        )`,
-        {
-          pawn_ticket_no: data.pawn_ticket_no,
-          vno: data.vno != null ? String(data.vno) : null,
-          customer_id: customerId,
-          customer_name: data.customer_name,
-          customer_phone: data.customer_phone,
-          item_name: data.item_name,
-          item_type: data.item_type != null ? String(data.item_type) : null,
-          gold_kind: data.gold_kind != null ? String(data.gold_kind) : null,
-          weight_kyat: num(w.kyat),
-          weight_pae: num(w.pae),
-          weight_yway: num(w.yway),
-          weight_grams: num(data.weight_grams),
-          purity: data.purity,
-          evaluated_value: num(data.evaluated_value),
-          loan_amount: num(data.loan_amount),
-          loan_amount_baht: num(data.loan_amount_baht),
-          monthly_interest_rate: num(data.monthly_interest_rate, 5),
-          loss_months: lossMonths,
-          start_date: startDate,
-          due_date: dueDate,
-          last_interest_date: initialLastInterest,
-          next_interest_date: nextInterest,
-          status: data.status ?? 'ACTIVE',
-          accrued_interest: num(data.accrued_interest),
-          notes: data.notes != null ? String(data.notes) : null,
-          customer_signature: data.customer_signature != null ? String(data.customer_signature) : null,
-          owner_signature: data.owner_signature != null ? String(data.owner_signature) : null,
-        } as any
-      );
-
-      const loanMmk = num(data.loan_amount);
-      const loanBaht = num(data.loan_amount_baht);
-      let ledgerLoanAmount = loanMmk;
-      if (ledgerLoanAmount <= 0 && loanBaht > 0) {
-        const settings = await this.getShopSettings();
-        ledgerLoanAmount = Math.round(loanBaht * (settings.baht_mmk_rate || 130));
-      }
-
-      await insertLedger(conn, {
-        type: 'EXPENSE',
-        category: 'PAWN_LOAN',
-        amount: ledgerLoanAmount,
-        description:
-          loanMmk > 0
-            ? `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${data.pawn_ticket_no} - ${data.customer_name})`
-            : `ပေါင်နှံပစ္စည်း ချေးငွေထုတ်ပေးခြင်း (${loanBaht} ฿) (${data.pawn_ticket_no} - ${data.customer_name})`,
-        reference_no: String(data.pawn_ticket_no),
-        date: startDate,
-      });
-
+      const insertId = await this.insertPawnOnConnection(conn, data);
       await conn.commit();
       const [rows] = await pool.query<RowDataPacket[]>(`SELECT * FROM pawn_records WHERE id = :id`, {
-        id: result.insertId,
+        id: insertId,
       });
       return mapPawn(rows[0]);
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+
+  /** All-or-nothing Excel/bulk import — any failure rolls back the whole batch. */
+  async addPawnsBulk(items: Record<string, unknown>[]) {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new HttpError(400, 'Import items မရှိပါ');
+    }
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    const createdIds: number[] = [];
+    try {
+      await conn.beginTransaction();
+
+      const seenVno = new Set<string>();
+      const seenTicket = new Set<string>();
+      for (let i = 0; i < items.length; i++) {
+        const data = items[i];
+        const vno = data.vno != null ? String(data.vno).trim() : '';
+        const ticket = data.pawn_ticket_no != null ? String(data.pawn_ticket_no).trim() : '';
+        if (vno) {
+          if (seenVno.has(vno)) {
+            throw new HttpError(400, `Row ${i + 1}: Excel ထဲ VNO "${vno}" ထပ်နေသည် — အားလုံး rollback`);
+          }
+          seenVno.add(vno);
+        }
+        if (ticket) {
+          if (seenTicket.has(ticket)) {
+            throw new HttpError(
+              400,
+              `Row ${i + 1}: Excel ထဲ လက်မှတ် "${ticket}" ထပ်နေသည် — အားလုံး rollback`
+            );
+          }
+          seenTicket.add(ticket);
+        }
+        try {
+          const id = await this.insertPawnOnConnection(conn, data);
+          createdIds.push(id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'insert failed';
+          throw new HttpError(400, `Row ${i + 1}: ${msg} — အားလုံး rollback`);
+        }
+      }
+
+      await conn.commit();
+      if (!createdIds.length) return [];
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT * FROM pawn_records WHERE id IN (${createdIds.map(() => '?').join(',')}) ORDER BY id`,
+        createdIds
+      );
+      return rows.map(mapPawn);
     } catch (err) {
       await conn.rollback();
       throw err;

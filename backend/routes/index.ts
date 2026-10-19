@@ -81,6 +81,7 @@ router.delete('/old-gold/other-outflows/:id', shopController.deleteOtherOutflow)
 router.get('/pawns', shopController.listPawns);
 router.get('/pawns/interest-payments', shopController.listPawnInterestPayments);
 router.delete('/pawns/interest-payments/:id', shopController.deletePawnInterestPayment);
+router.post('/pawns/bulk', shopController.addPawnsBulk);
 router.post('/pawns', shopController.addPawn);
 router.put('/pawns/:id', shopController.updatePawn);
 router.delete('/pawns/:id', shopController.deletePawn);
