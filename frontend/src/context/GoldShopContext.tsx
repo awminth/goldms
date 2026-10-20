@@ -271,7 +271,14 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     baht_mmk_rate: 100000 / 765,
     thai_gold_baht: 65000,
   });
-  const [loading, setLoading] = useState(true);
+  /** True while bootstrap runs for a logged-in user (start true if session restored). */
+  const [loading, setLoading] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem(STORAGE_KEYS.AUTH_USER));
+    } catch {
+      return false;
+    }
+  });
   const [apiError, setApiError] = useState<string | null>(null);
 
   const setters = {
@@ -318,7 +325,13 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await refreshData(true);
   }, [refreshData]);
 
+  // Only load shop data after login — block unauthenticated access to API bootstrap
   useEffect(() => {
+    if (!currentUser) {
+      setLoading(false);
+      setApiError(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -335,7 +348,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => {
       cancelled = true;
     };
-  }, [refreshData]);
+  }, [currentUser?.id, refreshData]);
 
   useEffect(() => {
     if (darkMode) {
@@ -365,16 +378,42 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [rolePermissions, currentUser?.role]);
 
+  const clearShopData = () => {
+    setGoldPrices([]);
+    setInventory([]);
+    setCustomers([]);
+    setTransactions([]);
+    setCustomOrders([]);
+    setGoldsmithJobs([]);
+    setMerchantReturns([]);
+    setShopTransfers([]);
+    setMelts([]);
+    setOtherOutflows([]);
+    setPawnRecords([]);
+    setPawnInterestPayments([]);
+    setLedger([]);
+    setCreditDebts([]);
+    setStaffUsers([]);
+    setMasterCategories([]);
+    setPermissionModules([]);
+    setRolePermissions([]);
+    setSelectedVoucher(null);
+    cacheInvalidate('bootstrap');
+    cacheInvalidate('reports');
+  };
+
   const login = async (username: string, pin: string) => {
     try {
       const user = await api.login(username, pin);
-      const withPerms: StaffUser = {
-        ...user,
-        permissions:
-          user.permissions ||
-          rolePermissions.filter((p) => p.role === user.role) ||
-          (await api.listPermissionsByRole(user.role)),
-      };
+      let perms = user.permissions || rolePermissions.filter((p) => p.role === user.role);
+      if (!perms?.length) {
+        try {
+          perms = await api.listPermissionsByRole(user.role);
+        } catch {
+          perms = [];
+        }
+      }
+      const withPerms: StaffUser = { ...user, permissions: perms };
       setCurrentUser(withPerms);
       localStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(withPerms));
       return { success: true };
@@ -398,6 +437,8 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+    clearShopData();
+    setApiError(null);
   };
 
   const can = (moduleKey: string, action: PermissionAction): boolean => {

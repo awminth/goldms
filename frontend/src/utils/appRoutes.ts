@@ -116,3 +116,33 @@ export function pushAppUrl(path: string) {
     window.history.pushState(null, '', next);
   }
 }
+
+const RETURN_PATH_KEY = 'goldms_return_path';
+
+/** Remember deep-link when forcing /login so we can restore after auth. */
+export function rememberReturnPath(pathname?: string) {
+  if (typeof window === 'undefined') return;
+  const p = pathname ?? window.location.pathname;
+  if (!p || p === '/' || p === '/login') return;
+  try {
+    sessionStorage.setItem(RETURN_PATH_KEY, p);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function takeReturnPath(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const p = sessionStorage.getItem(RETURN_PATH_KEY);
+    sessionStorage.removeItem(RETURN_PATH_KEY);
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+export function forceLoginUrl() {
+  rememberReturnPath();
+  replaceAppUrl('/login');
+}

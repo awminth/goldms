@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useGoldShop } from '../context/GoldShopContext';
 import { useDialog } from '../context/DialogContext';
 import { GoldPurity, PawnInterestPayment, PawnRecord } from '../types/gold';
@@ -16,25 +16,17 @@ import {
   ArrowLeft,
   CalendarDays,
   Coins,
-  Download,
   Eye,
   Pencil,
   Plus,
   Search,
   Trash2,
-  Upload,
   X,
 } from 'lucide-react';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { PaginationBar } from './PaginationBar';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
-import {
-  downloadPawnImportTemplate,
-  formatPawnImportIssues,
-  makePawnTicketNo,
-  parsePawnImportFile,
-} from '../utils/pawnExcelImport';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { formatDate, inDateRange } from '../utils/dateFormat';
@@ -256,7 +248,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     pawnRecords,
     pawnInterestPayments,
     addPawnRecord,
-    addPawnRecordsBulk,
     updatePawnRecord,
     deletePawnRecord,
     payPawnInterest,
@@ -315,9 +306,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const [discountKyat, setDiscountKyat] = useState(0);
   const [discountBaht, setDiscountBaht] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState('');
-  const importFileRef = useRef<HTMLInputElement>(null);
 
   const productCats = masterCategories.filter(
     (c) => c.category_group === 'PRODUCT' && c.is_active && c.code !== 'MIXED'
@@ -803,29 +792,29 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
 
   const summaryChips = (totals: { count: number; mmk: number; baht: number }, interestMode: boolean) => (
     <div className="flex flex-wrap items-center gap-1.5 mr-1">
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-700 dark:text-slate-200">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200">
         {language === 'MM' ? 'အရေအတွက်' : 'Count'}{' '}
-        <span className="font-mono text-[#996515] dark:text-amber-300">{totals.count}</span>
+        <span className="font-mono text-sm text-[#996515] dark:text-amber-300">{totals.count}</span>
       </span>
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-[10px] font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-200/60 dark:border-emerald-900">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-xs font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-200/60 dark:border-emerald-900">
         {interestMode
           ? language === 'MM'
-            ? 'စုစုပေါင်းအတိုး (MMK)'
+            ? 'စုစုပေါင်းအတိုး (ကျပ်)'
             : 'Total Interest MMK'
           : language === 'MM'
-            ? 'စုစုပေါင်း (MMK)'
+            ? 'စုစုပေါင်း (ကျပ်)'
             : 'Total MMK'}{' '}
-        <span className="font-mono">{formatMMK(totals.mmk)}</span>
+        <span className="font-mono text-sm">{formatMMK(totals.mmk)}</span>
       </span>
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-[10px] font-bold text-sky-800 dark:text-sky-200 border border-sky-200/60 dark:border-sky-900">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-xs font-bold text-sky-800 dark:text-sky-200 border border-sky-200/60 dark:border-sky-900">
         {interestMode
           ? language === 'MM'
-            ? 'စုစုပေါင်းအတိုး (Baht)'
+            ? 'စုစုပေါင်းအတိုး (ဘတ်)'
             : 'Total Interest Baht'
           : language === 'MM'
-            ? 'စုစုပေါင်း (Baht)'
+            ? 'စုစုပေါင်း (ဘတ်)'
             : 'Total Baht'}{' '}
-        <span className="font-mono">
+        <span className="font-mono text-sm">
           {totals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿
         </span>
       </span>
@@ -1159,110 +1148,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handlePawnExcelImport = async (file: File) => {
-    setImporting(true);
-    setMsg('');
-    try {
-      const buffer = await file.arrayBuffer();
-      const pure16 = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
-      const existingVnos = new Set(
-        pawnRecords
-          .map((p) => (p.vno || '').trim().toLowerCase())
-          .filter(Boolean)
-      );
-      const { rows, errors, warnings } = parsePawnImportFile(buffer, {
-        pure16Price: pure16,
-        priceForPurity: (p) => goldPrices.find((x) => x.gold_type === p)?.price_per_kyat,
-        kyatToGrams,
-        existingVnos,
-      });
-
-      if (rows.length === 0 && errors.length === 0) {
-        await dialog.alert({
-          title: language === 'MM' ? 'သတိပေးချက်' : 'Notice',
-          message: language === 'MM' ? 'သွင်းရန် အတန်း မတွေ့ပါ' : 'No data rows found',
-        });
-        return;
-      }
-
-      // Any hard error → show all row warnings/errors, import NOTHING (rollback N/A)
-      if (errors.length > 0) {
-        const warnBlock = warnings.length
-          ? `\n\n—— ${language === 'MM' ? 'ပြောင်းလဲမှု သတိပေးချက်' : 'Conversion notes'} ——\n${formatPawnImportIssues(warnings)}`
-          : '';
-        await dialog.alert({
-          title: language === 'MM' ? 'Excel Import မအောင်မြင်' : 'Import blocked',
-          message:
-            (language === 'MM'
-              ? `Format မကိုက်ညီသော အတန်းများရှိသည် — တစ်ကြောင်းမှ မသွင်းပါ။\n\n${formatPawnImportIssues(errors)}`
-              : `Invalid rows found — nothing imported.\n\n${formatPawnImportIssues(errors)}`) +
-            warnBlock,
-          variant: 'error',
-        });
-        return;
-      }
-
-      const payloads = rows.map((row, i) => {
-        const ticketNo = row.pawn_ticket_no || makePawnTicketNo(row.start_date, i);
-        return {
-          pawn_ticket_no: ticketNo,
-          vno: row.vno,
-          customer_id: '',
-          customer_name: row.customer_name,
-          customer_phone: row.customer_phone,
-          item_name: row.item_name,
-          item_type: row.item_type,
-          gold_kind: row.gold_kind,
-          weight: row.weight,
-          weight_grams: row.weight_grams,
-          purity: row.purity,
-          evaluated_value: row.evaluated_value,
-          loan_amount: row.loan_amount,
-          loan_amount_baht: row.loan_amount_baht,
-          monthly_interest_rate: row.monthly_interest_rate,
-          loss_months: row.loss_months,
-          start_date: row.start_date,
-          due_date: row.due_date,
-          last_interest_date: row.last_interest_date,
-          next_interest_date: row.next_interest_date,
-          status: 'ACTIVE' as const,
-          accrued_interest: row.accrued_interest,
-          notes: row.notes,
-        };
-      });
-
-      const saved = await addPawnRecordsBulk(payloads);
-      const warnNote = warnings.length
-        ? `\n\n${language === 'MM' ? 'ရက်စွဲ ပြောင်းထားသည်' : 'Dates converted'}:\n${formatPawnImportIssues(warnings)}`
-        : '';
-      setMsg(
-        language === 'MM'
-          ? `Excel Import — အောင်မြင် ${saved.length} ခု`
-          : `Excel Import — ${saved.length} saved`
-      );
-      await dialog.alert({
-        title: language === 'MM' ? 'Excel Import အောင်မြင်' : 'Import success',
-        message:
-          (language === 'MM'
-            ? `${saved.length} ခု သွင်းပြီးပါပြီ (transaction တစ်ခုတည်း)`
-            : `${saved.length} records imported (single transaction)`) + warnNote,
-        variant: 'success',
-      });
-    } catch (err) {
-      await dialog.alert({
-        title: language === 'MM' ? 'မအောင်မြင်ပါ (rollback)' : 'Failed (rolled back)',
-        message:
-          (err instanceof Error ? err.message : 'Import failed') +
-          (language === 'MM'
-            ? '\n\nတစ်ခုမှားလို့ အားလုံး ပြန်ဖျက်ပြီးပါပြီ။'
-            : '\n\nNothing was saved — full rollback.'),
-        variant: 'error',
-      });
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -2890,49 +2775,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                 onClick={exportCurrentList}
                 disabled={exportRowsCount === 0}
               />
-              {section === 'list' && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => downloadPawnImportTemplate()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-600/40 bg-sky-50 dark:bg-sky-950/30 text-sky-800 dark:text-sky-300 text-xs font-bold hover:bg-sky-100 dark:hover:bg-sky-950/50 print:hidden"
-                    title={
-                      language === 'MM'
-                        ? 'Excel Import နမူနာ ဒေါင်းလုပ်'
-                        : 'Download sample Excel for import'
-                    }
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    {language === 'MM' ? 'နမူနာ Excel' : 'Sample Excel'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={importing}
-                    onClick={() => importFileRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-600/40 bg-violet-50 dark:bg-violet-950/30 text-violet-800 dark:text-violet-300 text-xs font-bold hover:bg-violet-100 dark:hover:bg-violet-950/50 disabled:opacity-40 print:hidden"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    {importing
-                      ? language === 'MM'
-                        ? 'သွင်းနေ…'
-                        : 'Importing…'
-                      : language === 'MM'
-                        ? 'Excel Import'
-                        : 'Excel Import'}
-                  </button>
-                  <input
-                    ref={importFileRef}
-                    type="file"
-                    accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = '';
-                      if (file) void handlePawnExcelImport(file);
-                    }}
-                  />
-                </>
-              )}
               {section !== 'overdue-list' && (
               <button
                   type="button"

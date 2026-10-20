@@ -22,7 +22,14 @@ import { SetupView } from './components/SetupView';
 import { VoucherModal } from './components/VoucherModal';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 import { softwareSystemName } from './branding';
-import { buildAppPath, parseAppPath, pushAppUrl, replaceAppUrl } from './utils/appRoutes';
+import {
+  buildAppPath,
+  forceLoginUrl,
+  parseAppPath,
+  pushAppUrl,
+  replaceAppUrl,
+  takeReturnPath,
+} from './utils/appRoutes';
 
 const ACTIVE_TAB_KEY = 'goldms_active_tab';
 const PAWN_EDIT_ID_KEY = 'goldms_pawn_edit_id';
@@ -144,10 +151,10 @@ const MainLayout: React.FC = () => {
     if (tab !== 'pawn-new') setPawnEditId(null);
   }, []);
 
-  // Sync browser URL ↔ active page
+  // Sync browser URL ↔ active page (unauthenticated → always /login)
   useEffect(() => {
     if (!currentUser) {
-      replaceAppUrl('/login');
+      forceLoginUrl();
       return;
     }
     const path = buildAppPath({
@@ -164,13 +171,25 @@ const MainLayout: React.FC = () => {
     }
   }, [activeTab, goldsmithHandoffId, orderHandoffId, pawnEditId, currentUser]);
 
+  // After login, restore deep-link the user tried before being sent to /login
+  useEffect(() => {
+    if (!currentUser) return;
+    const ret = takeReturnPath();
+    if (!ret) return;
+    applyRoute(parseAppPath(ret));
+  }, [currentUser?.id, applyRoute]);
+
   useEffect(() => {
     const onPop = () => {
+      if (!currentUser) {
+        forceLoginUrl();
+        return;
+      }
       applyRoute(parseAppPath(window.location.pathname));
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [applyRoute]);
+  }, [applyRoute, currentUser]);
 
   useEffect(() => {
     try {
@@ -241,6 +260,15 @@ const MainLayout: React.FC = () => {
     setActiveTabState(tab);
   };
 
+  // Auth first — never render app pages without login (URL deep-links blocked)
+  if (!currentUser) {
+    return (
+      <>
+        <LoginPage />
+      </>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-page dark:bg-[#121212] text-gray-700 dark:text-gray-200">
@@ -264,15 +292,6 @@ const MainLayout: React.FC = () => {
           {language === 'MM' ? 'ပြန်လည်ကြိုးစားမည်' : 'Retry'}
         </button>
       </div>
-    );
-  }
-
-  if (!currentUser) {
-    return (
-      <>
-        <LoginPage />
-        <VoucherModal />
-      </>
     );
   }
 
