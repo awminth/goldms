@@ -2329,7 +2329,13 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
 
   const formFields = (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 w-full">
+      <div
+        className={`grid grid-cols-1 gap-2 w-full ${
+          section === 'form-create'
+            ? 'md:grid-cols-3'
+            : 'md:grid-cols-2 xl:grid-cols-4'
+        }`}
+      >
         <div className="min-w-0 w-full">
           <label className={labelCls}>လူအမည်</label>
           <input
@@ -2820,26 +2826,35 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         </div>
       )}
 
-      {section === 'form-create' && (
+      {section === 'form-create' ? (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2 w-full">
+          <div className="min-w-0 w-full">
+            <label className={labelCls}>ဖုန်းနံပါတ်</label>
+            <input
+              className={inputCls}
+              value={formPhone}
+              onChange={(e) => setFormPhone(e.target.value)}
+            />
+          </div>
+          <div className="min-w-0 w-full md:col-span-3">
+            <label className={labelCls}>မှတ်ချက်</label>
+            <input
+              className={inputCls}
+              value={formNotes}
+              onChange={(e) => setFormNotes(e.target.value)}
+            />
+          </div>
+        </div>
+      ) : (
         <div className="w-full min-w-0">
-          <label className={labelCls}>ဖုန်းနံပါတ်</label>
+          <label className={labelCls}>မှတ်ချက်</label>
           <input
             className={inputCls}
-            value={formPhone}
-            onChange={(e) => setFormPhone(e.target.value)}
+            value={formNotes}
+            onChange={(e) => setFormNotes(e.target.value)}
           />
         </div>
       )}
-
-      <div className="w-full min-w-0">
-        <label className={labelCls}>မှတ်ချက်</label>
-        <textarea
-          className={inputCls}
-          rows={2}
-          value={formNotes}
-          onChange={(e) => setFormNotes(e.target.value)}
-        />
-      </div>
     </>
   );
 
