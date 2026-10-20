@@ -2361,15 +2361,12 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
             <input className={inputCls} value={formItem} readOnly />
           </div>
         )}
-        <div className="min-w-0 w-full">
-          <label className={labelCls}>ဖုန်းနံပါတ်</label>
-          <input
-            className={inputCls}
-            value={formPhone}
-            onChange={(e) => setFormPhone(e.target.value)}
-            readOnly={section !== 'form-create'}
-          />
-        </div>
+        {section !== 'form-create' && (
+          <div className="min-w-0 w-full">
+            <label className={labelCls}>ဖုန်းနံပါတ်</label>
+            <input className={inputCls} value={formPhone} readOnly />
+          </div>
+        )}
         <div className="min-w-0 w-full">
           <label className={labelCls}>VNO</label>
           <input
@@ -2504,6 +2501,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               syncWeightFromKpy(v, formPae, formYway);
             }}
             readOnly={section !== 'form-create'}
+            tabIndex={section === 'form-create' ? -1 : undefined}
           />
         </div>
         <div className="min-w-0 w-full">
@@ -2516,6 +2514,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               syncWeightFromKpy(formKyat, v, formYway);
             }}
             readOnly={section !== 'form-create'}
+            tabIndex={section === 'form-create' ? -1 : undefined}
           />
         </div>
         <div className="min-w-0 w-full">
@@ -2529,6 +2528,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               syncWeightFromKpy(formKyat, formPae, v);
             }}
             readOnly={section !== 'form-create'}
+            tabIndex={section === 'form-create' ? -1 : undefined}
           />
         </div>
       </div>
@@ -2817,6 +2817,17 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
               }}
             />
           </div>
+        </div>
+      )}
+
+      {section === 'form-create' && (
+        <div className="w-full min-w-0">
+          <label className={labelCls}>ဖုန်းနံပါတ်</label>
+          <input
+            className={inputCls}
+            value={formPhone}
+            onChange={(e) => setFormPhone(e.target.value)}
+          />
         </div>
       )}
 
