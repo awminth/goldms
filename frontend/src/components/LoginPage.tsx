@@ -26,7 +26,7 @@ export const LoginPage: React.FC = () => {
   const { login, language, toggleLanguage, darkMode, toggleDarkMode } = useGoldShop();
 
   const [username, setUsername] = useState('admin');
-  const [pin, setPin] = useState('1234');
+  const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -172,14 +172,9 @@ export const LoginPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                      {language === 'MM' ? 'လျှို့ဝှက်ကုဒ် / PIN Code' : 'Password / PIN Code'}
-                    </label>
-                    <span className="text-[11px] text-[#B8860B] dark:text-amber-400 font-medium">
-                      Default: 1234
-                    </span>
-                  </div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                    {language === 'MM' ? 'လျှို့ဝှက်ကုဒ် / PIN Code' : 'Password / PIN Code'}
+                  </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
                       <KeyRound className="w-4 h-4 text-[#D4AF37]" />
