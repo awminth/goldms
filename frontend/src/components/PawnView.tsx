@@ -267,6 +267,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     section === 'form-create' || section === 'form-interest' || section === 'form-redeem';
 
   const [qSearch, setQSearch] = useState('');
+  const [filterItemType, setFilterItemType] = useState('ALL');
   const [searchTick, setSearchTick] = useState(0);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -635,11 +636,11 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     () => pawnRecords.filter((r) => r.status === 'ACTIVE' || r.status === 'OVERDUE'),
     [pawnRecords]
   );
-  /** Main pawn list: active + overdue + redeemed (status shows ရွေးပြီး). */
+  /** Main pawn list: only active + overdue (မရွေးရသေးသော အပေါင်များ). Redeemed items are in redeem-list tab. */
   const listAllPawns = useMemo(
     () =>
       pawnRecords.filter(
-        (r) => r.status === 'ACTIVE' || r.status === 'OVERDUE' || r.status === 'REDEEMED'
+        (r) => r.status === 'ACTIVE' || r.status === 'OVERDUE'
       ),
     [pawnRecords]
   );
@@ -697,15 +698,49 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     }));
   }, [pawnInterestPayments, pawnById]);
 
-  const listPawnRows = filterBySearch(
-    filterByDateRange(listAllPawns as unknown as Record<string, unknown>[], (r) =>
-      String(r.start_date || '')
+  const filterByItemType = (rows: Record<string, unknown>[]) => {
+    if (!filterItemType || filterItemType === 'ALL') return rows;
+    const targetType = filterItemType.trim().toUpperCase();
+    const opt = itemTypeOptions.find((o) => o.code === targetType);
+    const mmWord = opt?.mm?.trim().toLowerCase();
+    const enWord = opt?.en?.trim().toLowerCase();
+
+    return rows.filter((r) => {
+      const directType = String(r.item_type || '').trim().toUpperCase();
+      if (directType && directType === targetType) return true;
+
+      if (r.pawn_id) {
+        const parent = pawnById.get(String(r.pawn_id));
+        const parentType = String(parent?.item_type || '').trim().toUpperCase();
+        if (parentType && parentType === targetType) return true;
+        if (parent?.item_name) {
+          const pName = String(parent.item_name).toLowerCase();
+          if (mmWord && pName.includes(mmWord)) return true;
+          if (enWord && pName.includes(enWord)) return true;
+        }
+      }
+
+      const itemName = String(r.item_name || '').toLowerCase();
+      if (mmWord && itemName.includes(mmWord)) return true;
+      if (enWord && itemName.includes(enWord)) return true;
+
+      return false;
+    });
+  };
+
+  const listPawnRows = filterByItemType(
+    filterBySearch(
+      filterByDateRange(listAllPawns as unknown as Record<string, unknown>[], (r) =>
+        String(r.start_date || '')
+      )
     )
   ) as unknown as PawnRecord[];
   const listInterestRows = (() => {
-    const filtered = filterBySearch(
-      filterByDateRange(interestRowsWithHistory as unknown as Record<string, unknown>[], (r) =>
-        String(r.payment_date || '')
+    const filtered = filterByItemType(
+      filterBySearch(
+        filterByDateRange(interestRowsWithHistory as unknown as Record<string, unknown>[], (r) =>
+          String(r.payment_date || '')
+        )
       )
     ) as unknown as Array<
       PawnInterestPayment & { covered_last_interest_date?: string; status?: string }
@@ -734,25 +769,29 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     }
     return map;
   }, [listInterestRows]);
-  const listRedeemRows = filterBySearch(
-    filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
-      String(r.redeem_date || '')
+  const listRedeemRows = filterByItemType(
+    filterBySearch(
+      filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
+        String(r.redeem_date || '')
+      )
     )
   ) as unknown as PawnRecord[];
   const overduePawns = useMemo(
     () => pawnRecords.filter((r) => isOverduePawn(r)),
     [pawnRecords]
   );
-  const listOverdueRows = filterBySearch(
+  const listOverdueRows = filterByItemType(
     filterByDateRange(overduePawns as unknown as Record<string, unknown>[], (r) =>
       String(r.start_date || '')
     )
   ) as unknown as PawnRecord[];
-  const selectList = filterBySearch(
-    activePawns as unknown as Record<string, unknown>[]
+  const selectList = filterByItemType(
+    filterBySearch(
+      activePawns as unknown as Record<string, unknown>[]
+    )
   ) as unknown as PawnRecord[];
 
-  const selectPager = useClientPagination(selectList, [searchTick, qSearch, section]);
+  const selectPager = useClientPagination(selectList, [searchTick, qSearch, filterItemType, section]);
 
   const listDateFieldHint = useMemo(() => {
     if (section === 'interest-list') {
@@ -2160,6 +2199,25 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
             }
           />
         </div>
+
+        {/* Item Type Filter Dropdown */}
+        <div className="w-full sm:w-52 shrink-0">
+          <select
+            value={filterItemType}
+            onChange={(e) => setFilterItemType(e.target.value)}
+            className="w-full h-[34px] px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+          >
+            <option value="ALL">
+              {language === 'MM' ? 'ပစ္စည်းအမျိုးအစား (အားလုံး)' : 'All Item Types'}
+            </option>
+            {itemTypeOptions.map((opt) => (
+              <option key={opt.code} value={opt.code}>
+                {language === 'MM' ? opt.mm : opt.en}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <button
           type="button"
           onClick={() => setSearchTick((n) => n + 1)}
@@ -2204,6 +2262,15 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                 className="h-[34px] px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-[11px] font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
               >
                 {language === 'MM' ? 'ရက်စွဲ ရှင်းမည်' : 'Clear dates'}
+              </button>
+            )}
+            {filterItemType !== 'ALL' && (
+              <button
+                type="button"
+                onClick={() => setFilterItemType('ALL')}
+                className="h-[34px] px-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition"
+              >
+                {language === 'MM' ? 'အမျိုးအစား ရှင်းမည်' : 'Clear type'}
               </button>
             )}
           </div>
@@ -2813,7 +2880,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => pawnStatusRowClass(effectivePawnStatus(r))}
         />
@@ -2828,7 +2895,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => {
             const p = pawnById.get(String(r.pawn_id));
@@ -2852,7 +2919,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => pawnStatusRowClass(r.status)}
         />
@@ -2867,7 +2934,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'ရက်လွန် အပေါင် မရှိပါ' : 'No overdue pawns'}
           rowClassName={() => pawnStatusRowClass('OVERDUE')}
         />
