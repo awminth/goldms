@@ -769,13 +769,91 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     }
     return map;
   }, [listInterestRows]);
-  const listRedeemRows = filterByItemType(
-    filterBySearch(
-      filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
-        String(r.redeem_date || '')
+  const listRedeemRows = useMemo(() => {
+    const filtered = filterByItemType(
+      filterBySearch(
+        filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
+          String(r.redeem_date || '')
+        )
       )
-    )
-  ) as unknown as PawnRecord[];
+    ) as unknown as PawnRecord[];
+
+    return [...filtered].sort((a, b) => {
+      const nameA = String(a.customer_name || '').trim();
+      const nameB = String(b.customer_name || '').trim();
+      const nameCmp = nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+      if (nameCmp !== 0) return nameCmp;
+      const phoneCmp = String(a.customer_phone || '').localeCompare(String(b.customer_phone || ''));
+      if (phoneCmp !== 0) return phoneCmp;
+      const dateCmp = String(b.redeem_date || '').localeCompare(String(a.redeem_date || ''));
+      if (dateCmp !== 0) return dateCmp;
+      return Number(b.id) - Number(a.id);
+    });
+  }, [redeemedPawns, filterItemType, qSearch, dateFrom, dateTo]);
+
+  const redeemGroups = useMemo(() => {
+    type GroupType = {
+      key: string;
+      customer_name: string;
+      customer_phone: string;
+      sameRedeemDate: boolean;
+      commonRedeemDate?: string;
+      items: PawnRecord[];
+      total_loan_mmk: number;
+      total_loan_baht: number;
+      total_interest_mmk: number;
+      total_interest_baht: number;
+      total_amount_mmk: number;
+      total_amount_baht: number;
+    };
+    const groups: GroupType[] = [];
+    let current: GroupType | null = null;
+
+    for (const r of listRedeemRows) {
+      const name = String(r.customer_name || '').trim() || '—';
+      const phone = String(r.customer_phone || '').trim();
+      const key = `${name}___${phone}`;
+
+      if (!current || current.key !== key) {
+        current = {
+          key,
+          customer_name: name,
+          customer_phone: phone,
+          sameRedeemDate: true,
+          commonRedeemDate: r.redeem_date,
+          items: [r],
+          total_loan_mmk: Number(r.loan_amount || 0),
+          total_loan_baht: Number(r.loan_amount_baht || 0),
+          total_interest_mmk: Number(r.redeem_interest_kyat || 0),
+          total_interest_baht: Number(r.redeem_interest_baht || 0),
+          total_amount_mmk: Number(r.redeem_total_kyat || 0),
+          total_amount_baht: Number(r.redeem_total_baht || 0),
+        };
+        groups.push(current);
+      } else {
+        current.items.push(r);
+        if (r.redeem_date !== current.commonRedeemDate) {
+          current.sameRedeemDate = false;
+        }
+        current.total_loan_mmk += Number(r.loan_amount || 0);
+        current.total_loan_baht += Number(r.loan_amount_baht || 0);
+        current.total_interest_mmk += Number(r.redeem_interest_kyat || 0);
+        current.total_interest_baht += Number(r.redeem_interest_baht || 0);
+        current.total_amount_mmk += Number(r.redeem_total_kyat || 0);
+        current.total_amount_baht += Number(r.redeem_total_baht || 0);
+      }
+    }
+    return groups;
+  }, [listRedeemRows]);
+
+  const redeemGroupPager = useClientPagination(redeemGroups, [
+    searchTick,
+    qSearch,
+    filterItemType,
+    dateFrom,
+    dateTo,
+    section,
+  ]);
   const overduePawns = useMemo(
     () => pawnRecords.filter((r) => isOverduePawn(r)),
     [pawnRecords]
@@ -817,7 +895,14 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     return { count, mmk, baht };
   }, [listInterestRows]);
 
-  const listRedeemTotals = useMemo(() => {
+  const listRedeemPrincipalTotals = useMemo(() => {
+    const count = listRedeemRows.length;
+    const mmk = listRedeemRows.reduce((s, r) => s + Number(r.loan_amount || 0), 0);
+    const baht = listRedeemRows.reduce((s, r) => s + Number(r.loan_amount_baht || 0), 0);
+    return { count, mmk, baht };
+  }, [listRedeemRows]);
+
+  const listRedeemInterestTotals = useMemo(() => {
     const count = listRedeemRows.length;
     const mmk = listRedeemRows.reduce((s, r) => s + Number(r.redeem_interest_kyat || 0), 0);
     const baht = listRedeemRows.reduce((s, r) => s + Number(r.redeem_interest_baht || 0), 0);
@@ -829,36 +914,52 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const lastInterestHeader =
     language === 'MM' ? 'နောက်ဆုံးအတိုးရက်' : 'Last Interest';
 
-  const summaryChips = (totals: { count: number; mmk: number; baht: number }, interestMode: boolean) => (
-    <div className="flex flex-wrap items-center gap-1.5 mr-1">
-      <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200">
-        {language === 'MM' ? 'အရေအတွက်' : 'Count'}{' '}
-        <span className="font-mono text-sm text-[#996515] dark:text-amber-300">{totals.count}</span>
-      </span>
-      <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-xs font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-200/60 dark:border-emerald-900">
-        {interestMode
-          ? language === 'MM'
-            ? 'စုစုပေါင်းအတိုး (ကျပ်)'
-            : 'Total Interest MMK'
-          : language === 'MM'
-            ? 'စုစုပေါင်း (ကျပ်)'
-            : 'Total MMK'}{' '}
-        <span className="font-mono text-sm">{formatMMK(totals.mmk)}</span>
-      </span>
-      <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-xs font-bold text-sky-800 dark:text-sky-200 border border-sky-200/60 dark:border-sky-900">
-        {interestMode
-          ? language === 'MM'
-            ? 'စုစုပေါင်းအတိုး (ဘတ်)'
-            : 'Total Interest Baht'
-          : language === 'MM'
-            ? 'စုစုပေါင်း (ဘတ်)'
-            : 'Total Baht'}{' '}
-        <span className="font-mono text-sm">
-          {totals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿
+  const summaryChips = (
+    totals: { count: number; mmk: number; baht: number },
+    mode: 'principal' | 'interest' | 'default' | boolean = 'default'
+  ) => {
+    const isPrincipal = mode === 'principal';
+    const isInterest = mode === 'interest' || mode === true;
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 mr-1">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200">
+          {language === 'MM' ? 'အရေအတွက်' : 'Count'}{' '}
+          <span className="font-mono text-sm text-[#996515] dark:text-amber-300">{totals.count}</span>
         </span>
-      </span>
-    </div>
-  );
+        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-xs font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-200/60 dark:border-emerald-900">
+          {isPrincipal
+            ? language === 'MM'
+              ? 'စုစုပေါင်းအရင်း (ကျပ်)'
+              : 'Total Principal MMK'
+            : isInterest
+              ? language === 'MM'
+                ? 'စုစုပေါင်းအတိုး (ကျပ်)'
+                : 'Total Interest MMK'
+              : language === 'MM'
+                ? 'စုစုပေါင်း (ကျပ်)'
+                : 'Total MMK'}{' '}
+          <span className="font-mono text-sm">{formatMMK(totals.mmk)}</span>
+        </span>
+        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-xs font-bold text-sky-800 dark:text-sky-200 border border-sky-200/60 dark:border-sky-900">
+          {isPrincipal
+            ? language === 'MM'
+              ? 'စုစုပေါင်းအရင်း (ဘတ်)'
+              : 'Total Principal Baht'
+            : isInterest
+              ? language === 'MM'
+                ? 'စုစုပေါင်းအတိုး (ဘတ်)'
+                : 'Total Interest Baht'
+              : language === 'MM'
+                ? 'စုစုပေါင်း (ဘတ်)'
+                : 'Total Baht'}{' '}
+          <span className="font-mono text-sm">
+            {totals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿
+          </span>
+        </span>
+      </div>
+    );
+  };
 
   const title =
     section === 'list' || section === 'form-create'
@@ -987,7 +1088,9 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         columns: [
           { header: 'VNO', value: (r) => r.vno || r.pawn_ticket_no, width: 14 },
           { header: 'Redeem Date', value: (r) => formatDate(r.redeem_date || ''), width: 12 },
+          { header: 'Pawn Date', value: (r) => formatDate(r.start_date || ''), width: 12 },
           { header: 'Name', value: (r) => r.customer_name, width: 18 },
+          { header: 'Phone', value: (r) => r.customer_phone || '', width: 14 },
           { header: 'Item', value: (r) => r.item_name, width: 22 },
           { header: 'Loan', value: (r) => fmtPawnLoan(r), width: 14 },
           { header: 'Rate%', value: (r) => r.monthly_interest_rate, width: 8 },
@@ -2822,7 +2925,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {section === 'list' && !isForm && summaryChips(listPawnTotals, false)}
           {section === 'interest-list' && !isForm && summaryChips(listInterestTotals, true)}
-          {section === 'redeem-list' && !isForm && summaryChips(listRedeemTotals, true)}
+          {section === 'redeem-list' && !isForm && summaryChips(listRedeemPrincipalTotals, 'principal')}
           {isForm ? (
               <button
               type="button"
@@ -2912,17 +3015,294 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
 
       {/* LIST: Redeem */}
       {section === 'redeem-list' && (
-        <DataTable
-          rows={listRedeemRows}
-          columns={redeemListColumns}
-          rowKey={(r) => r.id}
-          language={language}
-          searchable={false}
-          selectable={false}
-          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
-          emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
-          rowClassName={(r) => pawnStatusRowClass(r.status)}
-        />
+        <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200/80 dark:border-gray-800 shadow-xs overflow-hidden w-full min-w-0 max-w-full">
+          <div className="px-3 sm:px-4 w-full max-w-full overflow-x-auto max-h-[60vh]">
+            <table className="data-table w-full text-left text-xs text-gray-600 dark:text-gray-300 min-w-max">
+              <thead className="sticky top-0 z-10 bg-gray-50/95 dark:bg-[#181818]/95 backdrop-blur-xs border-b border-gray-200 dark:border-gray-800">
+                <tr>
+                  <th scope="col" className="px-3 py-2.5 text-center font-bold text-gray-700 dark:text-gray-300 w-12 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'စဉ်' : 'No'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'အမည်' : 'Name'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'ဖုန်း' : 'Phone'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800 whitespace-nowrap">
+                    {language === 'MM' ? 'ရွေးရက်' : 'Redeem Date'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    VNO
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800 whitespace-nowrap">
+                    {pawnDateHeader}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'ပစ္စည်း' : 'Item'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'အမျိုးအစား' : 'Type'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'အလေးချိန်' : 'Weight'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-bold text-amber-700 dark:text-amber-400 border-b border-gray-200 dark:border-gray-800 whitespace-nowrap">
+                    {language === 'MM' ? 'အရင်း' : 'Principal'}
+                  </th>
+                  <th scope="col" className="px-2 py-2.5 text-center font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'အတိုး%' : 'Rate%'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-center font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800 whitespace-nowrap">
+                    {language === 'MM' ? 'သွင်းရက်စာ' : 'Period'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-bold text-emerald-700 dark:text-emerald-400 border-b border-gray-200 dark:border-gray-800 whitespace-nowrap">
+                    {language === 'MM' ? 'အတိုး' : 'Interest'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-bold text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-800 whitespace-nowrap">
+                    {language === 'MM' ? 'စုစုပေါင်း' : 'Total'}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-center font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {statusHeader}
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-center font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                    {language === 'MM' ? 'လုပ်ဆောင်ချက်' : 'Actions'}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60">
+                {redeemGroupPager.pageItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={16} className="px-3 py-10 text-center text-xs text-gray-400">
+                      {language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
+                    </td>
+                  </tr>
+                ) : (
+                  redeemGroupPager.pageItems.map((group, gIdx) => {
+                    const rowSpan = group.items.length + (group.items.length > 1 ? 1 : 0);
+                    const globalIdx = redeemGroupPager.from + gIdx;
+                    const groupTone = gIdx % 2 === 1 ? 'bg-slate-50/50 dark:bg-slate-900/20' : 'bg-white dark:bg-[#1A1A1A]';
+
+                    return (
+                      <React.Fragment key={group.key}>
+                        {group.items.map((it, itemIdx) => (
+                          <tr
+                            key={it.id}
+                            className={`hover:bg-amber-50/50 dark:hover:bg-amber-950/20 transition-colors ${groupTone} ${pawnStatusRowClass(it.status)}`}
+                          >
+                            {/* Common Group Columns: Only render on first item */}
+                            {itemIdx === 0 && (
+                              <>
+                                <td
+                                  rowSpan={rowSpan}
+                                  className="px-3 py-2 text-center font-mono font-bold align-top pt-3 border-r border-gray-100 dark:border-gray-800/80 text-gray-500 bg-inherit"
+                                >
+                                  {globalIdx}
+                                </td>
+                                <td
+                                  rowSpan={rowSpan}
+                                  className="px-3 py-2 align-top pt-3 border-r border-gray-100 dark:border-gray-800/80 bg-inherit"
+                                >
+                                  <div className="font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[140px]">
+                                    {group.customer_name}
+                                  </div>
+                                  {group.items.length > 1 && (
+                                    <span className="inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+                                      {group.items.length} {language === 'MM' ? 'မျိုး' : 'items'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td
+                                  rowSpan={rowSpan}
+                                  className="px-3 py-2 align-top pt-3 font-mono text-[11px] text-gray-600 dark:text-gray-400 border-r border-gray-100 dark:border-gray-800/80 bg-inherit"
+                                >
+                                  {group.customer_phone || '—'}
+                                </td>
+                                <td
+                                  rowSpan={group.sameRedeemDate ? rowSpan : 1}
+                                  className="px-3 py-2 align-top pt-3 font-mono text-[11px] text-gray-700 dark:text-gray-300 border-r border-gray-100 dark:border-gray-800/80 whitespace-nowrap bg-inherit"
+                                >
+                                  {formatDate(it.redeem_date || '')}
+                                </td>
+                              </>
+                            )}
+                            {/* If different dates per item, render redeem date on each row */}
+                            {!group.sameRedeemDate && itemIdx > 0 && (
+                              <td className="px-3 py-2 font-mono text-[11px] text-gray-700 dark:text-gray-300 border-r border-gray-100 dark:border-gray-800/80 whitespace-nowrap">
+                                {formatDate(it.redeem_date || '')}
+                              </td>
+                            )}
+
+                            {/* Item-specific Columns */}
+                            <td className="px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                              {it.vno || it.pawn_ticket_no}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-[11px] text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                              {it.start_date ? formatDate(it.start_date) : '—'}
+                            </td>
+                            <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100 truncate max-w-[130px]">
+                              {it.item_name}
+                            </td>
+                            <td className="px-3 py-2 text-[11px] text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                              {goldKindLabel(it.gold_kind)}
+                              {it.purity && (
+                                <span className="text-gray-400 dark:text-gray-500 ml-1">
+                                  · {PURITY_LABELS[it.purity]?.mm || it.purity}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                              {fmtNum(weightDecimal(it), 4)}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-bold text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                              {fmtPawnLoan(it)}
+                            </td>
+                            <td className="px-2 py-2 text-center font-mono text-gray-600 dark:text-gray-400">
+                              {it.monthly_interest_rate}%
+                            </td>
+                            <td className="px-3 py-2 text-center font-mono text-[11px] text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                              {fmtPeriodMonthsDays(it.redeem_months, it.redeem_days)}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                              {pawnLoanIsBaht(it)
+                                ? `${fmtNum(it.redeem_interest_baht, 0)} ฿`
+                                : formatMMK(Number(it.redeem_interest_kyat || 0))}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                              {pawnLoanIsBaht(it)
+                                ? `${fmtNum(it.redeem_total_baht, 0)} ฿`
+                                : formatMMK(Number(it.redeem_total_kyat || 0))}
+                            </td>
+                            <td className="px-3 py-2 text-center whitespace-nowrap">
+                              <PawnStatusBadge status={it.status} language={language} />
+                            </td>
+                            <td className="px-3 py-2 text-center whitespace-nowrap">
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-700"
+                                title={language === 'MM' ? 'ကြည့်မည်' : 'View'}
+                                onClick={() => setDetailView({ kind: 'redeem', record: it })}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+
+                        {/* Customer Subtotal Row if multiple items */}
+                        {group.items.length > 1 && (
+                          <tr className={`border-b-2 border-amber-200 dark:border-amber-900/50 text-[11px] font-bold ${groupTone}`}>
+                            <td colSpan={5} className="px-3 py-1.5 text-right text-gray-600 dark:text-gray-400">
+                              {language === 'MM'
+                                ? `(${group.customer_name}) အရင်း/အတိုး ပေါင်း:`
+                                : `(${group.customer_name}) Subtotal:`}
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-mono text-amber-800 dark:text-amber-300 whitespace-nowrap">
+                              {group.total_loan_baht > 0 && group.total_loan_mmk > 0
+                                ? `${formatMMK(group.total_loan_mmk)} + ${fmtNum(group.total_loan_baht, 0)} ฿`
+                                : group.total_loan_baht > 0
+                                  ? `${fmtNum(group.total_loan_baht, 0)} ฿`
+                                  : formatMMK(group.total_loan_mmk)}
+                            </td>
+                            <td colSpan={2}></td>
+                            <td className="px-3 py-1.5 text-right font-mono text-emerald-800 dark:text-emerald-300 whitespace-nowrap">
+                              {group.total_interest_baht > 0 && group.total_interest_mmk > 0
+                                ? `${formatMMK(group.total_interest_mmk)} + ${fmtNum(group.total_interest_baht, 0)} ฿`
+                                : group.total_interest_baht > 0
+                                  ? `${fmtNum(group.total_interest_baht, 0)} ฿`
+                                  : formatMMK(group.total_interest_mmk)}
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-mono text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                              {group.total_amount_baht > 0 && group.total_amount_mmk > 0
+                                ? `${formatMMK(group.total_amount_mmk)} + ${fmtNum(group.total_amount_baht, 0)} ฿`
+                                : group.total_amount_baht > 0
+                                  ? `${fmtNum(group.total_amount_baht, 0)} ฿`
+                                  : formatMMK(group.total_amount_mmk)}
+                            </td>
+                            <td colSpan={2}></td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+              {listRedeemRows.length > 0 && (
+                <tfoot className="sticky bottom-0 z-10 bg-amber-100/95 dark:bg-amber-950/90 backdrop-blur-xs border-t-2 border-amber-300 dark:border-amber-800/80 font-bold text-xs">
+                  <tr>
+                    <td colSpan={4} className="px-3 py-2.5 text-amber-950 dark:text-amber-100">
+                      <div className="flex items-center gap-2">
+                        <span>{language === 'MM' ? 'ဇယား စုစုပေါင်း' : 'Table Total'}</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/80 dark:bg-black/30 font-mono text-xs text-[#996515] dark:text-amber-300 border border-amber-200 dark:border-amber-900">
+                          {language === 'MM' ? 'အရေအတွက်' : 'Count'}: {listRedeemInterestTotals.count}
+                        </span>
+                      </div>
+                    </td>
+                    <td colSpan={5} className="px-3 py-2.5 text-right text-gray-700 dark:text-gray-300 text-[11px]">
+                      {language === 'MM' ? 'စုစုပေါင်းအရင်း:' : 'Total Principal:'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-amber-900 dark:text-amber-200 whitespace-nowrap">
+                      {listRedeemPrincipalTotals.mmk > 0 && (
+                        <div>{formatMMK(listRedeemPrincipalTotals.mmk)}</div>
+                      )}
+                      {listRedeemPrincipalTotals.baht > 0 && (
+                        <div>{listRedeemPrincipalTotals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿</div>
+                      )}
+                      {listRedeemPrincipalTotals.mmk === 0 && listRedeemPrincipalTotals.baht === 0 && <div>0</div>}
+                    </td>
+                    <td colSpan={2} className="px-3 py-2.5 text-right text-gray-700 dark:text-gray-300 text-[11px]">
+                      {language === 'MM' ? 'စုစုပေါင်းအတိုး:' : 'Total Interest:'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-900 dark:text-emerald-200 whitespace-nowrap">
+                      {listRedeemInterestTotals.mmk > 0 && (
+                        <div>{formatMMK(listRedeemInterestTotals.mmk)}</div>
+                      )}
+                      {listRedeemInterestTotals.baht > 0 && (
+                        <div>{listRedeemInterestTotals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿</div>
+                      )}
+                      {listRedeemInterestTotals.mmk === 0 && listRedeemInterestTotals.baht === 0 && <div>0</div>}
+                    </td>
+                    <td colSpan={3}></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {/* Footer Bar: Summary Chips at Bottom + PaginationBar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-3 sm:px-4 py-3 bg-slate-50/70 dark:bg-slate-900/40 border-t border-gray-200 dark:border-gray-800">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700">
+                {language === 'MM' ? 'အရေအတွက်' : 'Count'}{' '}
+                <span className="font-mono text-sm text-[#996515] dark:text-amber-300">
+                  {listRedeemInterestTotals.count}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-xs font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-200/60 dark:border-emerald-900">
+                {language === 'MM' ? 'စုစုပေါင်းအတိုး (ကျပ်)' : 'Total Interest MMK'}{' '}
+                <span className="font-mono text-sm">{formatMMK(listRedeemInterestTotals.mmk)}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-xs font-bold text-sky-800 dark:text-sky-200 border border-sky-200/60 dark:border-sky-900">
+                {language === 'MM' ? 'စုစုပေါင်းအတိုး (ဘတ်)' : 'Total Interest Baht'}{' '}
+                <span className="font-mono text-sm">
+                  {listRedeemInterestTotals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿
+                </span>
+              </span>
+            </div>
+
+            <PaginationBar
+              language={language === 'MM' ? 'MM' : 'EN'}
+              page={redeemGroupPager.page}
+              totalPages={redeemGroupPager.totalPages}
+              total={redeemGroupPager.total}
+              from={redeemGroupPager.from}
+              to={redeemGroupPager.to}
+              pageSize={redeemGroupPager.pageSize}
+              onPageChange={redeemGroupPager.setPage}
+              onPageSizeChange={redeemGroupPager.setPageSize}
+            />
+          </div>
+        </div>
       )}
 
       {/* LIST: Overdue */}

@@ -15,4 +15,6 @@ backend/.env
 
 note.txt
 *.mp4
+*.xlsx
+*.csv
 deploy-tmp/
