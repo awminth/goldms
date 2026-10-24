@@ -3015,7 +3015,8 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
 
       {/* LIST: Redeem */}
       {section === 'redeem-list' && (
-        <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200/80 dark:border-gray-800 shadow-xs overflow-hidden w-full min-w-0 max-w-full">
+        <>
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200/80 dark:border-gray-800 shadow-xs overflow-hidden w-full min-w-0 max-w-full">
           <div className="px-3 sm:px-4 w-full max-w-full overflow-x-auto max-h-[60vh]">
             <table className="data-table w-full text-left text-xs text-gray-600 dark:text-gray-300 min-w-max">
               <thead className="sticky top-0 z-10 bg-gray-50/95 dark:bg-[#181818]/95 backdrop-blur-xs border-b border-gray-200 dark:border-gray-800">
@@ -3227,69 +3228,10 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                   })
                 )}
               </tbody>
-              {listRedeemRows.length > 0 && (
-                <tfoot className="sticky bottom-0 z-10 bg-amber-100/95 dark:bg-amber-950/90 backdrop-blur-xs border-t-2 border-amber-300 dark:border-amber-800/80 font-bold text-xs">
-                  <tr>
-                    <td colSpan={4} className="px-3 py-2.5 text-amber-950 dark:text-amber-100">
-                      <div className="flex items-center gap-2">
-                        <span>{language === 'MM' ? 'ဇယား စုစုပေါင်း' : 'Table Total'}</span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/80 dark:bg-black/30 font-mono text-xs text-[#996515] dark:text-amber-300 border border-amber-200 dark:border-amber-900">
-                          {language === 'MM' ? 'အရေအတွက်' : 'Count'}: {listRedeemInterestTotals.count}
-                        </span>
-                      </div>
-                    </td>
-                    <td colSpan={5} className="px-3 py-2.5 text-right text-gray-700 dark:text-gray-300 text-[11px]">
-                      {language === 'MM' ? 'စုစုပေါင်းအရင်း:' : 'Total Principal:'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-amber-900 dark:text-amber-200 whitespace-nowrap">
-                      {listRedeemPrincipalTotals.mmk > 0 && (
-                        <div>{formatMMK(listRedeemPrincipalTotals.mmk)}</div>
-                      )}
-                      {listRedeemPrincipalTotals.baht > 0 && (
-                        <div>{listRedeemPrincipalTotals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿</div>
-                      )}
-                      {listRedeemPrincipalTotals.mmk === 0 && listRedeemPrincipalTotals.baht === 0 && <div>0</div>}
-                    </td>
-                    <td colSpan={2} className="px-3 py-2.5 text-right text-gray-700 dark:text-gray-300 text-[11px]">
-                      {language === 'MM' ? 'စုစုပေါင်းအတိုး:' : 'Total Interest:'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-emerald-900 dark:text-emerald-200 whitespace-nowrap">
-                      {listRedeemInterestTotals.mmk > 0 && (
-                        <div>{formatMMK(listRedeemInterestTotals.mmk)}</div>
-                      )}
-                      {listRedeemInterestTotals.baht > 0 && (
-                        <div>{listRedeemInterestTotals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿</div>
-                      )}
-                      {listRedeemInterestTotals.mmk === 0 && listRedeemInterestTotals.baht === 0 && <div>0</div>}
-                    </td>
-                    <td colSpan={3}></td>
-                  </tr>
-                </tfoot>
-              )}
             </table>
           </div>
 
-          {/* Footer Bar: Summary Chips at Bottom + PaginationBar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-3 sm:px-4 py-3 bg-slate-50/70 dark:bg-slate-900/40 border-t border-gray-200 dark:border-gray-800">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700">
-                {language === 'MM' ? 'အရေအတွက်' : 'Count'}{' '}
-                <span className="font-mono text-sm text-[#996515] dark:text-amber-300">
-                  {listRedeemInterestTotals.count}
-                </span>
-              </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-xs font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-200/60 dark:border-emerald-900">
-                {language === 'MM' ? 'စုစုပေါင်းအတိုး (ကျပ်)' : 'Total Interest MMK'}{' '}
-                <span className="font-mono text-sm">{formatMMK(listRedeemInterestTotals.mmk)}</span>
-              </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-xs font-bold text-sky-800 dark:text-sky-200 border border-sky-200/60 dark:border-sky-900">
-                {language === 'MM' ? 'စုစုပေါင်းအတိုး (ဘတ်)' : 'Total Interest Baht'}{' '}
-                <span className="font-mono text-sm">
-                  {listRedeemInterestTotals.baht.toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿
-                </span>
-              </span>
-            </div>
-
+          <div className="px-3 sm:px-4 py-2 border-t border-gray-200/80 dark:border-gray-800">
             <PaginationBar
               language={language === 'MM' ? 'MM' : 'EN'}
               page={redeemGroupPager.page}
@@ -3303,6 +3245,20 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
             />
           </div>
         </div>
+
+        {/* Bottom Card: Exactly matching top UI style for Total Interest */}
+        <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 p-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Coins className="w-5 h-5 text-[#D4AF37]" />
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">
+              {language === 'MM' ? 'စုစုပေါင်းအတိုး' : 'Total Interest'}
+            </h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            {summaryChips(listRedeemInterestTotals, 'interest')}
+          </div>
+        </div>
+      </>
       )}
 
       {/* LIST: Overdue */}
