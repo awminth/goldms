@@ -260,7 +260,7 @@ export function estimateSellingPrice(params: {
 
 export function generateBarcode(): string {
   const random = Math.floor(100000 + Math.random() * 900000);
-  return `STG-${random}`;
+  return `${random}`;
 }
 
 export function generateInvoiceNo(type = 'INV'): string {

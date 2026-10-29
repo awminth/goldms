@@ -28,6 +28,7 @@ import {
   mmkToBaht,
   resolveBahtMmkRate,
   calculateThaiGoldPrice,
+  normalizeBarcode,
 } from '../utils/goldCalculations';
 import {
   ReceiptText,
@@ -304,19 +305,23 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
 
   const filteredStock = useMemo(() => {
-    const q = inventorySearch.trim().toLowerCase();
+    const raw = inventorySearch.trim();
+    const qNorm = normalizeBarcode(raw).toLowerCase();
+    const qLower = raw.toLowerCase();
     return inStockItems.filter((i) => {
       if (stockCategory === 'THAI_GOLD') {
         if (!isThaiItem(i)) return false;
       } else if (stockCategory === 'MYANMAR_GOLD') {
         if (isThaiItem(i)) return false;
       }
-      if (!q) return true;
+      if (!raw) return true;
+      const bNorm = normalizeBarcode(i.barcode).toLowerCase();
       return (
-        i.barcode.toLowerCase().includes(q) ||
-        i.name_mm.toLowerCase().includes(q) ||
-        i.name.toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q)
+        bNorm.includes(qNorm) ||
+        i.barcode.toLowerCase().includes(qLower) ||
+        i.name_mm.toLowerCase().includes(qLower) ||
+        i.name.toLowerCase().includes(qLower) ||
+        i.category.toLowerCase().includes(qLower)
       );
     });
   }, [inStockItems, inventorySearch, stockCategory]);
@@ -498,20 +503,178 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     );
   };
 
-  const tryAddByBarcode = () => {
-    const q = inventorySearch.trim();
+  const playScanBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1400, ctx.currentTime);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.09);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.09);
+    } catch {
+      // Audio context might be restricted before first user interaction
+    }
+  };
+
+  const handleScanBarcode = (rawQuery?: string) => {
+    const q = normalizeBarcode(rawQuery !== undefined ? rawQuery : inventorySearch);
     if (!q) return;
-    const exact = inStockItems.find(
-      (i) => i.barcode.toLowerCase() === q.toLowerCase() && !cartIds.has(i.id)
+
+    // 1. Direct check: Is this barcode already in the cart?
+    const alreadyInCart = cartItems.find(
+      (c) => c.barcode && normalizeBarcode(c.barcode).toLowerCase() === q.toLowerCase()
     );
+    if (alreadyInCart) {
+      void dialog.alert(
+        language === 'MM'
+          ? `ပစ္စည်း "${alreadyInCart.item_name}" (${alreadyInCart.barcode}) သည် ဘောင်ချာထဲသို့ ထည့်သွင်းပြီးဖြစ်ပါသည်`
+          : `Item "${alreadyInCart.item_name}" (${alreadyInCart.barcode}) is already in the cart.`
+      );
+      setInventorySearch('');
+      searchInputRef.current?.focus();
+      return;
+    }
+
+    // 2. Exact match in inStockItems
+    const exact = inStockItems.find(
+      (i) => normalizeBarcode(i.barcode).toLowerCase() === q.toLowerCase()
+    );
+
     if (exact) {
+      if (cartIds.has(exact.id)) {
+        void dialog.alert(
+          language === 'MM'
+            ? `ပစ္စည်း "${exact.name_mm || exact.name}" (${exact.barcode}) သည် ဘောင်ချာထဲသို့ ထည့်သွင်းပြီးဖြစ်ပါသည်`
+            : `Item "${exact.name_mm || exact.name}" (${exact.barcode}) is already in the cart.`
+        );
+        setInventorySearch('');
+        searchInputRef.current?.focus();
+        return;
+      }
+      playScanBeep();
       addItemFromInventory(exact.id);
       return;
     }
+
+    // 3. Fallback: If 1 unique item matches the search query in filteredStock
     if (filteredStock.length === 1 && !cartIds.has(filteredStock[0].id)) {
+      playScanBeep();
       addItemFromInventory(filteredStock[0].id);
+      return;
     }
+
+    // 4. Was this item in inventory but SOLD or OUT?
+    const nonStock = inventory.find(
+      (i) => normalizeBarcode(i.barcode).toLowerCase() === q.toLowerCase()
+    );
+    if (nonStock) {
+      const statusLabel =
+        nonStock.status === 'SOLD'
+          ? (language === 'MM' ? 'ရောင်းချပြီးဖြစ်ပါသည်' : 'already SOLD')
+          : (language === 'MM' ? `စတော့တွင်မရှိပါ (${nonStock.status})` : `not in stock (${nonStock.status})`);
+      void dialog.alert(
+        language === 'MM'
+          ? `ဘားကုဒ် "${q}" ၏ ပစ္စည်း "${nonStock.name_mm || nonStock.name}" သည် ${statusLabel}။`
+          : `Item with barcode "${q}" is ${statusLabel}.`
+      );
+      setInventorySearch('');
+      searchInputRef.current?.focus();
+      return;
+    }
+
+    // 5. Not found
+    void dialog.alert(
+      language === 'MM'
+        ? `ဘားကုဒ် "${q}" နှင့် ကိုက်ညီသော စတော့ပစ္စည်း မတွေ့ရှိပါ!`
+        : `No in-stock item found matching barcode "${q}".`
+    );
+    setInventorySearch('');
+    searchInputRef.current?.focus();
   };
+
+  const handleScanBarcodeRef = useRef(handleScanBarcode);
+  handleScanBarcodeRef.current = handleScanBarcode;
+
+  // Global Barcode Scanner listener: catches rapid bursts from hardware scanners anywhere on screen
+  useEffect(() => {
+    let scanBuffer = '';
+    let lastKeyTime = Date.now();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if any modal popup or dialog is open
+      const hasModal = document.querySelector('[role="dialog"]') || document.querySelector('.modal-overlay');
+      if (hasModal) return;
+
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement;
+
+      const now = Date.now();
+      const interval = now - lastKeyTime;
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        // Barcode scanners type very rapidly (characters within ~20-50ms)
+        if (scanBuffer.length >= 2 && interval < 120) {
+          e.preventDefault();
+          const code = normalizeBarcode(scanBuffer);
+          scanBuffer = '';
+          handleScanBarcodeRef.current(code);
+          return;
+        }
+
+        // If the user was typing in the inventory search input and pressed Enter
+        if (activeEl === searchInputRef.current) {
+          e.preventDefault();
+          const val = normalizeBarcode(searchInputRef.current.value);
+          if (val) {
+            handleScanBarcodeRef.current(val);
+          }
+          scanBuffer = '';
+          return;
+        }
+
+        scanBuffer = '';
+        return;
+      }
+
+      // Ignore modifier keys
+      if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) {
+        return;
+      }
+
+      // Barcode scanners deliver characters in rapid succession (< 90ms per char)
+      if (interval > 90) {
+        scanBuffer = e.key;
+      } else {
+        scanBuffer += e.key;
+      }
+
+      // If scanner is typing outside an input field, prevent default so it doesn't trigger hotkeys or scrolls
+      if (scanBuffer.length >= 2 && !isInput && interval < 90) {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Auto-focus search input on mount
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
+  const tryAddByBarcode = handleScanBarcode;
 
   const removeCartItem = (id: string) => setCartItems(cartItems.filter((i) => i.id !== id));
 
@@ -1541,11 +1704,11 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                     ref={searchInputRef}
                     type="text"
                     value={inventorySearch}
-                    onChange={(e) => setInventorySearch(e.target.value)}
+                    onChange={(e) => setInventorySearch(normalizeBarcode(e.target.value))}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        tryAddByBarcode();
+                        handleScanBarcode();
                       }
                     }}
                     placeholder={
@@ -1553,8 +1716,14 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                         ? 'ဘားကုဒ် စကင် / အမည် ရိုက်ပြီး Enter…'
                         : 'Scan barcode / type name + Enter…'
                     }
-                    className="w-full pl-10 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] dark:text-white font-medium focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
+                    className="w-full pl-10 pr-28 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] dark:text-white font-medium focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
                   />
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
+                      <Barcode className="w-3.5 h-3.5" />
+                      Scanner Ready
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex rounded-xl border border-gray-200 dark:border-gray-700 p-0.5">

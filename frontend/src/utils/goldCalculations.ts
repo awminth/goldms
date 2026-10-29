@@ -322,10 +322,57 @@ export function formatKPYEnglish(kpy: WeightKPY): string {
   return parts.join(' ');
 }
 
-/** Generate a unique Barcode for stock items (e.g., STG-839210) */
+/** Generate a unique Barcode for stock items (e.g., 839210) */
 export function generateBarcode(): string {
   const random = Math.floor(100000 + Math.random() * 900000);
-  return `STG-${random}`;
+  return `${random}`;
+}
+
+/**
+ * Converts Myanmar numerals (၀-၉, ဝ), Shan numerals, and full-width numbers to standard English digits (0-9).
+ * Crucial for Barcode Scanners when Windows keyboard layout is set to Myanmar (Pyidaungsu/Myanmar3/Zawgyi).
+ */
+export function normalizeBarcode(input?: string | null): string {
+  if (!input) return '';
+  const myanmarDigits: Record<string, string> = {
+    '၀': '0',
+    'ဝ': '0', // digit zero & letter Wa
+    '၁': '1',
+    '၂': '2',
+    '၃': '3',
+    '၄': '4',
+    '၅': '5',
+    '၆': '6',
+    '၇': '7',
+    '၈': '8',
+    '၉': '9',
+    // Shan digits
+    '႐': '0',
+    '႑': '1',
+    '႒': '2',
+    '႓': '3',
+    '႔': '4',
+    '႕': '5',
+    '႖': '6',
+    '႗': '7',
+    '႘': '8',
+    '႙': '9',
+    // Full-width digits
+    '\uFF10': '0',
+    '\uFF11': '1',
+    '\uFF12': '2',
+    '\uFF13': '3',
+    '\uFF14': '4',
+    '\uFF15': '5',
+    '\uFF16': '6',
+    '\uFF17': '7',
+    '\uFF18': '8',
+    '\uFF19': '9',
+  };
+
+  return String(input)
+    .replace(/[၀-၉ဝ႐-႙\uFF10-\uFF19]/g, (ch) => myanmarDigits[ch] ?? ch)
+    .trim();
 }
 
 /** Generate a unique Invoice Number (e.g., INV-202609-1001) */

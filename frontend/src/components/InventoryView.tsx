@@ -48,7 +48,7 @@ import { DataTable, type DataTableColumn } from './DataTable';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import { ModalOverlay } from './ModalOverlay';
-import { InventoryBarcodeTag, BARCODE_TAG_PAGE_STYLE } from './InventoryBarcodeTag';
+import { InventoryBarcodeTag, BARCODE_TAG_PAGE_STYLE, getBarcodeTagPageStyle } from './InventoryBarcodeTag';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { useDialog } from '../context/DialogContext';
@@ -112,11 +112,26 @@ export const InventoryView: React.FC = () => {
     getLivePriceForPurity,
   } = useGoldShop();
   const dialog = useDialog();
+  const [tagOffsetY, setTagOffsetY] = useState<number>(() => {
+    const saved = localStorage.getItem('goldms_tag_offset_y');
+    return saved !== null ? Number(saved) : 1.5;
+  });
+  const tagOffsetYRef = useRef(tagOffsetY);
+  tagOffsetYRef.current = tagOffsetY;
+
+  const changeTagOffsetY = (delta: number) => {
+    setTagOffsetY((prev) => {
+      const next = Math.round((prev + delta) * 10) / 10;
+      localStorage.setItem('goldms_tag_offset_y', String(next));
+      return next;
+    });
+  };
+
   const barcodePrintRef = useRef<HTMLDivElement>(null);
   const handlePrintBarcodeTag = useReactToPrint({
     contentRef: barcodePrintRef,
-    documentTitle: 'barcode-tag-75x15',
-    pageStyle: BARCODE_TAG_PAGE_STYLE,
+    documentTitle: '',
+    pageStyle: getBarcodeTagPageStyle(tagOffsetY),
     // Avoid global voucher @media print rules (visibility/absolute) breaking sticker layout
     ignoreGlobalStyles: true,
     onBeforePrint: async () => {
@@ -127,6 +142,7 @@ export const InventoryView: React.FC = () => {
   });
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
+
 
   // Movement summary date range (default: today → today)
   const [summaryFrom, setSummaryFrom] = useState(() => todayISO());
@@ -2068,15 +2084,15 @@ export const InventoryView: React.FC = () => {
         </ModalOverlay>
       )}
 
-      {/* Barcode Tag Print Preview Modal — 75mm × 15mm via react-to-print */}
+      {/* Barcode Tag Print Preview Modal */}
       {tagItem && (
         <ModalOverlay>
-          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-md w-full p-5 shadow-2xl border border-[#D4AF37]/30">
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-[#D4AF37]/30">
             <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800">
               <h3 className="font-bold text-gray-900 dark:text-white text-sm flex items-center space-x-2">
                 <Printer className="w-4 h-4 text-[#D4AF37]" />
                 <span>
-                  {language === 'MM' ? 'ဘားကုဒ်ကတ်ပြား (75×15 mm)' : 'Barcode Tag (75×15 mm)'}
+                  {language === 'MM' ? 'ရတနာ ဘားကုဒ်တံဆိပ် ထုတ်မည်' : 'Print Jewelry Barcode Tag'}
                 </span>
               </h3>
               <button
@@ -2087,19 +2103,64 @@ export const InventoryView: React.FC = () => {
               </button>
             </div>
 
-            <div className="mt-4 flex flex-col items-center gap-3">
-              <p className="text-[10px] text-gray-500 text-center px-2">
+            <div className="mt-4 flex flex-col gap-3">
+              {/* Micro-adjust and notice */}
+              <div className="flex items-center justify-between gap-2 flex-wrap bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
+                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  {language === 'MM' ? 'အပေါ်/အောက် ညှိရန်:' : 'Vertical Adjust:'}
+                </span>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    type="button"
+                    onClick={() => changeTagOffsetY(-0.5)}
+                    className="px-2 py-1 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    title="အပေါ်သို့ 0.5 mm ရွှေ့မည်"
+                  >
+                    ▲ အပေါ်
+                  </button>
+                  <span className="font-mono text-xs font-bold min-w-[44px] text-center bg-white dark:bg-gray-900 px-2 py-0.5 rounded border border-gray-300 dark:border-gray-700">
+                    {tagOffsetY > 0 ? `+${tagOffsetY}` : tagOffsetY}mm
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => changeTagOffsetY(0.5)}
+                    className="px-2 py-1 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    title="အောက်သို့ 0.5 mm ရွှေ့မည်"
+                  >
+                    ▼ အောက်
+                  </button>
+                  {tagOffsetY !== 1.5 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTagOffsetY(1.5);
+                        localStorage.setItem('goldms_tag_offset_y', '1.5');
+                      }}
+                      className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline ml-1 font-semibold"
+                    >
+                      Default
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800/60 leading-relaxed">
                 {language === 'MM'
-                  ? 'ပရင့်ထုတ်ရင် အရွယ် 75×15 mm အတိုင်း ပုံမပျက် ထွက်ပါမည် (printer အမျိုးမျိုး OK)'
-                  : 'Print keeps a fixed 75×15 mm layout on any printer'}
+                  ? '💡 Paper size: 3.00" x 1.00" (76mm x 25mm) နှင့် Margins: None (အနားသတ် မရှိ) ထားပေးပါ။ လိုအပ်ပါက အပေါ်/အောက် ခလုတ်ဖြင့် 0.5mm စီ စိတ်ကြိုက် ညှိနိုင်ပါသည်။'
+                  : '💡 Paper size: 3.00" x 1.00" (76mm x 25mm) and Margins: None. Use the adjustment buttons to fine-tune ±0.5mm.'}
               </p>
-              {/* Preview (screen) — same node is cloned by react-to-print */}
-              <div className="w-full flex justify-center overflow-x-auto py-2">
+
+              {/* Preview (screen) */}
+              <div className="w-full flex flex-col items-center justify-center py-3 bg-gray-50 dark:bg-black/30 rounded-xl border border-gray-200 dark:border-gray-800 overflow-x-auto">
+                <span className="text-[10px] text-gray-400 mb-2 font-mono">
+                  Dumbbell Tag 76mm × 25mm Preview
+                </span>
                 <InventoryBarcodeTag
                   ref={barcodePrintRef}
                   item={tagItem}
                   kyatToGrams={kyatToGrams}
                   bahtBuyRate={resolveBahtMmkRate(shopSettings)}
+                  offsetY={tagOffsetY}
                 />
               </div>
             </div>

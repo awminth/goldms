@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsUpDown, Search, X } from 'lucide-react';
 import type { InventoryItem } from '../types/gold';
-import { formatMMK, PURITY_LABELS } from '../utils/goldCalculations';
+import { formatMMK, PURITY_LABELS, normalizeBarcode } from '../utils/goldCalculations';
 
 type Props = {
   items: InventoryItem[];
@@ -34,9 +34,13 @@ export const InventorySearchSelect: React.FC<Props> = ({
   );
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return pool;
+    const raw = query.trim();
+    if (!raw) return pool;
+    const qNorm = normalizeBarcode(raw).toLowerCase();
+    const q = raw.toLowerCase();
     return pool.filter((i) => {
+      const bNorm = normalizeBarcode(i.barcode).toLowerCase();
+      if (bNorm.includes(qNorm)) return true;
       const blob = [
         i.barcode,
         i.name,

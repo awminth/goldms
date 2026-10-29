@@ -15,6 +15,8 @@ type InventoryBarcodeTagProps = {
   kyatToGrams?: number;
   /** Baht↔MMK buy rate — Thai လက်ခ (฿) conversion */
   bahtBuyRate?: number;
+  /** Vertical fine-tune shift in mm (default 1.5mm) */
+  offsetY?: number;
   className?: string;
 };
 
@@ -50,13 +52,20 @@ function fmtWastage(pae: number, yway: number): string {
 }
 
 /**
- * Jewelry barcode sticker — physical size 75mm × 15mm.
- * Left: barcode + item code. Right: centered purity + values/units (fixed format, 0 if empty).
- * Printed via react-to-print (see InventoryView).
+ * Physical Jewelry Dumbbell Tag: 75mm × 15mm (2.95" × 0.59").
+ * Left head: 48mm wide (Left 24mm: Barcode + Code, Right 24mm: Details).
+ * Right tail: 27mm wide (blank wrap strap).
+ * Pre-calibrated fixed layout for direct thermal label printers (Aimo QF368B).
  */
 export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTagProps>(
   function InventoryBarcodeTag(
-    { item, kyatToGrams = KYAT_TO_GRAMS, bahtBuyRate = 755, className = '' },
+    {
+      item,
+      kyatToGrams = KYAT_TO_GRAMS,
+      bahtBuyRate = 755,
+      offsetY = 0,
+      className = '',
+    },
     ref
   ) {
     const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
@@ -108,6 +117,7 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
         ? Number(item.thai_weight_unit)
         : goldG || grossG;
 
+    // Right column always includes craft fee line (e.g. 0mmk) — 4 lines with purity for plain gold
     const rightValues = isThai
       ? [fmtGram(thaiG), fmtBaht(craftBaht)]
       : hasStone
@@ -121,29 +131,41 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
         : [fmtGram(goldG), fmtWastage(waste.pae, waste.yway), fmtMmk(craftMmk)];
 
     return (
-      <div ref={ref} className={`barcode-tag ${className}`.trim()}>
-        <div className="barcode-tag-left">
-          <div className="barcode-tag-barcode">
-            <BarcodeLabel
-              value={item.barcode}
-              height={26}
-              barWidth={1.1}
-              margin={1}
-              displayValue={false}
-              fontSize={7}
-              className="barcode-tag-svg"
-            />
+      <div
+        ref={ref}
+        className={`barcode-tag-container tag-dumbbell ${className}`.trim()}
+      >
+        <div
+          className="barcode-tag-head"
+          style={{ transform: offsetY !== 0 ? `translateY(${offsetY}mm)` : undefined }}
+        >
+          <div className="barcode-tag-head-left">
+            <div className="barcode-tag-barcode">
+              <BarcodeLabel
+                value={item.barcode}
+                height={14}
+                barWidth={0.8}
+                margin={0}
+                displayValue={false}
+                fontSize={6}
+                className="barcode-tag-svg"
+              />
+            </div>
+            <div className="barcode-tag-code">{item.barcode}</div>
           </div>
-          <div className="barcode-tag-code">{item.barcode}</div>
+
+          <div className="barcode-tag-head-right">
+            <div className="barcode-tag-purity">{isThai ? 'ထိုင်း' : purityLabel}</div>
+            {rightValues.map((v, i) => (
+              <div key={`${i}-${v}`} className="barcode-tag-row-value">
+                {v}
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="barcode-tag-right">
-          <div className="barcode-tag-purity">{isThai ? 'ထိုင်း' : purityLabel}</div>
-          {rightValues.map((v, i) => (
-            <div key={`${i}-${v}`} className="barcode-tag-row-value">
-              {v}
-            </div>
-          ))}
+        <div className="barcode-tag-tail" title="Dumbbell tail (blank wrap area)">
+          <div className="barcode-tag-tail-inner" />
         </div>
       </div>
     );
@@ -151,42 +173,39 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
 );
 
 /**
- * Print CSS for react-to-print.
- * Do NOT set @page to 75×15 (landscape) — that rotates against POS80 paper (80×210 portrait).
- * Keep page = printer paper (portrait); sticker content is fixed 75×15mm, centered on the page.
+ * Print CSS for react-to-print — Aimo QF368B jewelry dumbbell tags.
+ *
+ * Physical sticker size: 75mm × 15mm (2.95" × 0.59").
+ * Single-page lock guarantees 1 label per print without skipping.
  */
-export const BARCODE_TAG_PAGE_STYLE = `
+export function getBarcodeTagPageStyle(offsetY: number = 0): string {
+  return `
 @page {
-  size: auto portrait;
+  size: 75mm 15mm;
   margin: 0;
 }
 html, body {
   margin: 0 !important;
   padding: 0 !important;
-  width: 100% !important;
-  min-height: 100% !important;
-  height: 100% !important;
+  width: 75mm !important;
+  height: 15mm !important;
+  max-height: 15mm !important;
   overflow: hidden !important;
   background: #ffffff !important;
   color: #000000 !important;
-}
-html {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
 }
 body {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 100% !important;
-  min-height: 100vh !important;
-  min-height: 100% !important;
-}
-body > * {
   margin: 0 !important;
+  padding: 0 !important;
+  display: block !important;
+  width: 75mm !important;
+  height: 15mm !important;
+  overflow: hidden !important;
 }
-.barcode-tag {
+
+.barcode-tag-container {
   width: 75mm !important;
   height: 15mm !important;
   max-width: 75mm !important;
@@ -194,95 +213,148 @@ body > * {
   min-width: 75mm !important;
   min-height: 15mm !important;
   box-sizing: border-box !important;
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: stretch !important;
-  gap: 0.8mm !important;
-  padding: 0.5mm 0.7mm !important;
-  margin: 0 auto !important;
+  position: relative !important;
+  margin: 0 !important;
+  padding: 0 !important;
   background: #ffffff !important;
-  color: #111111 !important;
-  border: none !important;
+  color: #000000 !important;
   overflow: hidden !important;
   font-family: "Noto Sans Myanmar", "Myanmar Text", system-ui, sans-serif !important;
-  position: relative !important;
-  left: auto !important;
-  top: auto !important;
-  transform: none !important;
   page-break-inside: avoid !important;
   break-inside: avoid !important;
+  page-break-before: avoid !important;
+  break-before: avoid !important;
+  page-break-after: avoid !important;
+  break-after: avoid !important;
   -webkit-print-color-adjust: exact !important;
   print-color-adjust: exact !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
 }
-.barcode-tag-left {
-  flex: 0 0 28mm !important;
-  width: 28mm !important;
-  max-width: 28mm !important;
+
+.barcode-tag-head {
+  flex: 0 0 48mm !important;
+  width: 48mm !important;
+  max-width: 48mm !important;
+  min-width: 48mm !important;
+  height: 15mm !important;
+  min-height: 15mm !important;
+  max-height: 15mm !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-right: 0.25mm dashed #000000 !important;
+  transform: translateY(${offsetY}mm) !important;
+}
+
+.barcode-tag-head-left {
+  flex: 0 0 24mm !important;
+  width: 24mm !important;
+  max-width: 24mm !important;
+  height: 15mm !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 0.3mm !important;
-  min-width: 0 !important;
-  border-right: 0.3mm solid #c5a059 !important;
-  padding-right: 0.6mm !important;
+  gap: 0.2mm !important;
+  border-right: 0.25mm solid #000000 !important;
+  padding: 0.2mm 0.4mm 0.2mm 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
 }
+
+.barcode-tag-head-right {
+  flex: 0 0 24mm !important;
+  width: 24mm !important;
+  max-width: 24mm !important;
+  height: 15mm !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.1mm !important;
+  padding: 0.2mm 0 0.2mm 0.4mm !important;
+  margin: 0 !important;
+  text-align: center !important;
+  box-sizing: border-box !important;
+}
+
+.barcode-tag-tail {
+  flex: 0 0 27mm !important;
+  width: 27mm !important;
+  height: 15mm !important;
+  visibility: hidden !important;
+}
+
 .barcode-tag-barcode {
   width: 100% !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   line-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
+
 .barcode-tag-svg {
   width: 100% !important;
-  max-width: 27mm !important;
+  max-width: 18mm !important;
   height: auto !important;
-  max-height: 9.5mm !important;
+  max-height: 7mm !important;
+  display: block !important;
+  margin: 0 auto !important;
 }
+
 .barcode-tag-code {
   font-family: ui-monospace, Consolas, monospace !important;
-  font-size: 5.5pt !important;
+  font-size: 6pt !important;
   font-weight: 700 !important;
-  letter-spacing: 0.02em !important;
-  line-height: 1 !important;
+  letter-spacing: 0.03em !important;
+  line-height: 1.1 !important;
   text-align: center !important;
-  color: #111 !important;
+  color: #000000 !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
-.barcode-tag-right {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  justify-content: center !important;
-  align-items: center !important;
-  gap: 0.15mm !important;
-  padding-left: 0.4mm !important;
-  text-align: center !important;
-}
+
 .barcode-tag-purity {
-  font-size: 6.5pt !important;
+  font-size: 7pt !important;
   font-weight: 800 !important;
-  line-height: 1.05 !important;
-  color: #7a5210 !important;
+  line-height: 1.1 !important;
+  color: #000000 !important;
   letter-spacing: 0.02em !important;
   width: 100% !important;
   text-align: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
+
 .barcode-tag-row-value {
   font-family: ui-monospace, Consolas, monospace !important;
-  font-size: 5.4pt !important;
+  font-size: 5.8pt !important;
   font-weight: 700 !important;
-  color: #111 !important;
+  color: #000000 !important;
   text-align: center !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   width: 100% !important;
-  line-height: 1.08 !important;
+  line-height: 1.12 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 `;
+}
+
+export const BARCODE_TAG_PAGE_STYLE = getBarcodeTagPageStyle(0);
+

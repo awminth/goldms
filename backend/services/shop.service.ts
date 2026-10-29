@@ -1146,7 +1146,7 @@ export const shopService = {
       );
       if (!rows[0]) return code;
     }
-    return `STG-${Date.now().toString().slice(-8)}`;
+    return Date.now().toString().slice(-8);
   },
 
   /** Recalculate selling_price_estimated for Myanmar IN_STOCK items from live daily prices.

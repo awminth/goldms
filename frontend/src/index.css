@@ -247,6 +247,186 @@
   border: 1.5px solid #c5a059;
 }
 
+/* Screen preview styles for barcode tags */
+.barcode-tag-container {
+  box-sizing: border-box;
+  position: relative;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #000000;
+  overflow: hidden;
+  font-family: "Noto Sans Myanmar", "Myanmar Text", system-ui, sans-serif;
+  user-select: none;
+  transition: transform 0.2s ease-in-out;
+}
+.barcode-tag-container.rotate-180 {
+  transform: rotate(180deg);
+}
+
+/* Dumbbell 76x25 mm tag preview */
+.barcode-tag-container.tag-dumbbell {
+  width: 76mm;
+  height: 25mm;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  border: 1px dashed #d4af37;
+  border-radius: 4px;
+}
+.barcode-tag-container.tag-dumbbell .barcode-tag-head {
+  flex: 0 0 48mm;
+  width: 48mm;
+  height: 25mm;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 0.5mm;
+  background: #ffffff;
+  border-right: 1px dashed #d1d5db;
+}
+.barcode-tag-container.tag-dumbbell .barcode-tag-head-left {
+  flex: 0 0 24mm;
+  width: 24mm;
+  height: 25mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4mm;
+  border-right: 0.3mm solid #000000;
+  padding-right: 0.6mm;
+  box-sizing: border-box;
+}
+.barcode-tag-container.tag-dumbbell .barcode-tag-head-right {
+  flex: 0 0 24mm;
+  width: 24mm;
+  height: 25mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15mm;
+  padding-left: 0.6mm;
+  text-align: center;
+  box-sizing: border-box;
+}
+.barcode-tag-container.tag-dumbbell .barcode-tag-tail {
+  flex: 0 0 28mm;
+  width: 28mm;
+  height: 25mm;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.barcode-tag-container.tag-dumbbell .barcode-tag-tail-inner {
+  width: 100%;
+  height: 5mm;
+  background: #e2e8f0;
+  border: 1px dashed #cbd5e1;
+  border-radius: 2px;
+}
+
+/* Rectangle 75x15 mm tag preview */
+.barcode-tag-container.tag-rectangle {
+  width: 75mm;
+  height: 15mm;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.8mm;
+  padding: 0.5mm 0.7mm;
+  border: 1px dashed #d4af37;
+  border-radius: 3px;
+}
+.barcode-tag-container.tag-rectangle .barcode-tag-head {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.8mm;
+}
+.barcode-tag-container.tag-rectangle .barcode-tag-head-left {
+  flex: 0 0 28mm;
+  width: 28mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3mm;
+  border-right: 0.3mm solid #000000;
+  padding-right: 0.6mm;
+  box-sizing: border-box;
+}
+.barcode-tag-container.tag-rectangle .barcode-tag-head-right {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.15mm;
+  padding-left: 0.4mm;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.barcode-tag-barcode {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.barcode-tag-container.tag-dumbbell .barcode-tag-svg {
+  width: 100%;
+  max-width: 20mm;
+  height: auto;
+  max-height: 6.5mm;
+}
+.barcode-tag-container.tag-rectangle .barcode-tag-svg {
+  width: 100%;
+  max-width: 27mm;
+  height: auto;
+  max-height: 9.5mm;
+}
+.barcode-tag-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 5pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-align: center;
+  color: #000000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.barcode-tag-purity {
+  font-size: 5.6pt;
+  font-weight: 800;
+  line-height: 1;
+  color: #000000;
+  letter-spacing: 0.02em;
+  width: 100%;
+  text-align: center;
+}
+.barcode-tag-row-value {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 4.8pt;
+  font-weight: 700;
+  color: #000000;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  line-height: 1.05;
+}
+
 /*
  * Print vouchers: A4 portrait.
  * Keep original layout proportions — enlarge with zoom (do NOT stretch
@@ -303,7 +483,11 @@
   #printable-voucher,
   #printable-voucher *,
   .printable-doc,
-  .printable-doc * {
+  .printable-doc *,
+  .barcode-tag-container,
+  .barcode-tag-container *,
+  .barcode-tag,
+  .barcode-tag * {
     visibility: visible !important;
   }
 
