@@ -368,6 +368,13 @@ body {
   visibility: hidden !important;
 }
 
+.barcode-tag-tail-left {
+  flex: 0 0 22mm !important;
+  width: 22mm !important;
+  min-width: 22mm !important;
+  max-width: 22mm !important;
+}
+
 .barcode-tag-barcode {
   width: 100% !important;
   display: flex !important;

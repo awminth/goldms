@@ -344,6 +344,12 @@
   justify-content: center;
   position: relative;
 }
+.barcode-tag-container.tag-dumbbell .barcode-tag-tail.barcode-tag-tail-left {
+  flex: 0 0 22mm;
+  width: 22mm;
+  min-width: 22mm;
+  max-width: 22mm;
+}
 .barcode-tag-container.tag-dumbbell .barcode-tag-tail-inner {
   width: 100%;
   height: 4mm;
