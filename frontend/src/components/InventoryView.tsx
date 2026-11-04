@@ -50,7 +50,13 @@ import { DataTable, type DataTableColumn } from './DataTable';
 import { ExcelExportButton } from './ExcelExportButton';
 import { exportToExcel } from '../utils/excelExport';
 import { ModalOverlay } from './ModalOverlay';
-import { InventoryBarcodeTag, BARCODE_TAG_PAGE_STYLE, getBarcodeTagPageStyle } from './InventoryBarcodeTag';
+import {
+  InventoryBarcodeTag,
+  BARCODE_TAG_PAGE_STYLE,
+  getBarcodeTagPageStyle,
+  type TagPrinterModel,
+  type TagHeadOrder,
+} from './InventoryBarcodeTag';
 import { NumberInput } from './NumberInput';
 import { DateInput } from './DateInput';
 import { useDialog } from '../context/DialogContext';
@@ -114,12 +120,30 @@ export const InventoryView: React.FC = () => {
     getLivePriceForPurity,
   } = useGoldShop();
   const dialog = useDialog();
+
+  const [tagPrinterModel, setTagPrinterModel] = useState<TagPrinterModel>(() => {
+    const saved = localStorage.getItem('goldms_tag_printer_model');
+    return saved === 'xprinter' ? 'xprinter' : 'aimo';
+  });
+
+  const [tagHeadOrder, setTagHeadOrder] = useState<TagHeadOrder>(() => {
+    const saved = localStorage.getItem('goldms_tag_head_order');
+    return saved === 'text_first' ? 'text_first' : 'barcode_first';
+  });
+
+  const [tagRotate180, setTagRotate180] = useState<boolean>(() => {
+    return localStorage.getItem('goldms_tag_rotate_180') === 'true';
+  });
+
   const [tagOffsetY, setTagOffsetY] = useState<number>(() => {
     const saved = localStorage.getItem('goldms_tag_offset_y');
     return saved !== null ? Number(saved) : 1.5;
   });
-  const tagOffsetYRef = useRef(tagOffsetY);
-  tagOffsetYRef.current = tagOffsetY;
+
+  const [tagOffsetX, setTagOffsetX] = useState<number>(() => {
+    const saved = localStorage.getItem('goldms_tag_offset_x');
+    return saved !== null ? Number(saved) : 0;
+  });
 
   const changeTagOffsetY = (delta: number) => {
     setTagOffsetY((prev) => {
@@ -129,11 +153,56 @@ export const InventoryView: React.FC = () => {
     });
   };
 
+  const changeTagOffsetX = (delta: number) => {
+    setTagOffsetX((prev) => {
+      const next = Math.round((prev + delta) * 10) / 10;
+      localStorage.setItem('goldms_tag_offset_x', String(next));
+      return next;
+    });
+  };
+
+  const selectPrinterModel = (model: TagPrinterModel) => {
+    setTagPrinterModel(model);
+    localStorage.setItem('goldms_tag_printer_model', model);
+    if (model === 'xprinter' && localStorage.getItem('goldms_tag_head_order') === null) {
+      setTagHeadOrder('text_first');
+    }
+  };
+
+  const toggleHeadOrder = () => {
+    setTagHeadOrder((prev) => {
+      const next: TagHeadOrder = prev === 'barcode_first' ? 'text_first' : 'barcode_first';
+      localStorage.setItem('goldms_tag_head_order', next);
+      return next;
+    });
+  };
+
+  const toggleRotate180 = () => {
+    setTagRotate180((prev) => {
+      const next = !prev;
+      localStorage.setItem('goldms_tag_rotate_180', String(next));
+      return next;
+    });
+  };
+
+  const resetTagSettings = () => {
+    setTagPrinterModel('aimo');
+    setTagHeadOrder('barcode_first');
+    setTagRotate180(false);
+    setTagOffsetY(1.5);
+    setTagOffsetX(0);
+    localStorage.removeItem('goldms_tag_printer_model');
+    localStorage.removeItem('goldms_tag_head_order');
+    localStorage.removeItem('goldms_tag_rotate_180');
+    localStorage.setItem('goldms_tag_offset_y', '1.5');
+    localStorage.setItem('goldms_tag_offset_x', '0');
+  };
+
   const barcodePrintRef = useRef<HTMLDivElement>(null);
   const handlePrintBarcodeTag = useReactToPrint({
     contentRef: barcodePrintRef,
     documentTitle: '',
-    pageStyle: getBarcodeTagPageStyle(tagOffsetY),
+    pageStyle: getBarcodeTagPageStyle(tagOffsetY, tagOffsetX, tagRotate180),
     // Avoid global voucher @media print rules (visibility/absolute) breaking sticker layout
     ignoreGlobalStyles: true,
     onBeforePrint: async () => {
@@ -2131,57 +2200,146 @@ export const InventoryView: React.FC = () => {
               </button>
             </div>
 
-            <div className="mt-4 flex flex-col gap-3">
-              {/* Micro-adjust and notice */}
+            <div className="mt-4 flex flex-col gap-2.5">
+              {/* Printer Model Selection */}
               <div className="flex items-center justify-between gap-2 flex-wrap bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
                 <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                  {language === 'MM' ? 'အပေါ်/အောက် ညှိရန်:' : 'Vertical Adjust:'}
+                  {language === 'MM' ? 'ပရင်တာ ရွေးချယ်မှု:' : 'Printer Layout:'}
                 </span>
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => selectPrinterModel('aimo')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg border transition-colors shadow-2xs ${
+                      tagPrinterModel === 'aimo'
+                        ? 'bg-[#D4AF37] text-white border-[#C5A059]'
+                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100'
+                    }`}
+                    title="AIMO QF368B: ခေါင်း ဘယ်ဘက် (48mm) + အမြီး ညာဘက် (27mm)"
+                  >
+                    AIMO QF368B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectPrinterModel('xprinter')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg border transition-colors shadow-2xs ${
+                      tagPrinterModel === 'xprinter'
+                        ? 'bg-[#D4AF37] text-white border-[#C5A059]'
+                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100'
+                    }`}
+                    title="Xprinter XP-410B: အမြီး ဘယ်ဘက် (27mm) + ခေါင်း ညာဘက် (48mm)"
+                  >
+                    Xprinter XP-410B
+                  </button>
+                </div>
+              </div>
+
+              {/* Column arrangement & 180 Rotation */}
+              <div className="flex items-center justify-between gap-2 flex-wrap bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                    {language === 'MM' ? 'စီစဉ်ပုံ:' : 'Order:'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={toggleHeadOrder}
+                    className="px-2.5 py-1 text-xs font-bold bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    title="ခေါင်းအတွင်း စာသားနှင့် ဘားကုဒ် နေရာ လဲလှယ်ရန်"
+                  >
+                    {tagHeadOrder === 'text_first' ? '🔄 [ စာသား | ဘားကုဒ် ]' : '🔄 [ ဘားကုဒ် | စာသား ]'}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleRotate180}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-colors shadow-2xs ${
+                      tagRotate180
+                        ? 'bg-amber-600 text-white border-amber-700'
+                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100'
+                    }`}
+                    title="ပရင်တာက စာသား/ဘားကုဒ် ဇောက်ထိုးထွက်နေပါက ၁၈၀ ဒီဂရီ လှည့်ပေးရန်"
+                  >
+                    🔄 180° {tagRotate180 ? 'လှည့်ထားသည်' : 'လှည့်မည်'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Micro-adjust X and Y offsets */}
+              <div className="flex items-center justify-between gap-2 flex-wrap bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
+                {/* Horizontal (X) */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                    {language === 'MM' ? 'ဘယ်/ညာ:' : 'X (H):'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => changeTagOffsetX(-0.5)}
+                    className="px-2 py-0.5 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    title="ဘယ်ဘက်သို့ 0.5 mm ရွှေ့မည်"
+                  >
+                    ◀ ဘယ်
+                  </button>
+                  <span className="font-mono text-xs font-bold min-w-[42px] text-center bg-white dark:bg-gray-900 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-700">
+                    {tagOffsetX > 0 ? `+${tagOffsetX}` : tagOffsetX}mm
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => changeTagOffsetX(0.5)}
+                    className="px-2 py-0.5 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    title="ညာဘက်သို့ 0.5 mm ရွှေ့မည်"
+                  >
+                    ညာ ▶
+                  </button>
+                </div>
+
+                {/* Vertical (Y) */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                    {language === 'MM' ? 'အပေါ်/အောက်:' : 'Y (V):'}
+                  </span>
                   <button
                     type="button"
                     onClick={() => changeTagOffsetY(-0.5)}
-                    className="px-2 py-1 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    className="px-2 py-0.5 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
                     title="အပေါ်သို့ 0.5 mm ရွှေ့မည်"
                   >
                     ▲ အပေါ်
                   </button>
-                  <span className="font-mono text-xs font-bold min-w-[44px] text-center bg-white dark:bg-gray-900 px-2 py-0.5 rounded border border-gray-300 dark:border-gray-700">
+                  <span className="font-mono text-xs font-bold min-w-[42px] text-center bg-white dark:bg-gray-900 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-700">
                     {tagOffsetY > 0 ? `+${tagOffsetY}` : tagOffsetY}mm
                   </span>
                   <button
                     type="button"
                     onClick={() => changeTagOffsetY(0.5)}
-                    className="px-2 py-1 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
+                    className="px-2 py-0.5 font-bold text-xs bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-300 dark:border-gray-600 shadow-2xs"
                     title="အောက်သို့ 0.5 mm ရွှေ့မည်"
                   >
                     ▼ အောက်
                   </button>
-                  {tagOffsetY !== 1.5 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTagOffsetY(1.5);
-                        localStorage.setItem('goldms_tag_offset_y', '1.5');
-                      }}
-                      className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline ml-1 font-semibold"
-                    >
-                      Default
-                    </button>
-                  )}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={resetTagSettings}
+                  className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold ml-auto"
+                >
+                  {language === 'MM' ? 'မူလအတိုင်းပြန်ထား' : 'Reset'}
+                </button>
               </div>
 
+              {/* Instructions badge */}
               <p className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800/60 leading-relaxed">
                 {language === 'MM'
-                  ? '💡 Paper size: 3.00" x 1.00" (76mm x 25mm) နှင့် Margins: None (အနားသတ် မရှိ) ထားပေးပါ။ လိုအပ်ပါက အပေါ်/အောက် ခလုတ်ဖြင့် 0.5mm စီ စိတ်ကြိုက် ညှိနိုင်ပါသည်။'
-                  : '💡 Paper size: 3.00" x 1.00" (76mm x 25mm) and Margins: None. Use the adjustment buttons to fine-tune ±0.5mm.'}
+                  ? '💡 Xprinter XP-410B သုံးပါက Printing preferences ထဲတွင် Label Width: 75mm, Height: 15mm, Margins: None သတ်မှတ်ပေးပါ။ အထက်ပါ Preview အတိုင်း ကွက်တိ ထွက်ပါမည်။'
+                  : '💡 For Xprinter XP-410B, set custom stock 75mm x 15mm, Margins: None in Printing preferences.'}
               </p>
 
               {/* Preview (screen) */}
               <div className="w-full flex flex-col items-center justify-center py-3 bg-gray-50 dark:bg-black/30 rounded-xl border border-gray-200 dark:border-gray-800 overflow-x-auto">
                 <span className="text-[10px] text-gray-400 mb-2 font-mono">
-                  Dumbbell Tag 76mm × 25mm Preview
+                  {tagPrinterModel === 'xprinter' ? 'Xprinter XP-410B (75mm × 15mm)' : 'AIMO QF368B (75mm × 15mm)'} Preview
                 </span>
                 <InventoryBarcodeTag
                   ref={barcodePrintRef}
@@ -2189,6 +2347,10 @@ export const InventoryView: React.FC = () => {
                   kyatToGrams={kyatToGrams}
                   bahtBuyRate={resolveBahtMmkRate(shopSettings)}
                   offsetY={tagOffsetY}
+                  offsetX={tagOffsetX}
+                  printerModel={tagPrinterModel}
+                  headOrder={tagHeadOrder}
+                  rotate180={tagRotate180}
                 />
               </div>
             </div>

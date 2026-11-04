@@ -10,13 +10,24 @@ import {
 } from '../utils/goldCalculations';
 import { BarcodeLabel } from './BarcodeLabel';
 
-type InventoryBarcodeTagProps = {
+export type TagPrinterModel = 'aimo' | 'xprinter';
+export type TagHeadOrder = 'barcode_first' | 'text_first';
+
+export type InventoryBarcodeTagProps = {
   item: InventoryItem;
   kyatToGrams?: number;
   /** Baht↔MMK buy rate — Thai လက်ခ (฿) conversion */
   bahtBuyRate?: number;
-  /** Vertical fine-tune shift in mm (default 1.5mm) */
+  /** Vertical fine-tune shift in mm */
   offsetY?: number;
+  /** Horizontal fine-tune shift in mm */
+  offsetX?: number;
+  /** Printer model / paper layout: 'aimo' (Head-Left, Tail-Right) or 'xprinter' (Tail-Left, Head-Right) */
+  printerModel?: TagPrinterModel;
+  /** Head column order: 'barcode_first' or 'text_first' */
+  headOrder?: TagHeadOrder;
+  /** Rotate entire tag 180 degrees (for printers that feed upside down) */
+  rotate180?: boolean;
   className?: string;
 };
 
@@ -53,9 +64,12 @@ function fmtWastage(pae: number, yway: number): string {
 
 /**
  * Physical Jewelry Dumbbell Tag: 75mm × 15mm (2.95" × 0.59").
- * Left head: 48mm wide (Left 24mm: Barcode + Code, Right 24mm: Details).
- * Right tail: 27mm wide (blank wrap strap).
- * Pre-calibrated fixed layout for direct thermal label printers (Aimo QF368B).
+ * Head: 48mm wide (Barcode: 24mm, Details: 24mm).
+ * Tail: 27mm wide (blank wrap strap).
+ *
+ * Supports both:
+ * - AIMO QF368B (Head on Left 48mm, Tail on Right 27mm)
+ * - Xprinter XP-410B (Tail on Left 27mm, Head on Right 48mm)
  */
 export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTagProps>(
   function InventoryBarcodeTag(
@@ -64,6 +78,10 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
       kyatToGrams = KYAT_TO_GRAMS,
       bahtBuyRate = 755,
       offsetY = 0,
+      offsetX = 0,
+      printerModel = 'aimo',
+      headOrder = 'barcode_first',
+      rotate180 = false,
       className = '',
     },
     ref
@@ -117,7 +135,7 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
         ? Number(item.thai_weight_unit)
         : goldG || grossG;
 
-    // Right column always includes craft fee line (e.g. 0mmk) — 4 lines with purity for plain gold
+    // Details values (4 lines with purity for plain gold)
     const rightValues = isThai
       ? [fmtGram(thaiG), fmtBaht(craftBaht)]
       : hasStone
@@ -130,55 +148,105 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
           ]
         : [fmtGram(goldG), fmtWastage(waste.pae, waste.yway), fmtMmk(craftMmk)];
 
+    const barcodeCol = (
+      <div key="col-barcode" className="barcode-tag-head-col barcode-tag-head-left barcode-tag-col-barcode">
+        <div className="barcode-tag-barcode">
+          <BarcodeLabel
+            value={item.barcode}
+            height={14}
+            barWidth={0.8}
+            margin={0}
+            displayValue={false}
+            fontSize={6}
+            className="barcode-tag-svg"
+          />
+        </div>
+        <div className="barcode-tag-code">{item.barcode}</div>
+      </div>
+    );
+
+    const detailsCol = (
+      <div key="col-details" className="barcode-tag-head-col barcode-tag-head-right barcode-tag-col-details">
+        <div className="barcode-tag-purity">{isThai ? 'ထိုင်း' : purityLabel}</div>
+        {rightValues.map((v, i) => (
+          <div key={`${i}-${v}`} className="barcode-tag-row-value">
+            {v}
+          </div>
+        ))}
+      </div>
+    );
+
+    const headCols =
+      headOrder === 'text_first' ? [detailsCol, barcodeCol] : [barcodeCol, detailsCol];
+
+    const tailEl = (
+      <div
+        key="tail"
+        className={`barcode-tag-tail ${printerModel === 'xprinter' ? 'barcode-tag-tail-left' : 'barcode-tag-tail-right'}`}
+        title="Dumbbell tail (blank wrap area)"
+      >
+        <div className="barcode-tag-tail-inner" />
+      </div>
+    );
+
+    const transformParts: string[] = [];
+    if (offsetX !== 0 || offsetY !== 0) {
+      transformParts.push(`translate(${offsetX}mm, ${offsetY}mm)`);
+    }
+    if (rotate180) {
+      transformParts.push('rotate(180deg)');
+    }
+    const containerTransform = transformParts.length > 0 ? transformParts.join(' ') : undefined;
+
     return (
       <div
         ref={ref}
-        className={`barcode-tag-container tag-dumbbell ${className}`.trim()}
+        className={`barcode-tag-container tag-dumbbell ${rotate180 ? 'rotate-180' : ''} ${className}`.trim()}
+        style={{
+          transform: containerTransform,
+          transformOrigin: 'center center',
+        }}
       >
-        <div
-          className="barcode-tag-head"
-          style={{ transform: offsetY !== 0 ? `translateY(${offsetY}mm)` : undefined }}
-        >
-          <div className="barcode-tag-head-left">
-            <div className="barcode-tag-barcode">
-              <BarcodeLabel
-                value={item.barcode}
-                height={14}
-                barWidth={0.8}
-                margin={0}
-                displayValue={false}
-                fontSize={6}
-                className="barcode-tag-svg"
-              />
+        {printerModel === 'xprinter' ? (
+          <>
+            {tailEl}
+            <div className="barcode-tag-head barcode-tag-head-rightside">
+              {headCols}
             </div>
-            <div className="barcode-tag-code">{item.barcode}</div>
-          </div>
-
-          <div className="barcode-tag-head-right">
-            <div className="barcode-tag-purity">{isThai ? 'ထိုင်း' : purityLabel}</div>
-            {rightValues.map((v, i) => (
-              <div key={`${i}-${v}`} className="barcode-tag-row-value">
-                {v}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="barcode-tag-tail" title="Dumbbell tail (blank wrap area)">
-          <div className="barcode-tag-tail-inner" />
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="barcode-tag-head barcode-tag-head-leftside">
+              {headCols}
+            </div>
+            {tailEl}
+          </>
+        )}
       </div>
     );
   }
 );
 
 /**
- * Print CSS for react-to-print — Aimo QF368B jewelry dumbbell tags.
+ * Print CSS for react-to-print — jewelry dumbbell tags.
  *
  * Physical sticker size: 75mm × 15mm (2.95" × 0.59").
  * Single-page lock guarantees 1 label per print without skipping.
  */
-export function getBarcodeTagPageStyle(offsetY: number = 0): string {
+export function getBarcodeTagPageStyle(
+  offsetY: number = 0,
+  offsetX: number = 0,
+  rotate180: boolean = false
+): string {
+  const transformParts: string[] = [];
+  if (offsetX !== 0 || offsetY !== 0) {
+    transformParts.push(`translate(${offsetX}mm, ${offsetY}mm)`);
+  }
+  if (rotate180) {
+    transformParts.push('rotate(180deg)');
+  }
+  const transform = transformParts.length > 0 ? transformParts.join(' ') : 'none';
+
   return `
 @page {
   size: 75mm 15mm;
@@ -235,6 +303,8 @@ body {
   flex-direction: row !important;
   align-items: center !important;
   justify-content: flex-start !important;
+  transform: ${transform} !important;
+  transform-origin: center center !important;
 }
 
 .barcode-tag-head {
@@ -252,46 +322,49 @@ body {
   box-sizing: border-box !important;
   padding: 0 !important;
   margin: 0 !important;
+}
+
+.barcode-tag-head-leftside {
   border-right: 0.25mm dashed #000000 !important;
-  transform: translateY(${offsetY}mm) !important;
 }
 
-.barcode-tag-head-left {
+.barcode-tag-head-rightside {
+  border-left: 0.25mm dashed #000000 !important;
+}
+
+.barcode-tag-head-col {
   flex: 0 0 24mm !important;
   width: 24mm !important;
   max-width: 24mm !important;
+  min-width: 24mm !important;
   height: 14mm !important;
+  min-height: 14mm !important;
+  max-height: 14mm !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 0.15mm !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0.1mm 0.25mm !important;
+  overflow: hidden !important;
+}
+
+.barcode-tag-head .barcode-tag-head-col:first-child {
   border-right: 0.25mm solid #000000 !important;
-  padding: 0.1mm 0.3mm 0.1mm 0 !important;
-  margin: 0 !important;
-  box-sizing: border-box !important;
 }
 
-.barcode-tag-head-right {
-  flex: 0 0 24mm !important;
-  width: 24mm !important;
-  max-width: 24mm !important;
-  height: 14mm !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 0.05mm !important;
-  padding: 0.1mm 0 0.1mm 0.3mm !important;
-  margin: 0 !important;
-  text-align: center !important;
-  box-sizing: border-box !important;
+.barcode-tag-head .barcode-tag-head-col:last-child {
+  border-right: none !important;
 }
 
 .barcode-tag-tail {
   flex: 0 0 27mm !important;
   width: 27mm !important;
+  min-width: 27mm !important;
+  max-width: 27mm !important;
   height: 14mm !important;
+  box-sizing: border-box !important;
   visibility: hidden !important;
 }
 
@@ -359,5 +432,4 @@ body {
 `;
 }
 
-export const BARCODE_TAG_PAGE_STYLE = getBarcodeTagPageStyle(0);
-
+export const BARCODE_TAG_PAGE_STYLE = getBarcodeTagPageStyle(0, 0, false);
