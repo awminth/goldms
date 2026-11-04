@@ -43,8 +43,6 @@ import {
   CalendarDays,
   Scale,
   Download,
-  Copy,
-  FileText,
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { api } from '../services/api';
@@ -146,71 +144,6 @@ export const InventoryView: React.FC = () => {
   });
 
   const [tagExporting, setTagExporting] = useState(false);
-  const [copiedText, setCopiedText] = useState(false);
-
-  const getTagTextContent = (item: InventoryItem): string => {
-    const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
-    const purity = PURITY_LABELS[item.purity]?.mm || item.purity;
-    const gross = {
-      kyat: Number(item.weight_kyat || 0),
-      pae: Number(item.weight_pae || 0),
-      yway: Number(item.weight_yway || 0),
-    };
-    const net = {
-      kyat: Number(item.net_weight_kyat || 0),
-      pae: Number(item.net_weight_pae || 0),
-      yway: Number(item.net_weight_yway || 0),
-    };
-    const gem = {
-      kyat: Number(item.gemstone_weight_kyat || 0),
-      pae: Number(item.gemstone_weight_pae || 0),
-      yway: Number(item.gemstone_weight_yway || 0),
-    };
-    const gemY = kpyToYway(gem.kyat, gem.pae, gem.yway);
-    const goldPureY = Math.max(0, kpyToYway(gross.kyat, gross.pae, gross.yway) - gemY);
-    const wasteY = Math.max(0, kpyToYway(net.kyat, net.pae, net.yway) - goldPureY);
-    const waste = ywayToKpy(wasteY);
-    const goldG = kpyToGrams(ywayToKpy(goldPureY), kyatToGrams);
-    const craft = Number(item.craftsmanship_fee || 0) + Number(item.craftsmanship_profit_fee || 0);
-
-    const lines: string[] = [
-      `=== ${item.name_mm || item.name} ===`,
-      `Barcode: ${item.barcode}`,
-      `ရွှေရည်: ${isThai ? 'ထိုင်းရွှေ' : purity}`,
-      `အလေးချိန်: ${goldG.toFixed(goldG >= 10 ? 2 : 3)} g`,
-      `အလျော့တွက်: ${waste.pae > 0 ? `${waste.pae} ပဲ ` : ''}${waste.yway || 0} Y`,
-      `လက်ခ: ${craft.toLocaleString('en-US')}mmk`,
-    ];
-    return lines.join('\n');
-  };
-
-  const handleCopyTagText = async (item: InventoryItem) => {
-    try {
-      const text = getTagTextContent(item);
-      await navigator.clipboard.writeText(text);
-      setCopiedText(true);
-      setTimeout(() => setCopiedText(false), 2000);
-    } catch {
-      void dialog.alert(language === 'MM' ? 'ကော်ပီကူးယူ၍ မရပါ' : 'Failed to copy');
-    }
-  };
-
-  const handleDownloadTagText = (item: InventoryItem) => {
-    try {
-      const text = getTagTextContent(item);
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Tag-${item.barcode || 'item'}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch {
-      void dialog.alert(language === 'MM' ? 'ဖိုင်ဒေါင်းလုဒ် မအောင်မြင်ပါ' : 'Download failed');
-    }
-  };
 
   const handleDownloadTagImage = async (item: InventoryItem) => {
     if (!barcodePrintRef.current) return;
@@ -2266,31 +2199,11 @@ export const InventoryView: React.FC = () => {
                   type="button"
                   disabled={tagExporting}
                   onClick={() => tagItem && handleDownloadTagImage(tagItem)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
                   title="AIMO Mobile App ထဲ သွင်းထုတ်ရန် ဓာတ်ပုံအဖြစ် သိမ်းဆည်းခြင်း"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>{tagExporting ? 'ထုတ်ယူနေပါသည်…' : (language === 'MM' ? 'ပုံအဖြစ် ဒေါင်းလုဒ် (PNG)' : 'Save as Image')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => tagItem && handleCopyTagText(tagItem)}
-                  className="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold flex items-center space-x-1 transition-colors"
-                  title="ဖုန်း Notepad ထဲ ကူးထည့်ရန် စာသား Copy ယူခြင်း"
-                >
-                  {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedText ? (language === 'MM' ? 'ကူးပြီးပါပြီ' : 'Copied!') : (language === 'MM' ? 'စာသား ကော်ပီ' : 'Copy Text')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => tagItem && handleDownloadTagText(tagItem)}
-                  className="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold flex items-center space-x-1 transition-colors"
-                  title="Notepad (.txt) ဖိုင်အဖြစ် ဒေါင်းလုဒ်ဆွဲခြင်း"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>{language === 'MM' ? 'Notepad (.txt)' : '.txt'}</span>
+                  <span>{tagExporting ? 'ထုတ်ယူနေပါသည်…' : (language === 'MM' ? 'ပုံအဖြစ် ဒေါင်းလုဒ် (PNG)' : 'Save as Image (PNG)')}</span>
                 </button>
               </div>
 
