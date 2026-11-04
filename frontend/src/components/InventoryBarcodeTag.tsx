@@ -182,36 +182,39 @@ export function getBarcodeTagPageStyle(offsetY: number = 0): string {
   return `
 @page {
   size: 75mm 15mm;
-  margin: 0;
+  margin: 0 !important;
 }
 html, body {
   margin: 0 !important;
   padding: 0 !important;
   width: 75mm !important;
-  height: 15mm !important;
-  max-height: 15mm !important;
+  height: 14mm !important;
+  max-height: 14mm !important;
   overflow: hidden !important;
   background: #ffffff !important;
   color: #000000 !important;
   -webkit-print-color-adjust: exact !important;
   print-color-adjust: exact !important;
+  page-break-after: avoid !important;
+  break-after: avoid !important;
 }
 body {
   margin: 0 !important;
   padding: 0 !important;
   display: block !important;
   width: 75mm !important;
-  height: 15mm !important;
+  height: 14mm !important;
+  max-height: 14mm !important;
   overflow: hidden !important;
 }
 
 .barcode-tag-container {
   width: 75mm !important;
-  height: 15mm !important;
+  height: 14mm !important;
   max-width: 75mm !important;
-  max-height: 15mm !important;
+  max-height: 14mm !important;
   min-width: 75mm !important;
-  min-height: 15mm !important;
+  min-height: 14mm !important;
   box-sizing: border-box !important;
   position: relative !important;
   margin: 0 !important;
@@ -239,9 +242,9 @@ body {
   width: 48mm !important;
   max-width: 48mm !important;
   min-width: 48mm !important;
-  height: 15mm !important;
-  min-height: 15mm !important;
-  max-height: 15mm !important;
+  height: 14mm !important;
+  min-height: 14mm !important;
+  max-height: 14mm !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
@@ -257,14 +260,14 @@ body {
   flex: 0 0 24mm !important;
   width: 24mm !important;
   max-width: 24mm !important;
-  height: 15mm !important;
+  height: 14mm !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 0.2mm !important;
+  gap: 0.15mm !important;
   border-right: 0.25mm solid #000000 !important;
-  padding: 0.2mm 0.4mm 0.2mm 0 !important;
+  padding: 0.1mm 0.3mm 0.1mm 0 !important;
   margin: 0 !important;
   box-sizing: border-box !important;
 }
@@ -273,13 +276,13 @@ body {
   flex: 0 0 24mm !important;
   width: 24mm !important;
   max-width: 24mm !important;
-  height: 15mm !important;
+  height: 14mm !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 0.1mm !important;
-  padding: 0.2mm 0 0.2mm 0.4mm !important;
+  gap: 0.05mm !important;
+  padding: 0.1mm 0 0.1mm 0.3mm !important;
   margin: 0 !important;
   text-align: center !important;
   box-sizing: border-box !important;
@@ -288,7 +291,7 @@ body {
 .barcode-tag-tail {
   flex: 0 0 27mm !important;
   width: 27mm !important;
-  height: 15mm !important;
+  height: 14mm !important;
   visibility: hidden !important;
 }
 
@@ -306,17 +309,17 @@ body {
   width: 100% !important;
   max-width: 18mm !important;
   height: auto !important;
-  max-height: 7mm !important;
+  max-height: 6.2mm !important;
   display: block !important;
   margin: 0 auto !important;
 }
 
 .barcode-tag-code {
   font-family: ui-monospace, Consolas, monospace !important;
-  font-size: 6pt !important;
+  font-size: 5.6pt !important;
   font-weight: 700 !important;
-  letter-spacing: 0.03em !important;
-  line-height: 1.1 !important;
+  letter-spacing: 0.02em !important;
+  line-height: 1 !important;
   text-align: center !important;
   color: #000000 !important;
   white-space: nowrap !important;
@@ -328,9 +331,9 @@ body {
 }
 
 .barcode-tag-purity {
-  font-size: 7pt !important;
+  font-size: 6.4pt !important;
   font-weight: 800 !important;
-  line-height: 1.1 !important;
+  line-height: 1 !important;
   color: #000000 !important;
   letter-spacing: 0.02em !important;
   width: 100% !important;
@@ -341,7 +344,7 @@ body {
 
 .barcode-tag-row-value {
   font-family: ui-monospace, Consolas, monospace !important;
-  font-size: 5.8pt !important;
+  font-size: 5.2pt !important;
   font-weight: 700 !important;
   color: #000000 !important;
   text-align: center !important;
@@ -349,7 +352,7 @@ body {
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   width: 100% !important;
-  line-height: 1.12 !important;
+  line-height: 1.05 !important;
   margin: 0 !important;
   padding: 0 !important;
 }
