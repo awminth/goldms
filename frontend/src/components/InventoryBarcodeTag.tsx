@@ -369,10 +369,10 @@ body {
 }
 
 .barcode-tag-tail-left {
-  flex: 0 0 22mm !important;
-  width: 22mm !important;
-  min-width: 22mm !important;
-  max-width: 22mm !important;
+  flex: 0 0 23mm !important;
+  width: 23mm !important;
+  min-width: 23mm !important;
+  max-width: 23mm !important;
 }
 
 .barcode-tag-barcode {
