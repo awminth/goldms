@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { useGoldShop } from '../context/GoldShopContext';
 import { InventoryItem, GoldPurity } from '../types/gold';
 import {
@@ -37,6 +37,8 @@ import {
   Coins,
   Copy,
   Check,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 interface BarcodeScannerModalProps {
@@ -54,14 +56,14 @@ function playBeep() {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(2100, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.09);
+    osc.frequency.setValueAtTime(2200, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.08);
     gain.gain.setValueAtTime(0.35, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.09);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 0.1);
+    osc.stop(ctx.currentTime + 0.09);
   } catch {
     // Ignore audio permission errors
   }
@@ -98,6 +100,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
+
+  // Zoom control state
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [zoomRange, setZoomRange] = useState<{ min: number; max: number; step: number } | null>(null);
 
   // Recent scans list (session-only)
   const [recentScans, setRecentScans] = useState<Array<{ barcode: string; name: string; time: string }>>([]);
@@ -154,11 +160,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
         if (html5QrCodeRef.current.isScanning) {
           await html5QrCodeRef.current.stop();
         }
+        await html5QrCodeRef.current.clear();
       } catch (err) {
         console.warn('Error stopping scanner:', err);
       }
+      html5QrCodeRef.current = null;
       setIsScanning(false);
       setTorchOn(false);
+      setZoomRange(null);
     }
   }, []);
 
@@ -242,27 +251,56 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
       setCurrentCameraIndex(camIndex);
       const selectedCameraId = devices[camIndex].id;
 
-      if (!html5QrCodeRef.current) {
-        html5QrCodeRef.current = new Html5Qrcode('barcode-scanner-viewport');
+      // Stop previous instance cleanly
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+          }
+          await html5QrCodeRef.current.clear();
+        } catch {
+          // ignore
+        }
+        html5QrCodeRef.current = null;
       }
 
+      // Configure hardware-accelerated 1D & QR barcode detector
+      html5QrCodeRef.current = new Html5Qrcode('barcode-scanner-viewport', {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.QR_CODE,
+        ],
+        useBarCodeDetectorIfSupported: true,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true,
+        },
+        verbose: false,
+      });
+
       const scanner = html5QrCodeRef.current;
-      if (scanner.isScanning) {
-        await scanner.stop();
-      }
 
       await scanner.start(
         selectedCameraId,
         {
-          fps: 15,
-          // Wide rectangle scan box optimal for 1D dumbbell tags
-          qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-            const boxWidth = Math.min(viewfinderWidth * 0.85, 320);
-            const boxHeight = Math.min(boxWidth * 0.55, 170);
-            return { width: Math.round(boxWidth), height: Math.round(boxHeight) };
+          fps: 20, // High frame rate for instant recognition
+          videoConstraints: {
+            facingMode: { ideal: 'environment' },
+            width: { min: 1280, ideal: 1920 },
+            height: { min: 720, ideal: 1080 },
+            advanced: [{ focusMode: 'continuous' } as any],
           },
-          aspectRatio: 1.33,
+          // Generous scan box so slight tilts or offsets still get detected
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const width = Math.min(Math.round(viewfinderWidth * 0.92), 360);
+            const height = Math.min(Math.round(width * 0.6), Math.round(viewfinderHeight * 0.75));
+            return { width, height };
+          },
+          disableFlip: true,
         },
         (decodedText) => {
           void handleBarcodeFound(decodedText);
@@ -274,14 +312,38 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
 
       setIsScanning(true);
 
-      // Check torch capabilities
+      // Check torch and zoom capabilities
       try {
         const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & {
           torch?: boolean;
+          zoom?: { min: number; max: number; step: number };
         };
+
         setHasTorch(Boolean(capabilities && 'torch' in capabilities));
+
+        if (capabilities && 'zoom' in capabilities && capabilities.zoom) {
+          const zMin = capabilities.zoom.min || 1;
+          const zMax = capabilities.zoom.max || 5;
+          const zStep = capabilities.zoom.step || 0.1;
+          setZoomRange({ min: zMin, max: zMax, step: zStep });
+
+          // Default to a comfortable 1.5x - 2.0x zoom for tiny jewelry barcodes if available
+          const defaultZoom = Math.min(Math.max(zMin, 1.8), zMax);
+          try {
+            await scanner.applyVideoConstraints({
+              advanced: [{ zoom: defaultZoom } as any],
+            });
+            setZoomLevel(defaultZoom);
+          } catch {
+            setZoomLevel(1);
+          }
+        } else {
+          setZoomRange(null);
+          setZoomLevel(1);
+        }
       } catch {
         setHasTorch(false);
+        setZoomRange(null);
       }
     } catch (err: unknown) {
       console.error('Camera start error:', err);
@@ -295,6 +357,20 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     }
   }, [handleBarcodeFound]);
 
+  // Set Zoom helper
+  const handleSetZoom = async (val: number) => {
+    if (!html5QrCodeRef.current || !zoomRange) return;
+    try {
+      const clamped = Math.min(Math.max(zoomRange.min, val), zoomRange.max);
+      await html5QrCodeRef.current.applyVideoConstraints({
+        advanced: [{ zoom: clamped } as any],
+      });
+      setZoomLevel(clamped);
+    } catch (err) {
+      console.warn('Failed to set zoom:', err);
+    }
+  };
+
   // Switch camera front/back
   const switchCamera = async () => {
     if (cameras.length <= 1) return;
@@ -306,9 +382,16 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
       await html5QrCodeRef.current.start(
         cameras[nextIndex].id,
         {
-          fps: 15,
-          qrbox: { width: 280, height: 160 },
-          aspectRatio: 1.33,
+          fps: 20,
+          videoConstraints: {
+            width: { min: 1280, ideal: 1920 },
+            height: { min: 720, ideal: 1080 },
+          },
+          qrbox: (w, h) => ({
+            width: Math.min(Math.round(w * 0.92), 360),
+            height: Math.min(Math.round(w * 0.55), Math.round(h * 0.7)),
+          }),
+          disableFlip: true,
         },
         (decodedText) => {
           void handleBarcodeFound(decodedText);
@@ -336,7 +419,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
   useEffect(() => {
     if (isOpen) {
       if (activeMode === 'camera' && !scannedItem) {
-        // slight timeout so DOM container is rendered
         const t = setTimeout(() => {
           void startCamera();
         }, 150);
@@ -357,6 +439,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
           if (html5QrCodeRef.current.isScanning) {
             void html5QrCodeRef.current.stop();
           }
+          void html5QrCodeRef.current.clear();
         } catch {
           // ignore
         }
@@ -449,7 +532,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                   <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
                     <span>{language === 'MM' ? 'Barcode Scanner' : 'Barcode Scanner'}</span>
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                      Mobile & Desktop
+                      Smart AI Detector
                     </span>
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -543,7 +626,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                           {/* Optical Target Overlay */}
                           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
                             {/* Scanning Guide Box */}
-                            <div className="relative w-[82%] h-[55%] border-2 border-amber-400/80 rounded-xl shadow-[0_0_15px_rgba(212,175,55,0.4)] flex items-center justify-center">
+                            <div className="relative w-[88%] h-[58%] border-2 border-amber-400/80 rounded-xl shadow-[0_0_15px_rgba(212,175,55,0.4)] flex items-center justify-center">
                               {/* Animated Red Laser Line */}
                               <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-red-500 to-transparent shadow-[0_0_8px_#ef4444] animate-scanner-laser" />
 
@@ -554,55 +637,91 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                               <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-amber-300" />
                             </div>
 
-                            <span className="mt-2 text-[11px] font-medium text-white/90 bg-black/60 px-2.5 py-0.5 rounded-full backdrop-blur-xs">
+                            <span className="mt-2 text-[11px] font-medium text-white/95 bg-black/70 px-3 py-0.5 rounded-full backdrop-blur-xs">
                               {language === 'MM' ? 'Barcode ကို အကွက်ထဲ တည့်တည့်ချိန်ပေးပါ' : 'Align barcode within frame'}
                             </span>
                           </div>
                         </div>
 
-                        {/* Camera Quick Controls */}
-                        <div className="mt-3 flex items-center gap-3">
-                          {cameras.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => void switchCamera()}
-                              className="px-3.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                              title="ကင်မရာ ရှေ့/နောက် ပြောင်းမည်"
-                            >
-                              <SwitchCamera className="w-4 h-4" />
-                              <span>{language === 'MM' ? 'ကင်မရာ ပြောင်းမည်' : 'Switch Camera'}</span>
-                            </button>
+                        {/* 💡 Scanner Controls: Zoom, Flashlight, Camera Switch */}
+                        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 w-full max-w-md">
+                          {/* Zoom Presets (Crucial for tiny jewelry stickers!) */}
+                          {zoomRange && (
+                            <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl gap-1">
+                              <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 px-1.5 flex items-center gap-0.5">
+                                <ZoomIn className="w-3 h-3 text-amber-500" />
+                                <span>Zoom:</span>
+                              </span>
+                              {[1, 1.5, 2, 2.5].map((z) => {
+                                if (z < zoomRange.min || z > zoomRange.max) return null;
+                                const isCurrent = Math.abs(zoomLevel - z) < 0.15;
+                                return (
+                                  <button
+                                    key={z}
+                                    type="button"
+                                    onClick={() => void handleSetZoom(z)}
+                                    className={`px-2 py-1 rounded-lg text-xs font-bold font-mono transition-all ${
+                                      isCurrent
+                                        ? 'bg-amber-500 text-white shadow-xs scale-105'
+                                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                    }`}
+                                  >
+                                    {z}x
+                                  </button>
+                                );
+                              })}
+                            </div>
                           )}
 
+                          {/* Flashlight Button */}
                           {hasTorch && (
                             <button
                               type="button"
                               onClick={() => void toggleTorch()}
-                              className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                                 torchOn
                                   ? 'bg-amber-500 text-white'
                                   : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
                               }`}
                               title="မီးဖွင့်/ပိတ်မည်"
                             >
-                              {torchOn ? <Flashlight className="w-4 h-4" /> : <FlashlightOff className="w-4 h-4" />}
-                              <span>{torchOn ? 'မီးပိတ်မည်' : 'မီးဖွင့်မည်'}</span>
+                              {torchOn ? <Flashlight className="w-3.5 h-3.5" /> : <FlashlightOff className="w-3.5 h-3.5" />}
+                              <span>{torchOn ? 'မီးပိတ်' : 'မီးဖွင့်'}</span>
                             </button>
                           )}
 
+                          {/* Switch Camera */}
+                          {cameras.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => void switchCamera()}
+                              className="px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                              title="ကင်မရာ ရှေ့/နောက် ပြောင်းမည်"
+                            >
+                              <SwitchCamera className="w-3.5 h-3.5" />
+                              <span>{language === 'MM' ? 'ကင်မရာ ပြောင်း' : 'Camera'}</span>
+                            </button>
+                          )}
+
+                          {/* Restart */}
                           <button
                             type="button"
                             onClick={() => {
                               void stopCamera();
                               void startCamera();
                             }}
-                            className="px-3.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                            className="px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
                             title="ကင်မရာ ပြန်စမည်"
                           >
-                            <RotateCcw className="w-4 h-4" />
-                            <span>{language === 'MM' ? 'ကင်မရာ Refresh' : 'Restart'}</span>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>{language === 'MM' ? 'Refresh' : 'Restart'}</span>
                           </button>
                         </div>
+
+                        {/* Scanning Tip Banner */}
+                        <p className="mt-2 text-[11px] text-amber-800/90 dark:text-amber-300/90 text-center max-w-sm px-2">
+                          💡 အကြံပြုချက်: ဖုန်းကို ပစ္စည်းနှင့် ၁ ပေခန့် ခွာထားပြီး 2x Zoom (သို့မဟုတ်) မီးဖွင့်၍ ဖတ်ပါက ပိုမိုမြန်ဆန်တိကျပါသည်
+                        </p>
                       </div>
                     )}
                   </div>
