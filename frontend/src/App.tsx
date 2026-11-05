@@ -20,6 +20,7 @@ import { FinancialReportView } from './components/FinancialReportView';
 import { SalesPerformanceReportView } from './components/SalesPerformanceReportView';
 import { SetupView } from './components/SetupView';
 import { VoucherModal } from './components/VoucherModal';
+import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 import { softwareSystemName } from './branding';
 import {
@@ -400,6 +401,7 @@ const MainLayout: React.FC = () => {
         </main>
 
         <VoucherModal />
+        <BarcodeScannerModal onNavigate={setActiveTab} />
 
         <footer className="sticky bottom-0 z-20 mt-auto border-t border-line dark:border-gray-800 bg-panel/95 dark:bg-[#161616]/95 backdrop-blur supports-[backdrop-filter]:bg-panel/90 dark:supports-[backdrop-filter]:bg-[#161616]/90 py-3 px-4 sm:px-6 lg:px-8 print:hidden shadow-[0_-4px_12px_rgba(40,35,25,0.06)]">
           <div className="max-w-7xl mx-auto flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">

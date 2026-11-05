@@ -602,6 +602,19 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   const handleScanBarcodeRef = useRef(handleScanBarcode);
   handleScanBarcodeRef.current = handleScanBarcode;
 
+  // Auto-add pending barcode sent from BarcodeScannerModal
+  useEffect(() => {
+    try {
+      const pending = sessionStorage.getItem('goldms_pos_pending_barcode');
+      if (pending) {
+        sessionStorage.removeItem('goldms_pos_pending_barcode');
+        handleScanBarcode(pending);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Global Barcode Scanner listener: catches rapid bursts from hardware scanners anywhere on screen
   useEffect(() => {
     let scanBuffer = '';

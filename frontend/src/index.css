@@ -421,11 +421,11 @@
   max-height: 9.5mm;
 }
 .barcode-tag-code {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 5pt;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 6.4pt;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1;
+  letter-spacing: 0.03em;
+  line-height: 1.1;
   text-align: center;
   color: #000000;
   white-space: nowrap;
@@ -434,17 +434,18 @@
   max-width: 100%;
 }
 .barcode-tag-purity {
-  font-size: 5.6pt;
+  font-family: 'SF Mono', "Noto Sans Myanmar", "Myanmar Text", system-ui, sans-serif;
+  font-size: 7.4pt;
   font-weight: 800;
-  line-height: 1;
+  line-height: 1.1;
   color: #000000;
   letter-spacing: 0.02em;
   width: 100%;
   text-align: center;
 }
 .barcode-tag-row-value {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 4.8pt;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 6.0pt;
   font-weight: 700;
   color: #000000;
   text-align: center;
@@ -452,6 +453,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
+  line-height: 1.15;
+}
+.barcode-tag-head-col.is-dense .barcode-tag-purity {
+  font-size: 6.4pt;
+}
+.barcode-tag-head-col.is-dense .barcode-tag-row-value {
+  font-size: 5.2pt;
   line-height: 1.05;
 }
 
@@ -795,4 +803,52 @@
   text-overflow: ellipsis;
   width: 100%;
   line-height: 1.08;
+}
+
+/* Barcode Scanner Animations */
+@keyframes scanner-laser {
+  0% {
+    top: 5%;
+    opacity: 0.8;
+  }
+  50% {
+    top: 90%;
+    opacity: 1;
+  }
+  100% {
+    top: 5%;
+    opacity: 0.8;
+  }
+}
+
+.animate-scanner-laser {
+  animation: scanner-laser 2.2s ease-in-out infinite;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+@keyframes bounce-short {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.animate-bounce-short {
+  animation: bounce-short 1.5s ease-in-out infinite;
 }

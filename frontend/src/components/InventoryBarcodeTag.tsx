@@ -148,13 +148,15 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
           ]
         : [fmtGram(goldG), fmtWastage(waste.pae, waste.yway), fmtMmk(craftMmk)];
 
+    const isDense = rightValues.length > 3;
+
     const barcodeCol = (
       <div key="col-barcode" className="barcode-tag-head-col barcode-tag-head-left barcode-tag-col-barcode">
         <div className="barcode-tag-barcode">
           <BarcodeLabel
             value={item.barcode}
-            height={14}
-            barWidth={0.8}
+            height={15}
+            barWidth={0.82}
             margin={0}
             displayValue={false}
             fontSize={6}
@@ -166,7 +168,7 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
     );
 
     const detailsCol = (
-      <div key="col-details" className="barcode-tag-head-col barcode-tag-head-right barcode-tag-col-details">
+      <div key="col-details" className={`barcode-tag-head-col barcode-tag-head-right barcode-tag-col-details ${isDense ? 'is-dense' : ''}`}>
         <div className="barcode-tag-purity">{isThai ? 'ထိုင်း' : purityLabel}</div>
         {rightValues.map((v, i) => (
           <div key={`${i}-${v}`} className="barcode-tag-row-value">
@@ -395,11 +397,11 @@ body {
 }
 
 .barcode-tag-code {
-  font-family: ui-monospace, Consolas, monospace !important;
-  font-size: 5.6pt !important;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace !important;
+  font-size: 6.8pt !important;
   font-weight: 700 !important;
-  letter-spacing: 0.02em !important;
-  line-height: 1 !important;
+  letter-spacing: 0.03em !important;
+  line-height: 1.1 !important;
   text-align: center !important;
   color: #000000 !important;
   white-space: nowrap !important;
@@ -411,9 +413,10 @@ body {
 }
 
 .barcode-tag-purity {
-  font-size: 6.4pt !important;
+  font-family: 'SF Mono', "Noto Sans Myanmar", "Myanmar Text", system-ui, sans-serif !important;
+  font-size: 7.8pt !important;
   font-weight: 800 !important;
-  line-height: 1 !important;
+  line-height: 1.1 !important;
   color: #000000 !important;
   letter-spacing: 0.02em !important;
   width: 100% !important;
@@ -423,8 +426,8 @@ body {
 }
 
 .barcode-tag-row-value {
-  font-family: ui-monospace, Consolas, monospace !important;
-  font-size: 5.2pt !important;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace !important;
+  font-size: 6.4pt !important;
   font-weight: 700 !important;
   color: #000000 !important;
   text-align: center !important;
@@ -432,9 +435,18 @@ body {
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   width: 100% !important;
-  line-height: 1.05 !important;
+  line-height: 1.15 !important;
   margin: 0 !important;
   padding: 0 !important;
+}
+
+.barcode-tag-head-col.is-dense .barcode-tag-purity {
+  font-size: 6.6pt !important;
+}
+
+.barcode-tag-head-col.is-dense .barcode-tag-row-value {
+  font-size: 5.3pt !important;
+  line-height: 1.05 !important;
 }
 `;
 }
