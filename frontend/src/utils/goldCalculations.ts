@@ -107,7 +107,7 @@ export function ywayToKpy(totalYway: number): WeightKPY {
   const kyat = Math.floor(safeTotal / KYAT_TO_YWAY);
   const rem1 = safeTotal - (kyat * KYAT_TO_YWAY);
   const pae = Math.floor(rem1 / PAE_TO_YWAY);
-  const yway = Number((rem1 - (pae * PAE_TO_YWAY)).toFixed(2));
+  const yway = Number((rem1 - (pae * PAE_TO_YWAY)).toFixed(3));
 
   return { kyat, pae, yway };
 }
@@ -115,8 +115,17 @@ export function ywayToKpy(totalYway: number): WeightKPY {
 /** Convert Kyat-Pae-Yway to Grams (uses Settings factor when provided) */
 export function kpyToGrams(kpy: WeightKPY, kyatToGrams: number = KYAT_TO_GRAMS): number {
   const factor = Number(kyatToGrams) > 0 ? Number(kyatToGrams) : KYAT_TO_GRAMS;
-  const kyats = kpyToYway(kpy.kyat, kpy.pae, kpy.yway) / KYAT_TO_YWAY;
-  return Number((kyats * factor).toFixed(3));
+  const totalYway = kpyToYway(kpy.kyat, kpy.pae, kpy.yway);
+  const rawGrams = (totalYway / KYAT_TO_YWAY) * factor;
+  // Recover exact 2-decimal gram inputs that were previously rounded to 2-decimal yway (e.g. 2.99g -> 7.06Y, 2.3g -> 1.73Y)
+  if (Number(totalYway.toFixed(2)) === Number(totalYway.toFixed(3))) {
+    const g2 = Number(rawGrams.toFixed(2));
+    const ywayFromG2 = Number(((g2 / factor) * KYAT_TO_YWAY).toFixed(2));
+    if (ywayFromG2 === Number(totalYway.toFixed(2))) {
+      return g2;
+    }
+  }
+  return Number(rawGrams.toFixed(3));
 }
 
 /** Convert Grams to Kyat-Pae-Yway (uses Settings factor when provided) */
@@ -307,18 +316,20 @@ export function toBurmeseNumber(num: number | string): string {
 /** Format KPY display in Myanmar language (e.g., ၁ ကျပ် ၂ ပဲ ၃.၅ ရွေး) */
 export function formatKPYMyanmar(kpy: WeightKPY): string {
   const parts: string[] = [];
+  const y = Number(Number(kpy.yway || 0).toFixed(2));
   if (kpy.kyat > 0) parts.push(`${toBurmeseNumber(kpy.kyat)} ကျပ်`);
   if (kpy.pae > 0) parts.push(`${toBurmeseNumber(kpy.pae)} ပဲ`);
-  if (kpy.yway > 0 || parts.length === 0) parts.push(`${toBurmeseNumber(kpy.yway)} ရွေး`);
+  if (y > 0 || parts.length === 0) parts.push(`${toBurmeseNumber(y)} ရွေး`);
   return parts.join(' ');
 }
 
 /** Format KPY display in English (e.g., 1 K 2 P 3.5 Y) */
 export function formatKPYEnglish(kpy: WeightKPY): string {
   const parts: string[] = [];
+  const y = Number(Number(kpy.yway || 0).toFixed(2));
   if (kpy.kyat > 0) parts.push(`${kpy.kyat} K`);
   if (kpy.pae > 0) parts.push(`${kpy.pae} P`);
-  if (kpy.yway > 0 || parts.length === 0) parts.push(`${kpy.yway} Y`);
+  if (y > 0 || parts.length === 0) parts.push(`${y} Y`);
   return parts.join(' ');
 }
 

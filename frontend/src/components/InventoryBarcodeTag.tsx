@@ -112,7 +112,11 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
     const waste = ywayToKpy(wasteYway);
 
     const grossG = kpyToGrams(gross, kyatToGrams);
-    const goldG = kpyToGrams(goldPure, kyatToGrams);
+    const gemG = gemYway > 0 ? kpyToGrams(gem, kyatToGrams) : 0;
+    const goldG =
+      gemYway > 0
+        ? Number(Math.max(0, grossG - gemG).toFixed(3))
+        : kpyToGrams(goldPure, kyatToGrams);
     const hasStone =
       gemYway > 0 ||
       Number(item.stone_price || 0) > 0 ||
