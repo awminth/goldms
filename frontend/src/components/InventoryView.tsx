@@ -133,6 +133,24 @@ export const InventoryView: React.FC = () => {
     },
   });
 
+  const formBarcodePrintRef = useRef<HTMLDivElement>(null);
+  const handlePrintFormBarcodeTag = useReactToPrint({
+    contentRef: formBarcodePrintRef,
+    documentTitle: '',
+    pageStyle: getBarcodeTagPageStyle(1.5, 0, false),
+    ignoreGlobalStyles: true,
+    onBeforePrint: async () => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      await new Promise<void>((resolve) => {
+        window.setTimeout(() => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }, 30);
+      });
+    },
+  });
+
   const [tagExporting, setTagExporting] = useState(false);
 
   const handleDownloadTagImage = async (item: InventoryItem) => {
@@ -821,6 +839,48 @@ export const InventoryView: React.FC = () => {
 
   const fmtBaht = (n: number) =>
     `${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ฿`;
+
+  const formPreviewItem: InventoryItem = {
+    id: editingItemId || 'preview',
+    barcode: formBarcode || '000000',
+    category: isThaiEntry ? 'THAI_GOLD' : formCategory,
+    name: formNameMM.trim() || 'Preview',
+    name_mm: formNameMM.trim() || 'Preview',
+    weight_kyat: Number(formGrossKyat || 0),
+    weight_pae: Number(formGrossPae || 0),
+    weight_yway: Number(formGrossYway || 0),
+    gemstone_weight_kyat: isThaiEntry ? 0 : Number(formGemKyat || 0),
+    gemstone_weight_pae: isThaiEntry ? 0 : Number(formGemPae || 0),
+    gemstone_weight_yway: isThaiEntry ? 0 : Number(formGemYway || 0),
+    craft_deduction_pae: isThaiEntry ? 0 : Number(formCraftDedPae || 0),
+    craft_deduction_yway: isThaiEntry ? 0 : Number(formCraftDedYway || 0),
+    profit_deduction_pae: isThaiEntry ? 0 : Number(formProfitDedPae || 0),
+    profit_deduction_yway: isThaiEntry ? 0 : Number(formProfitDedYway || 0),
+    deduction_pae: isThaiEntry ? 0 : totalDedPae,
+    deduction_yway: isThaiEntry ? 0 : totalDedYway,
+    net_weight_kyat: computedNet.kyat,
+    net_weight_pae: computedNet.pae,
+    net_weight_yway: computedNet.yway,
+    purity: formPurity,
+    item_type: isThaiEntry ? ('THAI_GOLD' as ItemType) : formItemType,
+    thai_weight_unit: isThaiEntry ? formThaiGrams : undefined,
+    craftsmanship_fee: isThaiEntry
+      ? Math.round(bahtToMmk(Number(formCraftsmanship || 0), sellRate))
+      : Math.round(Number(formCraftsmanship || 0)),
+    craftsmanship_profit_fee: isThaiEntry
+      ? Math.round(bahtToMmk(Number(formCraftProfit || 0), sellRate))
+      : Math.round(Number(formCraftProfit || 0)),
+    stone_price: isThaiEntry ? 0 : Number(formStonePrice || 0),
+    stone_profit_price: isThaiEntry ? 0 : Number(formStoneProfit || 0),
+    selling_price_estimated: estimatedTotalSelling,
+    craftsmanship_fee_baht: isThaiEntry ? Number(formCraftsmanship || 0) : 0,
+    craftsmanship_profit_fee_baht: isThaiEntry ? Number(formCraftProfit || 0) : 0,
+    selling_price_baht: isThaiEntry ? Number(thaiBahtBreakdown?.totalPrice || 0) : 0,
+    baht_mmk_rate: isThaiEntry ? sellRate : undefined,
+    thai_gold_baht_snapshot: isThaiEntry ? thaiBahtRate : undefined,
+    status: 'IN_STOCK',
+    created_at: '',
+  };
 
   // Save item
   const handleSaveItem = async (e: React.FormEvent) => {
@@ -2054,6 +2114,47 @@ export const InventoryView: React.FC = () => {
                 )}
               </div>
 
+              {/* Live Barcode Tag Preview (Exact 75mm × 15mm Print Layout) */}
+              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-[#141414] border border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center space-x-1.5 text-xs font-bold text-gray-800 dark:text-gray-200">
+                    <Printer className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <span>
+                      {language === 'MM'
+                        ? 'ဘားကုဒ်တံဆိပ် နမူနာ (Barcode Tag Preview - 75mm × 15mm)'
+                        : 'Barcode Tag Preview (75mm × 15mm)'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    {language === 'MM'
+                      ? 'အချက်အလက်ဖြည့်သွင်းနေစဉ် တိုက်ရိုက်ကြည့်ရှုပြီး ချက်ချင်း Print ထုတ်ယူနိုင်ပါသည်'
+                      : 'Live preview updates as you type — print directly anytime'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center sm:justify-end gap-3 overflow-x-auto py-1">
+                  <InventoryBarcodeTag
+                    ref={formBarcodePrintRef}
+                    item={formPreviewItem}
+                    kyatToGrams={kyatToGrams}
+                    bahtBuyRate={sellRate}
+                    offsetY={1.5}
+                    offsetX={0}
+                    printerModel="xprinter"
+                    headOrder="text_first"
+                    rotate180={false}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handlePrintFormBarcodeTag()}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center space-x-1.5 shadow-sm transition shrink-0"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>{language === 'MM' ? 'ကတ်ပြား ပရင့်ထုတ်' : 'Print Tag'}</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Total Summary Footer */}
               <div className="p-3 rounded-xl bg-[#FAF8F2] dark:bg-[#221F18] border border-[#D4AF37]/30 flex items-center justify-between">
                 <div>
@@ -2080,20 +2181,30 @@ export const InventoryView: React.FC = () => {
               </div>
               </div>
 
-              <div className="px-5 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-800 flex justify-end space-x-2 shrink-0 bg-white dark:bg-[#1A1A1A]">
+              <div className="px-5 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-white dark:bg-[#1A1A1A]">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  onClick={() => handlePrintFormBarcodeTag()}
+                  className="px-4 py-2 rounded-xl border border-[#D4AF37] bg-[#FAF8F2] dark:bg-[#221F18] text-[#996515] dark:text-amber-300 text-xs font-bold hover:bg-[#D4AF37]/15 flex items-center space-x-1.5 transition"
                 >
-                  {language === 'MM' ? 'ပယ်ဖျက်' : 'Cancel'}
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>{language === 'MM' ? 'ကတ်ပြား ပရင့်ထုတ်' : 'Print Tag'}</span>
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#D4AF37] text-white text-xs font-bold hover:bg-[#C5A059] transition shadow-md"
-                >
-                  {language === 'MM' ? 'စာရင်းသွင်းမည်' : 'Save Item'}
-                </button>
+                <div className="flex items-center space-x-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    {language === 'MM' ? 'ပယ်ဖျက်' : 'Cancel'}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-[#D4AF37] text-white text-xs font-bold hover:bg-[#C5A059] transition shadow-md"
+                  >
+                    {language === 'MM' ? 'စာရင်းသွင်းမည်' : 'Save Item'}
+                  </button>
+                </div>
               </div>
 
             </form>
