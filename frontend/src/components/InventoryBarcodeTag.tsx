@@ -310,10 +310,10 @@ body {
 }
 
 .barcode-tag-head {
-  flex: 0 0 48mm !important;
-  width: 48mm !important;
-  max-width: 48mm !important;
-  min-width: 48mm !important;
+  flex: 0 0 47.2mm !important;
+  width: 47.2mm !important;
+  max-width: 47.2mm !important;
+  min-width: 47.2mm !important;
   height: 14mm !important;
   min-height: 14mm !important;
   max-height: 14mm !important;
@@ -335,10 +335,10 @@ body {
 }
 
 .barcode-tag-head-col {
-  flex: 0 0 24mm !important;
-  width: 24mm !important;
-  max-width: 24mm !important;
-  min-width: 24mm !important;
+  flex: 0 0 23.6mm !important;
+  width: 23.6mm !important;
+  max-width: 23.6mm !important;
+  min-width: 23.6mm !important;
   height: 14mm !important;
   min-height: 14mm !important;
   max-height: 14mm !important;
@@ -361,20 +361,20 @@ body {
 }
 
 .barcode-tag-tail {
-  flex: 0 0 27mm !important;
-  width: 27mm !important;
-  min-width: 27mm !important;
-  max-width: 27mm !important;
+  flex: 0 0 27.8mm !important;
+  width: 27.8mm !important;
+  min-width: 27.8mm !important;
+  max-width: 27.8mm !important;
   height: 14mm !important;
   box-sizing: border-box !important;
   visibility: hidden !important;
 }
 
 .barcode-tag-tail-left {
-  flex: 0 0 25mm !important;
-  width: 25mm !important;
-  min-width: 25mm !important;
-  max-width: 25mm !important;
+  flex: 0 0 27.8mm !important;
+  width: 27.8mm !important;
+  min-width: 27.8mm !important;
+  max-width: 27.8mm !important;
 }
 
 .barcode-tag-barcode {
