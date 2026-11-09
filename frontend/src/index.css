@@ -308,6 +308,9 @@
 .barcode-tag-container.tag-dumbbell .barcode-tag-head .barcode-tag-head-col:first-child {
   border-right: 0.3mm solid #000000;
 }
+.barcode-tag-container.tag-dumbbell .barcode-tag-head .barcode-tag-head-col:last-child {
+  border-right: none;
+}
 .barcode-tag-container.tag-dumbbell .barcode-tag-head-left {
   flex: 0 0 24mm;
   width: 24mm;
@@ -317,7 +320,6 @@
   align-items: center;
   justify-content: center;
   gap: 0.2mm;
-  border-right: 0.3mm solid #000000;
   padding-right: 0.4mm;
   box-sizing: border-box;
 }
@@ -345,10 +347,10 @@
   position: relative;
 }
 .barcode-tag-container.tag-dumbbell .barcode-tag-tail.barcode-tag-tail-left {
-  flex: 0 0 23mm;
-  width: 23mm;
-  min-width: 23mm;
-  max-width: 23mm;
+  flex: 0 0 25mm;
+  width: 25mm;
+  min-width: 25mm;
+  max-width: 25mm;
 }
 .barcode-tag-container.tag-dumbbell .barcode-tag-tail-inner {
   width: 100%;

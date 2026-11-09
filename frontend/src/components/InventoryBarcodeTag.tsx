@@ -327,11 +327,11 @@ body {
 }
 
 .barcode-tag-head-leftside {
-  border-right: 0.25mm dashed #000000 !important;
+  border-right: none !important;
 }
 
 .barcode-tag-head-rightside {
-  border-left: 0.25mm dashed #000000 !important;
+  border-left: none !important;
 }
 
 .barcode-tag-head-col {
@@ -371,10 +371,10 @@ body {
 }
 
 .barcode-tag-tail-left {
-  flex: 0 0 23mm !important;
-  width: 23mm !important;
-  min-width: 23mm !important;
-  max-width: 23mm !important;
+  flex: 0 0 25mm !important;
+  width: 25mm !important;
+  min-width: 25mm !important;
+  max-width: 25mm !important;
 }
 
 .barcode-tag-barcode {

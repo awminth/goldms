@@ -119,11 +119,34 @@ export const InventoryView: React.FC = () => {
   } = useGoldShop();
   const dialog = useDialog();
 
+  const [tagOffsetX, setTagOffsetX] = useState<number>(() => {
+    const saved = localStorage.getItem('goldms_tag_offset_x');
+    const parsed = saved !== null ? Number(saved) : 0;
+    return Number.isFinite(parsed) ? parsed : 0;
+  });
+  const [tagOffsetY, setTagOffsetY] = useState<number>(() => {
+    const saved = localStorage.getItem('goldms_tag_offset_y');
+    const parsed = saved !== null ? Number(saved) : 1.5;
+    return Number.isFinite(parsed) ? parsed : 1.5;
+  });
+
+  const updateTagOffsetX = (val: number) => {
+    const rounded = Math.round(val * 2) / 2;
+    setTagOffsetX(rounded);
+    localStorage.setItem('goldms_tag_offset_x', String(rounded));
+  };
+
+  const updateTagOffsetY = (val: number) => {
+    const rounded = Math.round(val * 2) / 2;
+    setTagOffsetY(rounded);
+    localStorage.setItem('goldms_tag_offset_y', String(rounded));
+  };
+
   const barcodePrintRef = useRef<HTMLDivElement>(null);
   const handlePrintBarcodeTag = useReactToPrint({
     contentRef: barcodePrintRef,
     documentTitle: '',
-    pageStyle: getBarcodeTagPageStyle(1.5, 0, false),
+    pageStyle: getBarcodeTagPageStyle(tagOffsetY, tagOffsetX, false),
     // Avoid global voucher @media print rules (visibility/absolute) breaking sticker layout
     ignoreGlobalStyles: true,
     onBeforePrint: async () => {
@@ -2124,8 +2147,8 @@ export const InventoryView: React.FC = () => {
             <div className="mt-4 flex flex-col gap-3">
               <p className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800/60 leading-relaxed">
                 {language === 'MM'
-                  ? '💡 Xprinter XP-410B (75mm × 15mm) စက္ကူဆိုဒ်၊ Margins: None သတ်မှတ်ပြီး ထုတ်ယူနိုင်ပါသည်။'
-                  : '💡 Xprinter XP-410B (75mm × 15mm) stock, Margins: None.'}
+                  ? '💡 Xprinter XP-410B စက်အတွင်းရှိ စက္ကူလမ်းကြောင်းထိန်း ကလစ် (Paper Guides) နှစ်ဖက်ကို စက္ကူလိပ်နှင့် ကပ်နေအောင် ညှပ်ထားပေးပါ (စက္ကူလိပ် ဘယ်/ညာ မရွေ့စေရန်)။ အောက်ပါ ဘယ်/ညာ (↔) ခလုတ်ဖြင့်လည်း အသေ (Fixed) ချိန်ညှိထားနိုင်ပါသည်။'
+                  : '💡 Lock the paper guides snugly against the roll inside Xprinter XP-410B. Use the X/Y controls below to lock fixed alignment.'}
               </p>
 
               {/* Preview (screen) */}
@@ -2138,12 +2161,78 @@ export const InventoryView: React.FC = () => {
                   item={tagItem}
                   kyatToGrams={kyatToGrams}
                   bahtBuyRate={resolveBahtMmkRate(shopSettings)}
-                  offsetY={1.5}
-                  offsetX={0}
+                  offsetY={tagOffsetY}
+                  offsetX={tagOffsetX}
                   printerModel="xprinter"
                   headOrder="text_first"
                   rotate180={false}
                 />
+              </div>
+
+              {/* Persistent X/Y Position Calibration (Saved in localStorage) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-gray-600 dark:text-gray-300">
+                    {language === 'MM' ? '↔ ဘယ်/ညာ:' : '↔ Left/Right:'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updateTagOffsetX(tagOffsetX - 0.5)}
+                    className="px-2 py-0.5 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 font-bold hover:bg-gray-100 dark:hover:bg-gray-700"
+                    title="ဘယ်ဘက်သို့ 0.5mm ရွှေ့ရန်"
+                  >
+                    ◀
+                  </button>
+                  <span className="font-mono font-bold min-w-[3.4rem] text-center text-gray-800 dark:text-gray-200">
+                    {tagOffsetX > 0 ? `+${tagOffsetX}` : tagOffsetX}mm
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updateTagOffsetX(tagOffsetX + 0.5)}
+                    className="px-2 py-0.5 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 font-bold hover:bg-gray-100 dark:hover:bg-gray-700"
+                    title="ညာဘက်သို့ 0.5mm ရွှေ့ရန်"
+                  >
+                    ▶
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-gray-600 dark:text-gray-300">
+                    {language === 'MM' ? '↕ အပေါ်/အောက်:' : '↕ Up/Down:'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updateTagOffsetY(tagOffsetY - 0.5)}
+                    className="px-2 py-0.5 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 font-bold hover:bg-gray-100 dark:hover:bg-gray-700"
+                    title="အပေါ်သို့ 0.5mm ရွှေ့ရန်"
+                  >
+                    ▲
+                  </button>
+                  <span className="font-mono font-bold min-w-[3.4rem] text-center text-gray-800 dark:text-gray-200">
+                    {tagOffsetY > 0 ? `+${tagOffsetY}` : tagOffsetY}mm
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updateTagOffsetY(tagOffsetY + 0.5)}
+                    className="px-2 py-0.5 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 font-bold hover:bg-gray-100 dark:hover:bg-gray-700"
+                    title="အောက်သို့ 0.5mm ရွှေ့ရန်"
+                  >
+                    ▼
+                  </button>
+                </div>
+
+                {(tagOffsetX !== 0 || tagOffsetY !== 1.5) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateTagOffsetX(0);
+                      updateTagOffsetY(1.5);
+                    }}
+                    className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+                  >
+                    Reset
+                  </button>
+                )}
               </div>
             </div>
 
