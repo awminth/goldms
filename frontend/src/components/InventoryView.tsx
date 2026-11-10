@@ -1034,6 +1034,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         { header: 'Purity', value: (i) => PURITY_LABELS[i.purity]?.en || i.purity, width: 14 },
         { header: 'Type', value: (i) => i.item_type, width: 14 },
         {
+          header: language === 'MM' ? 'အထည်ချိန် (g)' : 'Gross Weight (g)',
+          value: (i) => {
+            const isThai = i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
+            if (isThai && i.thai_weight_unit) return Number(Number(i.thai_weight_unit).toFixed(3));
+            return Number(
+              kpyToGrams(
+                { kyat: i.weight_kyat, pae: i.weight_pae, yway: i.weight_yway },
+                kyatToGrams
+              ).toFixed(3)
+            );
+          },
+          width: 14,
+        },
+        {
+          header: language === 'MM' ? 'စုစုပေါင်းအလေးချိန် (g)' : 'Total Weight (g)',
+          value: (i) => {
+            const isThai = i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
+            if (isThai && i.thai_weight_unit) return Number(Number(i.thai_weight_unit).toFixed(3));
+            return Number(
+              kpyToGrams(
+                { kyat: i.net_weight_kyat, pae: i.net_weight_pae, yway: i.net_weight_yway },
+                kyatToGrams
+              ).toFixed(3)
+            );
+          },
+          width: 16,
+        },
+        {
           header: language === 'MM' ? 'အထည်ချိန်' : 'Gross Weight',
           value: (i) => formatKPYEnglish({ kyat: i.weight_kyat, pae: i.weight_pae, yway: i.weight_yway }),
           width: 16,
@@ -1156,8 +1184,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         ),
       },
       {
+        id: 'gross_grams',
+        header: language === 'MM' ? 'အထည်ချိန် (g)' : 'Gross Weight (g)',
+        slot: 'detail',
+        accessor: (i) => {
+          const isThai = i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
+          if (isThai && i.thai_weight_unit) return Number(i.thai_weight_unit);
+          return kpyToGrams(
+            { kyat: i.weight_kyat, pae: i.weight_pae, yway: i.weight_yway },
+            kyatToGrams
+          );
+        },
+        cell: (item) => {
+          const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+          const grams =
+            isThai && item.thai_weight_unit
+              ? Number(item.thai_weight_unit)
+              : kpyToGrams(
+                  {
+                    kyat: item.weight_kyat,
+                    pae: item.weight_pae,
+                    yway: item.weight_yway,
+                  },
+                  kyatToGrams
+                );
+          return <span className="font-mono font-semibold">{Number(grams).toFixed(3)} g</span>;
+        },
+      },
+      {
         id: 'grams',
-        header: language === 'MM' ? 'အလေးချိန် (g)' : 'Weight (g)',
+        header: language === 'MM' ? 'စုစုပေါင်းအလေးချိန် (g)' : 'Total Weight (g)',
         slot: 'detail',
         accessor: (i) => {
           const isThai = i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
@@ -1811,28 +1867,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 />
               </div>
 
-              {/* Row 3: Locked gold path + Myanmar purity */}
+              {/* Row 3: Myanmar purity + Locked gold path */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                    {language === 'MM' ? 'ရွှေအမျိုးအစား:' : 'Gold type:'}
-                  </label>
-                  <div
-                    className={`px-3 py-2 rounded-xl text-xs font-bold border ${
-                      isThaiEntry
-                        ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
-                        : 'bg-[#FAF8F2] dark:bg-[#201D17] border-[#D4AF37]/40 text-[#996515] dark:text-amber-300'
-                    }`}
-                  >
-                    {isThaiEntry
-                      ? language === 'MM'
-                        ? 'ထိုင်းရွှေ'
-                        : 'Thai Gold'
-                      : language === 'MM'
-                        ? 'မြန်မာရွှေ'
-                        : 'Myanmar Gold'}
-                  </div>
-                </div>
                 {!isThaiEntry && (
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
@@ -1853,6 +1889,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     </select>
                   </div>
                 )}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    {language === 'MM' ? 'ရွှေအမျိုးအစား:' : 'Gold type:'}
+                  </label>
+                  <div
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border ${
+                      isThaiEntry
+                        ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+                        : 'bg-[#FAF8F2] dark:bg-[#201D17] border-[#D4AF37]/40 text-[#996515] dark:text-amber-300'
+                    }`}
+                  >
+                    {isThaiEntry
+                      ? language === 'MM'
+                        ? 'ထိုင်းရွှေ'
+                        : 'Thai Gold'
+                      : language === 'MM'
+                        ? 'မြန်မာရွှေ'
+                        : 'Myanmar Gold'}
+                  </div>
+                </div>
               </div>
 
               {/* Weight Tracking */}
@@ -1974,15 +2030,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <div className="flex flex-wrap gap-1.5">
                         <div className="w-[4.5rem]">
                           <label className="text-[11px] text-gray-500 block mb-0.5">ကျပ်</label>
-                          <NumberInput min={0} value={formGrossKyat} onChange={(v) => applyGrossFromKpy({ kyat: v, pae: formGrossPae, yway: formGrossYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                          <NumberInput tabIndex={-1} min={0} value={formGrossKyat} onChange={(v) => applyGrossFromKpy({ kyat: v, pae: formGrossPae, yway: formGrossYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                         </div>
                         <div className="w-[4.5rem]">
                           <label className="text-[11px] text-gray-500 block mb-0.5">ပဲ</label>
-                          <NumberInput min={0} max={15} value={formGrossPae} onChange={(v) => applyGrossFromKpy({ kyat: formGrossKyat, pae: v, yway: formGrossYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                          <NumberInput tabIndex={-1} min={0} max={15} value={formGrossPae} onChange={(v) => applyGrossFromKpy({ kyat: formGrossKyat, pae: v, yway: formGrossYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                         </div>
                         <div className="w-[4.5rem]">
                           <label className="text-[11px] text-gray-500 block mb-0.5">ရွေး</label>
-                          <NumberInput min={0} step={0.1} value={formGrossYway} onChange={(v) => applyGrossFromKpy({ kyat: formGrossKyat, pae: formGrossPae, yway: v })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                          <NumberInput tabIndex={-1} min={0} step={0.1} value={formGrossYway} onChange={(v) => applyGrossFromKpy({ kyat: formGrossKyat, pae: formGrossPae, yway: v })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                         </div>
                       </div>
                     </div>
@@ -2003,15 +2059,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <div className="flex flex-wrap gap-1.5">
                           <div className="w-[4.5rem]">
                             <label className="text-[11px] text-gray-500 block mb-0.5">ကျပ်</label>
-                            <NumberInput min={0} value={formGemKyat} onChange={(v) => applyGemFromKpy({ kyat: v, pae: formGemPae, yway: formGemYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                            <NumberInput tabIndex={-1} min={0} value={formGemKyat} onChange={(v) => applyGemFromKpy({ kyat: v, pae: formGemPae, yway: formGemYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                           </div>
                           <div className="w-[4.5rem]">
                             <label className="text-[11px] text-gray-500 block mb-0.5">ပဲ</label>
-                            <NumberInput min={0} value={formGemPae} onChange={(v) => applyGemFromKpy({ kyat: formGemKyat, pae: v, yway: formGemYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                            <NumberInput tabIndex={-1} min={0} value={formGemPae} onChange={(v) => applyGemFromKpy({ kyat: formGemKyat, pae: v, yway: formGemYway })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                           </div>
                           <div className="w-[4.5rem]">
                             <label className="text-[11px] text-gray-500 block mb-0.5">ရွေး</label>
-                            <NumberInput min={0} step={0.1} value={formGemYway} onChange={(v) => applyGemFromKpy({ kyat: formGemKyat, pae: formGemPae, yway: v })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                            <NumberInput tabIndex={-1} min={0} step={0.1} value={formGemYway} onChange={(v) => applyGemFromKpy({ kyat: formGemKyat, pae: formGemPae, yway: v })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                           </div>
                         </div>
                       </div>
@@ -2029,12 +2085,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
                             <div className="w-[6.5rem]">
                               <label className="text-[10px] text-gray-500 block mb-0.5">Gram</label>
-                              <NumberInput min={0} step={0.001} value={formCraftDedGrams} onChange={(v) => applyPaeYwayFromGrams(v, setFormCraftDedGrams, setFormCraftDedPae, setFormCraftDedYway)} className="w-full px-2 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]" />
+                              <NumberInput tabIndex={-1} min={0} step={0.001} value={formCraftDedGrams} onChange={(v) => applyPaeYwayFromGrams(v, setFormCraftDedGrams, setFormCraftDedPae, setFormCraftDedYway)} className="w-full px-2 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]" />
                             </div>
                             <div className="hidden sm:block w-px self-stretch bg-gray-200 dark:bg-gray-700" />
                             <div className="w-[4rem]">
                               <label className="text-[10px] text-gray-500 block mb-0.5">ပဲ</label>
-                              <NumberInput min={0} value={formCraftDedPae} onChange={(v) => applyGramsFromPaeYway(v, formCraftDedYway, setFormCraftDedPae, setFormCraftDedYway, setFormCraftDedGrams)} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                              <NumberInput tabIndex={-1} min={0} value={formCraftDedPae} onChange={(v) => applyGramsFromPaeYway(v, formCraftDedYway, setFormCraftDedPae, setFormCraftDedYway, setFormCraftDedGrams)} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                             </div>
                             <div className="w-[4rem]">
                               <label className="text-[10px] text-gray-500 block mb-0.5">ရွေး</label>
@@ -2049,12 +2105,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
                             <div className="w-[6.5rem]">
                               <label className="text-[10px] text-gray-500 block mb-0.5">Gram</label>
-                              <NumberInput min={0} step={0.001} value={formProfitDedGrams} onChange={(v) => applyPaeYwayFromGrams(v, setFormProfitDedGrams, setFormProfitDedPae, setFormProfitDedYway)} className="w-full px-2 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]" />
+                              <NumberInput tabIndex={-1} min={0} step={0.001} value={formProfitDedGrams} onChange={(v) => applyPaeYwayFromGrams(v, setFormProfitDedGrams, setFormProfitDedPae, setFormProfitDedYway)} className="w-full px-2 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]" />
                             </div>
                             <div className="hidden sm:block w-px self-stretch bg-gray-200 dark:bg-gray-700" />
                             <div className="w-[4rem]">
                               <label className="text-[10px] text-gray-500 block mb-0.5">ပဲ</label>
-                              <NumberInput min={0} value={formProfitDedPae} onChange={(v) => applyGramsFromPaeYway(v, formProfitDedYway, setFormProfitDedPae, setFormProfitDedYway, setFormProfitDedGrams)} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                              <NumberInput tabIndex={-1} min={0} value={formProfitDedPae} onChange={(v) => applyGramsFromPaeYway(v, formProfitDedYway, setFormProfitDedPae, setFormProfitDedYway, setFormProfitDedGrams)} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                             </div>
                             <div className="w-[4rem]">
                               <label className="text-[10px] text-gray-500 block mb-0.5">ရွေး</label>
@@ -2074,6 +2130,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <input
                               type="text"
                               readOnly
+                              tabIndex={-1}
                               value={totalWasteGrams}
                               className="w-full px-2.5 py-1.5 text-xs font-extrabold rounded-lg border border-rose-300 dark:border-rose-800 bg-white/80 dark:bg-[#1A1A1A] text-rose-800 dark:text-rose-200 font-mono"
                             />
@@ -2087,6 +2144,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               <input
                                 type="text"
                                 readOnly
+                                tabIndex={-1}
                                 value={totalWasteKpy.kyat}
                                 className="w-full px-1.5 py-1.5 text-xs font-extrabold rounded-lg border border-rose-300 dark:border-rose-800 bg-white/80 dark:bg-[#1A1A1A] text-rose-800 dark:text-rose-200 font-mono"
                               />
@@ -2096,6 +2154,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               <input
                                 type="text"
                                 readOnly
+                                tabIndex={-1}
                                 value={totalWasteKpy.pae}
                                 className="w-full px-1.5 py-1.5 text-xs font-extrabold rounded-lg border border-rose-300 dark:border-rose-800 bg-white/80 dark:bg-[#1A1A1A] text-rose-800 dark:text-rose-200 font-mono"
                               />
@@ -2105,6 +2164,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               <input
                                 type="text"
                                 readOnly
+                                tabIndex={-1}
                                 value={totalWasteKpy.yway}
                                 className="w-full px-1.5 py-1.5 text-xs font-extrabold rounded-lg border border-rose-300 dark:border-rose-800 bg-white/80 dark:bg-[#1A1A1A] text-rose-800 dark:text-rose-200 font-mono"
                               />
@@ -2132,7 +2192,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">
                             {language === 'MM' ? 'စုစုပေါင်းလက်ခ' : 'Total craft'}
                           </label>
-                          <input type="text" readOnly value={formatMMK(mmCraftTotal)} className="w-full px-2.5 py-1.5 text-xs font-extrabold rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 font-mono" />
+                          <input type="text" readOnly tabIndex={-1} value={formatMMK(mmCraftTotal)} className="w-full px-2.5 py-1.5 text-xs font-extrabold rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 font-mono" />
                         </div>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -2152,7 +2212,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">
                             {language === 'MM' ? 'ကျောက်ဖိုးစုစုပေါင်း' : 'Total stone'}
                           </label>
-                          <input type="text" readOnly value={formatMMK(mmStoneTotal)} className="w-full px-2.5 py-1.5 text-xs font-extrabold rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 text-sky-800 dark:text-sky-300 font-mono" />
+                          <input type="text" readOnly tabIndex={-1} value={formatMMK(mmStoneTotal)} className="w-full px-2.5 py-1.5 text-xs font-extrabold rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 text-sky-800 dark:text-sky-300 font-mono" />
                         </div>
                       </div>
                     </div>

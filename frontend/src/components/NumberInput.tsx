@@ -56,6 +56,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
       value={text}
       onFocus={(e) => {
         focused.current = true;
+        e.currentTarget.select();
         onFocus?.(e);
       }}
       onChange={(e) => {
