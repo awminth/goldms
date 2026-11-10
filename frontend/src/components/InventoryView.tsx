@@ -40,6 +40,7 @@ import {
   Printer,
   Sparkles,
   RefreshCw,
+  RotateCcw,
   CalendarDays,
   Scale,
   Download,
@@ -102,7 +103,13 @@ function inventoryStatusRowClass(status: string | undefined | null): string {
   }
 }
 
-export const InventoryView: React.FC = () => {
+interface InventoryViewProps {
+  section?: 'list' | 'summary';
+}
+
+export const InventoryView: React.FC<InventoryViewProps> = ({
+  section = 'list',
+}) => {
   const {
     inventory,
     transactions,
@@ -495,7 +502,7 @@ export const InventoryView: React.FC = () => {
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [inventoryDateSummary.rows.length, language]);
+  }, [inventoryDateSummary.rows.length, language, section]);
 
   /** Myanmar: ရွှေတန်ဖိုး + စုစုပေါင်းလက်ခ + ကျောက်ဖိုးစုစုပေါင်း */
   const myanmarItemEstimatedValue = (item: InventoryItem): number => {
@@ -530,7 +537,18 @@ export const InventoryView: React.FC = () => {
   // Filter
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedPurity, setSelectedPurity] = useState<string>('ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>('IN_STOCK');
+  const [invDateFrom, setInvDateFrom] = useState<string>(() => todayISO());
+  const [invDateTo, setInvDateTo] = useState<string>(() => todayISO());
+  const [searchResetTick, setSearchResetTick] = useState<number>(0);
+
+  const handleResetInventoryFilters = () => {
+    const today = todayISO();
+    setSelectedCategory('ALL');
+    setSelectedPurity('ALL');
+    setInvDateFrom(today);
+    setInvDateTo(today);
+    setSearchResetTick((t) => t + 1);
+  };
 
   // Add/Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -986,9 +1004,22 @@ export const InventoryView: React.FC = () => {
       (selectedCategory === 'THAI_GOLD' &&
         (item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD'));
     const matchesPurity = selectedPurity === 'ALL' || item.purity === selectedPurity;
-    const matchesStatus = selectedStatus === 'ALL' || item.status === selectedStatus;
 
-    return matchesCategory && matchesPurity && matchesStatus;
+    let fromDay = invDateFrom || '';
+    let toDay = invDateTo || '';
+    if (fromDay && toDay && fromDay > toDay) {
+      const tmp = fromDay;
+      fromDay = toDay;
+      toDay = tmp;
+    }
+    const itemDay = toDayISO(item.created_at);
+    const matchesDate =
+      (!fromDay && !toDay) ||
+      (Boolean(itemDay) &&
+        (!fromDay || itemDay >= fromDay) &&
+        (!toDay || itemDay <= toDay));
+
+    return matchesCategory && matchesPurity && matchesDate;
   });
 
   const exportInventoryExcel = () => {
@@ -1295,6 +1326,233 @@ export const InventoryView: React.FC = () => {
     [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, dialog]
   );
 
+  if (section === 'summary') {
+    return (
+      <div className="space-y-6 pb-12">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-[#1A1A1A] p-4 sm:p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-extrabold tracking-wide">
+                {language === 'MM' ? 'စာရင်းချုပ်' : 'SUMMARY'}
+              </span>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center space-x-2">
+                <Scale className="w-5 h-5 text-[#D4AF37]" />
+                <span>
+                  {language === 'MM' ? 'အထည်စတော့စာရင်းချုပ်' : 'Stock Summary'}
+                </span>
+              </h2>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              {language === 'MM'
+                ? 'ရွေးချယ်ရက်အပိုင်းအတွက် — Setup ရွှေအမျိုးအစား (မီးလင်း အစရှိ) အကုန်လုံးဖြင့် စတော့အဝင်၊ ရောင်း/ဆိုင်ထုတ်/ပန်းထိမ်အပ် အထွက်'
+                : 'For selected date range — all Setup gold classes (Meelin, …) with stock-in vs sold / shop-out / goldsmith'}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 hidden sm:block" />
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+              <span>{language === 'MM' ? 'မှ' : 'From'}</span>
+              <DateInput
+                value={summaryFrom}
+                onChange={setSummaryFrom}
+                className="w-36 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+              <span>{language === 'MM' ? 'ထိ' : 'To'}</span>
+              <DateInput
+                value={summaryTo}
+                onChange={setSummaryTo}
+                className="w-36 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const t = todayISO();
+                setSummaryFrom(t);
+                setSummaryTo(t);
+              }}
+              className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{language === 'MM' ? 'Reset' : 'Reset'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Daily / period movement summary by gold type */}
+        <div className="space-y-3">
+          <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-yellow-950/20 border border-amber-200 dark:border-amber-800/50 overflow-hidden shadow-xs">
+            <div className="px-3 py-2.5 border-b border-amber-200/80 dark:border-amber-800/40 flex flex-wrap items-center justify-between gap-2 text-[11px] bg-amber-100/50 dark:bg-amber-950/30">
+              <div className="flex items-center gap-2">
+                <Scale className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                <span className="font-bold text-amber-950 dark:text-amber-100">
+                  {language === 'MM' ? 'ရွှေအမျိုးအစားအလိုက် အဝင်–အထွက်' : 'In–Out by gold type'}
+                </span>
+                <span className="font-mono text-amber-700/70 dark:text-amber-300/70">
+                  ({formatDate(inventoryDateSummary.from)} → {formatDate(inventoryDateSummary.to)})
+                </span>
+              </div>
+              <div className="font-mono text-amber-800 dark:text-amber-300 font-extrabold">
+                {language === 'MM' ? 'လက်ကျန်' : 'Balance'}:{' '}
+                {inventoryDateSummary.totals.balanceCount}{' '}
+                {language === 'MM' ? 'ခု' : 'pcs'} · {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="relative min-w-[720px]">
+                {/* Full-height continuous vertical lines (through ကာလစုစုပေါင်း) */}
+                {summaryVLines.map((x) => (
+                  <div
+                    key={x}
+                    aria-hidden
+                    className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-amber-500 dark:bg-amber-400"
+                    style={{ left: x }}
+                  />
+                ))}
+                <table
+                  ref={summaryTableRef}
+                  className="w-full text-[11px] text-left border-collapse border border-amber-200 dark:border-amber-800/50"
+                >
+                  <thead>
+                    <tr className="bg-amber-100/70 dark:bg-amber-950/40 text-amber-900/80 dark:text-amber-200/80 border-b border-amber-200 dark:border-amber-800/40">
+                      <th className="px-3 py-2.5 font-bold w-10" rowSpan={2}>
+                        စဉ်
+                      </th>
+                      <th className="px-3 py-2.5 font-bold" rowSpan={2}>
+                        {language === 'MM' ? 'ရွှေအမျိုးအစား' : 'Gold Type'}
+                      </th>
+                      <th className="px-3 py-2 font-bold text-center" colSpan={2}>
+                        {language === 'MM' ? 'ဆိုင်ရှိ (မတိုင်မီ)' : 'Opening'}
+                      </th>
+                      <th
+                        className="px-3 py-2 font-bold text-center text-emerald-700 dark:text-emerald-400"
+                        colSpan={2}
+                      >
+                        {language === 'MM' ? 'အဝင်' : 'In'}
+                      </th>
+                      <th
+                        className="px-3 py-2 font-bold text-center text-rose-700 dark:text-rose-400"
+                        colSpan={2}
+                      >
+                        {language === 'MM' ? 'အထွက်' : 'Out'}
+                      </th>
+                      <th
+                        className="px-3 py-2 font-bold text-center text-amber-800 dark:text-amber-300"
+                        colSpan={2}
+                      >
+                        {language === 'MM' ? 'လက်ကျန်' : 'Balance'}
+                      </th>
+                    </tr>
+                    <tr className="bg-amber-100/50 dark:bg-amber-950/30 text-amber-900/70 dark:text-amber-200/70 border-b border-amber-200 dark:border-amber-800/40">
+                      <th className="px-3 py-1.5 font-bold text-right">
+                        {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                      </th>
+                      <th className="px-3 py-1.5 font-bold text-right">Gram</th>
+                      <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                        {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                      </th>
+                      <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                        Gram
+                      </th>
+                      <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                        {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                      </th>
+                      <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                        Gram
+                      </th>
+                      <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                        {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
+                      </th>
+                      <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                        Gram
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventoryDateSummary.rows.map((cat, idx) => (
+                      <tr
+                        key={cat.key}
+                        className="hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition border-b border-amber-100 dark:border-amber-900/30"
+                      >
+                        <td className="px-3 py-2.5 font-mono text-amber-700/50 dark:text-amber-400/50">
+                          {idx + 1}
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${cat.badgeClass}`}>
+                            {language === 'MM' ? cat.nameMm : cat.nameEn}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                          {cat.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                          {cat.openingGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          {cat.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          {cat.inGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                          {cat.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                          {cat.outGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                          {cat.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                          {cat.balanceGrams.toFixed(3)} g
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t border-amber-200 dark:border-amber-800/40 font-bold">
+                      <td className="px-3 py-2.5 text-amber-950 dark:text-amber-100" colSpan={2}>
+                        {language === 'MM' ? 'ကာလ စုစုပေါင်း' : 'Period total'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        {inventoryDateSummary.totals.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        {inventoryDateSummary.totals.openingGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {inventoryDateSummary.totals.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {inventoryDateSummary.totals.inGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        {inventoryDateSummary.totals.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        {inventoryDateSummary.totals.outGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                        {inventoryDateSummary.totals.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                        {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
       
@@ -1356,224 +1614,6 @@ export const InventoryView: React.FC = () => {
 
       </div>
 
-      {/* Daily / period movement summary by gold type */}
-      <div className="space-y-3">
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-extrabold tracking-wide">
-                {language === 'MM' ? 'နေ့စဉ် / ကာလ' : 'PERIOD'}
-              </span>
-              <h3 className="text-sm font-bold text-gray-900 dark:text-white">
-                {language === 'MM' ? 'ရွှေထည် အဝင်–အထွက် စာရင်းချုပ်' : 'Inventory In–Out Summary'}
-              </h3>
-            </div>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400">
-              {language === 'MM'
-                ? 'ရွေးချယ်ရက်အပိုင်းအတွက် — Setup ရွှေအမျိုးအစား (မီးလင်း အစရှိ) အကုန်လုံးဖြင့် စတော့အဝင်၊ ရောင်း/ဆိုင်ထုတ်/ပန်းထိမ်အပ် အထွက်'
-                : 'For selected date range — all Setup gold classes (Meelin, …) with stock-in vs sold / shop-out / goldsmith'}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 hidden sm:block" />
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
-              <span>{language === 'MM' ? 'မှ' : 'From'}</span>
-              <DateInput
-                value={summaryFrom}
-                onChange={setSummaryFrom}
-                className="w-36 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
-              />
-            </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
-              <span>{language === 'MM' ? 'ထိ' : 'To'}</span>
-              <DateInput
-                value={summaryTo}
-                onChange={setSummaryTo}
-                className="w-36 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-xs font-mono text-gray-900 dark:text-white"
-              />
-            </div>
-            {(summaryFrom !== todayISO() || summaryTo !== todayISO()) && (
-              <button
-                type="button"
-                onClick={() => {
-                  const t = todayISO();
-                  setSummaryFrom(t);
-                  setSummaryTo(t);
-                }}
-                className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer"
-              >
-                {language === 'MM' ? 'ယနေ့' : 'Today'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-yellow-950/20 border border-amber-200 dark:border-amber-800/50 overflow-hidden shadow-xs">
-          <div className="px-3 py-2.5 border-b border-amber-200/80 dark:border-amber-800/40 flex flex-wrap items-center justify-between gap-2 text-[11px] bg-amber-100/50 dark:bg-amber-950/30">
-            <div className="flex items-center gap-2">
-              <Scale className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-              <span className="font-bold text-amber-950 dark:text-amber-100">
-                {language === 'MM' ? 'ရွှေအမျိုးအစားအလိုက် အဝင်–အထွက်' : 'In–Out by gold type'}
-              </span>
-              <span className="font-mono text-amber-700/70 dark:text-amber-300/70">
-                ({formatDate(inventoryDateSummary.from)} → {formatDate(inventoryDateSummary.to)})
-              </span>
-            </div>
-            <div className="font-mono text-amber-800 dark:text-amber-300 font-extrabold">
-              {language === 'MM' ? 'လက်ကျန်' : 'Balance'}:{' '}
-              {inventoryDateSummary.totals.balanceCount}{' '}
-              {language === 'MM' ? 'ခု' : 'pcs'} · {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <div className="relative min-w-[720px]">
-              {/* Full-height continuous vertical lines (through ကာလစုစုပေါင်း) */}
-              {summaryVLines.map((x) => (
-                <div
-                  key={x}
-                  aria-hidden
-                  className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-amber-500 dark:bg-amber-400"
-                  style={{ left: x }}
-                />
-              ))}
-              <table
-                ref={summaryTableRef}
-                className="w-full text-[11px] text-left border-collapse border border-amber-200 dark:border-amber-800/50"
-              >
-                <thead>
-                  <tr className="bg-amber-100/70 dark:bg-amber-950/40 text-amber-900/80 dark:text-amber-200/80 border-b border-amber-200 dark:border-amber-800/40">
-                    <th className="px-3 py-2.5 font-bold w-10" rowSpan={2}>
-                      စဉ်
-                    </th>
-                    <th className="px-3 py-2.5 font-bold" rowSpan={2}>
-                      {language === 'MM' ? 'ရွှေအမျိုးအစား' : 'Gold Type'}
-                    </th>
-                    <th className="px-3 py-2 font-bold text-center" colSpan={2}>
-                      {language === 'MM' ? 'ဆိုင်ရှိ (မတိုင်မီ)' : 'Opening'}
-                    </th>
-                    <th
-                      className="px-3 py-2 font-bold text-center text-emerald-700 dark:text-emerald-400"
-                      colSpan={2}
-                    >
-                      {language === 'MM' ? 'အဝင်' : 'In'}
-                    </th>
-                    <th
-                      className="px-3 py-2 font-bold text-center text-rose-700 dark:text-rose-400"
-                      colSpan={2}
-                    >
-                      {language === 'MM' ? 'အထွက်' : 'Out'}
-                    </th>
-                    <th
-                      className="px-3 py-2 font-bold text-center text-amber-800 dark:text-amber-300"
-                      colSpan={2}
-                    >
-                      {language === 'MM' ? 'လက်ကျန်' : 'Balance'}
-                    </th>
-                  </tr>
-                  <tr className="bg-amber-100/50 dark:bg-amber-950/30 text-amber-900/70 dark:text-amber-200/70 border-b border-amber-200 dark:border-amber-800/40">
-                    <th className="px-3 py-1.5 font-bold text-right">
-                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
-                    </th>
-                    <th className="px-3 py-1.5 font-bold text-right">Gram</th>
-                    <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
-                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
-                    </th>
-                    <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
-                      Gram
-                    </th>
-                    <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
-                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
-                    </th>
-                    <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
-                      Gram
-                    </th>
-                    <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
-                      {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
-                    </th>
-                    <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
-                      Gram
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inventoryDateSummary.rows.map((cat, idx) => (
-                    <tr
-                      key={cat.key}
-                      className="hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition border-b border-amber-100 dark:border-amber-900/30"
-                    >
-                      <td className="px-3 py-2.5 font-mono text-amber-700/50 dark:text-amber-400/50">
-                        {idx + 1}
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${cat.badgeClass}`}>
-                          {language === 'MM' ? cat.nameMm : cat.nameEn}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
-                        {cat.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
-                        {cat.openingGrams.toFixed(3)} g
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                        {cat.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                        {cat.inGrams.toFixed(3)} g
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
-                        {cat.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
-                        {cat.outGrams.toFixed(3)} g
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
-                        {cat.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
-                        {cat.balanceGrams.toFixed(3)} g
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t border-amber-200 dark:border-amber-800/40 font-bold">
-                    <td className="px-3 py-2.5 text-amber-950 dark:text-amber-100" colSpan={2}>
-                      {language === 'MM' ? 'ကာလ စုစုပေါင်း' : 'Period total'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
-                      {inventoryDateSummary.totals.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
-                      {inventoryDateSummary.totals.openingGrams.toFixed(3)} g
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                      {inventoryDateSummary.totals.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                      {inventoryDateSummary.totals.inGrams.toFixed(3)} g
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
-                      {inventoryDateSummary.totals.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
-                      {inventoryDateSummary.totals.outGrams.toFixed(3)} g
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
-                      {inventoryDateSummary.totals.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
-                      {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Filter Row */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         
@@ -1605,19 +1645,35 @@ export const InventoryView: React.FC = () => {
           ))}
         </select>
 
-        {/* Status Filter */}
-        <select
-          value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
-          className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] dark:text-gray-200 text-xs font-medium"
+        {/* Date From - To Filter */}
+        <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+          <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 hidden sm:block" />
+          <span>{language === 'MM' ? 'မှ' : 'From'}</span>
+          <DateInput
+            value={invDateFrom}
+            onChange={setInvDateFrom}
+            className="w-36 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-xs font-mono text-gray-900 dark:text-white"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+          <span>{language === 'MM' ? 'ထိ' : 'To'}</span>
+          <DateInput
+            value={invDateTo}
+            onChange={setInvDateTo}
+            className="w-36 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-xs font-mono text-gray-900 dark:text-white"
+          />
+        </div>
+
+        {/* Reset Button (replaces In Stock dropdown) */}
+        <button
+          type="button"
+          onClick={handleResetInventoryFilters}
+          className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-gray-700 dark:text-gray-200 hover:bg-amber-50 hover:border-amber-300 dark:hover:bg-amber-950/30 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+          title={language === 'MM' ? 'ရှာဖွေမှုများကို မူလအတိုင်း ပြန်ထားရန်' : 'Reset all filters to default'}
         >
-          <option value="ALL">{language === 'MM' ? 'အခြေအနေအားလုံး' : 'All Statuses'}</option>
-          <option value="IN_STOCK">{language === 'MM' ? 'ဆိုင်ရှိပစ္စည်း (In Stock)' : 'In Stock'}</option>
-          <option value="WITH_GOLDSMITH">{language === 'MM' ? 'ပန်းထိမ်အပ်' : 'At goldsmith'}</option>
-          <option value="SOLD">{language === 'MM' ? 'ရောင်းချပြီး (Sold)' : 'Sold'}</option>
-          <option value="SHOP_OUT">{language === 'MM' ? 'ဆိုင်ထုတ်' : 'Shop out'}</option>
-          <option value="UNDER_PAWN">{language === 'MM' ? 'ပေါင်နှံထားဆဲ (Under Pawn)' : 'Under Pawn'}</option>
-        </select>
+          <RotateCcw className="w-3.5 h-3.5 text-[#D4AF37]" />
+          <span>{language === 'MM' ? 'Reset' : 'Reset'}</span>
+        </button>
 
         <span className="text-gray-400 dark:text-gray-500 ml-auto">
           {filteredItems.length} {language === 'MM' ? 'ခု' : 'items'}
@@ -1625,6 +1681,7 @@ export const InventoryView: React.FC = () => {
       </div>
 
       <DataTable
+        key={searchResetTick}
         rows={filteredItems}
         columns={inventoryColumns}
         rowKey={(i) => i.id}
@@ -1632,7 +1689,7 @@ export const InventoryView: React.FC = () => {
         searchable
         searchPlaceholder={language === 'MM' ? 'ဘားကုဒ် / အမည် ရှာရန်…' : 'Search barcode / name…'}
         getSearchText={(i) => [i.name, i.name_mm, i.barcode, i.category].join(' ')}
-        resetDeps={[selectedCategory, selectedPurity, selectedStatus]}
+        resetDeps={[selectedCategory, selectedPurity, invDateFrom, invDateTo, searchResetTick]}
         emptyMessage={language === 'MM' ? 'ပစ္စည်းမတွေ့ပါ' : 'No inventory items'}
         maxHeightClass={false}
         rowClassName={(i) => inventoryStatusRowClass(i.status)}

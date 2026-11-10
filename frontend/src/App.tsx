@@ -45,6 +45,7 @@ const ALL_TABS: ActiveTab[] = [
   'pos-exchange',
   'pos-history',
   'inventory',
+  'inventory-summary',
   'old-gold',
   'old-gold-outflows',
   'goldsmith',
@@ -313,7 +314,12 @@ const MainLayout: React.FC = () => {
           {can('pos', 'read') && activeTab === 'pos' && <PosView />}
           {(can('pos_history', 'read') || can('pos', 'read')) &&
             activeTab === 'pos-history' && <PosHistoryView />}
-          {activeTab === 'inventory' && can('inventory', 'read') && <InventoryView />}
+          {activeTab === 'inventory' && can('inventory', 'read') && (
+            <InventoryView section="list" />
+          )}
+          {activeTab === 'inventory-summary' && can('inventory', 'read') && (
+            <InventoryView section="summary" />
+          )}
           {activeTab === 'old-gold' && can('inventory', 'read') && (
             <OldGoldView section="summary" onNavigate={setActiveTab} />
           )}

@@ -62,6 +62,10 @@ const OLD_GOLD_TABS: ActiveTab[] = [
   'old-gold-outflows',
 ];
 
+const SUMMARY_TABS: ActiveTab[] = [
+  'inventory-summary',
+];
+
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
@@ -100,6 +104,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [pawnOpen, setPawnOpen] = useState(pawnOpenByDefault);
   const oldGoldOpenByDefault = OLD_GOLD_TABS.includes(activeTab);
   const [oldGoldOpen, setOldGoldOpen] = useState(oldGoldOpenByDefault);
+  const summaryOpenByDefault = SUMMARY_TABS.includes(activeTab);
+  const [summaryOpen, setSummaryOpen] = useState(summaryOpenByDefault);
 
   useEffect(() => {
     if (SETUP_TABS.includes(activeTab)) setSetupOpen(true);
@@ -111,6 +117,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   useEffect(() => {
     if (OLD_GOLD_TABS.includes(activeTab)) setOldGoldOpen(true);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (SUMMARY_TABS.includes(activeTab)) setSummaryOpen(true);
   }, [activeTab]);
 
   const mainNavTop = [
@@ -318,6 +328,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     : [];
   const showOldGold = oldGoldChildren.length > 0;
   const oldGoldChildActive = OLD_GOLD_TABS.includes(activeTab);
+
+  const summaryChildren = can('inventory', 'read')
+    ? [
+        {
+          id: 'inventory-summary' as ActiveTab,
+          labelMM: 'အထည်စတော့စာရင်းချုပ်',
+          labelEN: 'Stock Summary',
+          icon: Scale,
+        },
+      ]
+    : [];
+  const showSummary = summaryChildren.length > 0;
+  const summaryChildActive = SUMMARY_TABS.includes(activeTab);
 
   const handleSelectTab = (tab: ActiveTab) => {
     setActiveTab(tab);
@@ -592,6 +615,67 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+
+          {showSummary && (
+            <div className="pt-1">
+              <button
+                type="button"
+                id="sidebar-nav-summary-group"
+                onClick={() => setSummaryOpen((o) => !o)}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  summaryChildActive
+                    ? 'bg-[#FAF8F2] dark:bg-[#222222] text-[#996515] dark:text-[#FFD700]'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515] dark:hover:text-[#FFD700]'
+                }`}
+              >
+                <div className="flex items-center space-x-3 truncate">
+                  <FileSpreadsheet className="w-4 h-4 shrink-0 text-[#D4AF37]" />
+                  <span className="truncate">
+                    {language === 'MM' ? 'စာရင်းချုပ်' : 'Summaries'}
+                  </span>
+                </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-gray-400 transition-transform ${
+                    summaryOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {summaryOpen && (
+                <div className="mt-0.5 ml-3 pl-2 border-l border-line dark:border-gray-800 space-y-0.5">
+                  {summaryChildren.map((child) => {
+                    const Icon = child.icon;
+                    const isActive = activeTab === child.id;
+                    return (
+                      <button
+                        key={child.id}
+                        id={`sidebar-nav-${child.id}`}
+                        type="button"
+                        onClick={() => handleSelectTab(child.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white shadow-sm'
+                            : 'text-gray-600 dark:text-gray-400 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515]'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2.5 truncate">
+                          <Icon
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isActive ? 'text-white' : 'text-[#D4AF37]'
+                            }`}
+                          />
+                          <span className="truncate">
+                            {language === 'MM' ? child.labelMM : child.labelEN}
+                          </span>
+                        </div>
+                        {isActive && <ChevronRight className="w-3 h-3 text-white/80" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {showSetup && (
             <div className="pt-1">
