@@ -64,6 +64,7 @@ const OLD_GOLD_TABS: ActiveTab[] = [
 
 const SUMMARY_TABS: ActiveTab[] = [
   'inventory-summary',
+  'inventory-stock-ledger',
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -336,6 +337,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           labelMM: 'အထည်စတော့စာရင်းချုပ်',
           labelEN: 'Stock Summary',
           icon: Scale,
+        },
+        {
+          id: 'inventory-stock-ledger' as ActiveTab,
+          labelMM: 'နေ့စဉ်လက်ကျန်စာရင်း',
+          labelEN: 'Daily Stock Ledger',
+          icon: FileSpreadsheet,
         },
       ]
     : [];

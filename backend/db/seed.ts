@@ -50,7 +50,7 @@ export async function seedDatabase(pool: Pool): Promise<void> {
         1, 2, 0, 0, 4, 1, 1, 4, 'MEELIN', 'MYANMAR_GOLD', NULL, 120000, 6420000, 'SOLD', '2026-09-01 10:00:00'),
       (2, 'STG-804102', 'RING', 'Floral Diamond-cut Ring (ပန်းပွင့် လက်စွပ်)', 'ပန်းပွင့် လက်စွပ် (၁၅ ပဲ)',
         0, 4, 2, 0, 2, 0, 4, 0, 'PE15A', 'MYANMAR_GOLD', NULL, 65000, 1420000, 'IN_STOCK', '2026-09-02 11:30:00'),
-      /* Thai gold: thai_weight_unit = grams; qty → separate barcodes (-01, -02, …); category = THAI_GOLD */
+      /* Thai gold: thai_weight_unit = grams; identical units share one barcode (qty rows); category = THAI_GOLD */
       (3, 'STG-804103-01', 'THAI_GOLD', 'Thai Classic Pattern Bracelet (ထိုင်းရွှေ ဟန်းချိန်း)', 'ထိုင်းရွှေ ဟန်းချိန်း 1 Kyat Standard',
         1, 0, 0, 0, 0, 1, 0, 0, 'THAI_GOLD', 'THAI_GOLD', 15.2, 95000, 5615000, 'IN_STOCK', '2026-09-03 12:00:00'),
       (4, 'STG-804103-02', 'THAI_GOLD', 'Thai Classic Pattern Bracelet (ထိုင်းရွှေ ဟန်းချိန်း)', 'ထိုင်းရွှေ ဟန်းချိန်း 1 Kyat Standard',

@@ -78,7 +78,7 @@ export const TABLE_STATEMENTS: string[] = [
     image_url VARCHAR(500) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_inventory_barcode (barcode),
+    KEY idx_inventory_barcode (barcode),
     KEY idx_inventory_category (category),
     KEY idx_inventory_status (status)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -674,6 +674,36 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
   // 4. inventory_items
   const invNames = getCols('inventory_items');
   if (invNames.size > 0) {
+    // Thai gold may share one barcode across qty units — drop UNIQUE if present
+    const [barcodeIdx] = await pool.query<RowDataPacket[]>(
+      `SELECT INDEX_NAME, NON_UNIQUE FROM information_schema.statistics
+       WHERE table_schema = DATABASE()
+         AND table_name = 'inventory_items'
+         AND column_name = 'barcode'`
+    );
+    const uniqueBarcode = barcodeIdx.find(
+      (r) => String(r.INDEX_NAME) === 'uk_inventory_barcode' || Number(r.NON_UNIQUE) === 0
+    );
+    if (uniqueBarcode) {
+      try {
+        await pool.query(
+          `ALTER TABLE inventory_items DROP INDEX \`${String(uniqueBarcode.INDEX_NAME)}\``
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    const hasBarcodeIdx = barcodeIdx.some(
+      (r) => String(r.INDEX_NAME) === 'idx_inventory_barcode' && Number(r.NON_UNIQUE) === 1
+    );
+    if (!hasBarcodeIdx) {
+      try {
+        await pool.query(`ALTER TABLE inventory_items ADD INDEX idx_inventory_barcode (barcode)`);
+      } catch {
+        /* ignore */
+      }
+    }
+
     const addInv = async (col: string, ddl: string) => {
       if (!invNames.has(col)) await pool.query(`ALTER TABLE inventory_items ADD COLUMN ${ddl}`);
     };

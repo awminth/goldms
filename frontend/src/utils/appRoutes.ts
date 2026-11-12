@@ -10,6 +10,7 @@ export const TAB_TO_PATH: Record<ActiveTab, string> = {
   'pos-history': 'pos-history',
   inventory: 'inventory',
   'inventory-summary': 'inventory-summary',
+  'inventory-stock-ledger': 'inventory-stock-ledger',
   'old-gold': 'old-gold',
   'old-gold-outflows': 'old-gold-outflows',
   goldsmith: 'goldsmith',

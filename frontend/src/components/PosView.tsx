@@ -527,39 +527,29 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     const q = normalizeBarcode(rawQuery !== undefined ? rawQuery : inventorySearch);
     if (!q) return;
 
-    // 1. Direct check: Is this barcode already in the cart?
-    const alreadyInCart = cartItems.find(
-      (c) => c.barcode && normalizeBarcode(c.barcode).toLowerCase() === q.toLowerCase()
+    // Exact barcode matches still in stock and not already on the cart (Thai may share one barcode)
+    const availableExact = inStockItems.filter(
+      (i) =>
+        normalizeBarcode(i.barcode).toLowerCase() === q.toLowerCase() && !cartIds.has(i.id)
     );
-    if (alreadyInCart) {
-      void dialog.alert(
-        language === 'MM'
-          ? `ပစ္စည်း "${alreadyInCart.item_name}" (${alreadyInCart.barcode}) သည် ဘောင်ချာထဲသို့ ထည့်သွင်းပြီးဖြစ်ပါသည်`
-          : `Item "${alreadyInCart.item_name}" (${alreadyInCart.barcode}) is already in the cart.`
-      );
-      setInventorySearch('');
-      searchInputRef.current?.focus();
+
+    if (availableExact.length > 0) {
+      playScanBeep();
+      addItemFromInventory(availableExact[0].id);
       return;
     }
 
-    // 2. Exact match in inStockItems
-    const exact = inStockItems.find(
-      (i) => normalizeBarcode(i.barcode).toLowerCase() === q.toLowerCase()
+    const sameBarcodeInCart = cartItems.find(
+      (c) => c.barcode && normalizeBarcode(c.barcode).toLowerCase() === q.toLowerCase()
     );
-
-    if (exact) {
-      if (cartIds.has(exact.id)) {
-        void dialog.alert(
-          language === 'MM'
-            ? `ပစ္စည်း "${exact.name_mm || exact.name}" (${exact.barcode}) သည် ဘောင်ချာထဲသို့ ထည့်သွင်းပြီးဖြစ်ပါသည်`
-            : `Item "${exact.name_mm || exact.name}" (${exact.barcode}) is already in the cart.`
-        );
-        setInventorySearch('');
-        searchInputRef.current?.focus();
-        return;
-      }
-      playScanBeep();
-      addItemFromInventory(exact.id);
+    if (sameBarcodeInCart) {
+      void dialog.alert(
+        language === 'MM'
+          ? `ပစ္စည်း "${sameBarcodeInCart.item_name}" (${sameBarcodeInCart.barcode}) အတွက် လက်ကျန်ယူနစ် မရှိတော့ပါ (ဘောင်ချာထဲ ရောက်ပြီး)`
+          : `No remaining units for "${sameBarcodeInCart.item_name}" (${sameBarcodeInCart.barcode}) — already on the voucher.`
+      );
+      setInventorySearch('');
+      searchInputRef.current?.focus();
       return;
     }
 

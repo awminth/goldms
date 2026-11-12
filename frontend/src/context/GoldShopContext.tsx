@@ -68,7 +68,9 @@ interface GoldShopContextType {
 
   updateGoldPrice: (type: GoldPurity, sellPrice: number, buyPrice?: number) => Promise<void>;
   updateShopSettings: (data: Partial<ShopSettings>) => Promise<void>;
-  addInventoryItem: (item: Omit<InventoryItem, 'id' | 'created_at'>) => Promise<InventoryItem>;
+  addInventoryItem: (
+    item: Omit<InventoryItem, 'id' | 'created_at'> & { quantity?: number }
+  ) => Promise<InventoryItem>;
   updateInventoryItem: (id: string, updates: Partial<InventoryItem>) => Promise<void>;
   deleteInventoryItem: (id: string) => Promise<void>;
   createTransaction: (txnData: Omit<Transaction, 'id' | 'created_at'>) => Promise<Transaction>;
@@ -491,7 +493,9 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     cacheInvalidate('bootstrap');
   };
 
-  const addInventoryItem = async (itemData: Omit<InventoryItem, 'id' | 'created_at'>) => {
+  const addInventoryItem = async (
+    itemData: Omit<InventoryItem, 'id' | 'created_at'> & { quantity?: number }
+  ) => {
     const item = await api.addInventoryItem(itemData);
     await invalidateAndRefresh();
     return item;

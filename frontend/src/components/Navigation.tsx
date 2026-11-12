@@ -18,6 +18,7 @@ export type ActiveTab =
   | 'pos-history'
   | 'inventory'
   | 'inventory-summary'
+  | 'inventory-stock-ledger'
   | 'old-gold'
   | 'old-gold-outflows'
   | 'goldsmith'

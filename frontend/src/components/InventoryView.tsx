@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useGoldShop } from '../context/GoldShopContext';
 import {
@@ -534,19 +534,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return myanmarItemEstimatedValue(item);
   };
 
-  // Filter
+  // Filter — From defaults to first stock-in day (no need to remember open date)
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedPurity, setSelectedPurity] = useState<string>('ALL');
-  const [invDateFrom, setInvDateFrom] = useState<string>(() => todayISO());
+  const [invDateFrom, setInvDateFrom] = useState<string>('');
   const [invDateTo, setInvDateTo] = useState<string>(() => todayISO());
+  const [invDateDefaultsReady, setInvDateDefaultsReady] = useState(false);
   const [searchResetTick, setSearchResetTick] = useState<number>(0);
 
+  const earliestStockInDate = useMemo(() => {
+    let min = '';
+    for (const item of inventory) {
+      const d = toDayISO(item.created_at);
+      if (!d) continue;
+      if (!min || d < min) min = d;
+    }
+    return min;
+  }, [inventory]);
+
+  useEffect(() => {
+    if (invDateDefaultsReady) return;
+    if (!earliestStockInDate) return;
+    setInvDateFrom(earliestStockInDate);
+    setInvDateTo(todayISO());
+    setInvDateDefaultsReady(true);
+  }, [earliestStockInDate, invDateDefaultsReady]);
+
   const handleResetInventoryFilters = () => {
-    const today = todayISO();
     setSelectedCategory('ALL');
     setSelectedPurity('ALL');
-    setInvDateFrom(today);
-    setInvDateTo(today);
+    setInvDateFrom(earliestStockInDate || todayISO());
+    setInvDateTo(todayISO());
     setSearchResetTick((t) => t + 1);
   };
 
@@ -586,6 +604,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [formCraftProfit, setFormCraftProfit] = useState<number>(0);
   const [formStonePrice, setFormStonePrice] = useState<number>(0);
   const [formStoneProfit, setFormStoneProfit] = useState<number>(0);
+  /** Thai gold only: identical units share one barcode */
+  const [formQty, setFormQty] = useState<number>(1);
 
   const isThaiEntry = formPurity === 'THAI_GOLD' || formItemType === 'THAI_GOLD';
 
@@ -651,6 +671,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setFormCraftProfit(0);
     setFormStonePrice(0);
     setFormStoneProfit(0);
+    setFormQty(1);
   };
 
   // Open modal for new item (Myanmar or Thai)
@@ -731,6 +752,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       setFormStonePrice(Number(item.stone_price || 0));
       setFormStoneProfit(Number(item.stone_profit_price || 0));
     }
+    setFormQty(1);
     setIsModalOpen(true);
   };
 
@@ -927,6 +949,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       ? Math.round(bahtToMmk(sellBaht, sellRate))
       : estimatedTotalSelling;
 
+    const thaiQty = isThaiEntry
+      ? Math.max(1, Math.min(500, Math.floor(Number(formQty) || 1)))
+      : 1;
+
     const itemPayload = {
       barcode: formBarcode || generateBarcode(),
       category: isThaiEntry ? 'THAI_GOLD' : formCategory,
@@ -963,6 +989,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       status: (editingItemId
         ? inventory.find((i) => i.id === editingItemId)?.status || 'IN_STOCK'
         : 'IN_STOCK') as InventoryItem['status'],
+      ...(isThaiEntry && !editingItemId ? { quantity: thaiQty } : {}),
     };
 
     const wasEdit = Boolean(editingItemId);
@@ -982,9 +1009,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           ? language === 'MM'
             ? 'ပစ္စည်း ပြင်ဆင်ပြီးပါပြီ'
             : 'Item updated'
-          : language === 'MM'
-            ? 'ပစ္စည်း သိမ်းပြီးပါပြီ'
-            : 'Item saved',
+          : isThaiEntry && thaiQty > 1
+            ? language === 'MM'
+              ? `ထိုင်းရွှေ ${thaiQty} ခု သိမ်းပြီးပါပြီ (ဘားကုဒ် တစ်ခုတည်း)`
+              : `Saved ${thaiQty} Thai units (shared barcode)`
+            : language === 'MM'
+              ? 'ပစ္စည်း သိမ်းပြီးပါပြီ'
+              : 'Item saved',
         variant: 'success',
       });
     } catch (err) {
@@ -1022,6 +1053,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return matchesCategory && matchesPurity && matchesDate;
   });
 
+  /** Thai identical barcodes collapse to one row with qty; Myanmar stays 1 row = 1 unit */
+  type InventoryListRow = InventoryItem & { listQty: number };
+  const inventoryListRows = useMemo((): InventoryListRow[] => {
+    const myanmar: InventoryListRow[] = [];
+    const thaiByBarcode = new Map<string, InventoryItem[]>();
+
+    for (const item of filteredItems) {
+      const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+      if (!isThai) {
+        myanmar.push({ ...item, listQty: 1 });
+        continue;
+      }
+      const key = String(item.barcode || '').trim().toLowerCase() || `id:${item.id}`;
+      const list = thaiByBarcode.get(key) || [];
+      list.push(item);
+      thaiByBarcode.set(key, list);
+    }
+
+    const thaiRows: InventoryListRow[] = [];
+    for (const units of thaiByBarcode.values()) {
+      const inStock = units.filter((u) => u.status === 'IN_STOCK');
+      const sample = inStock[0] || units[0];
+      thaiRows.push({
+        ...sample,
+        listQty: inStock.length,
+        status: inStock.length > 0 ? 'IN_STOCK' : sample.status,
+      });
+    }
+
+    return [...thaiRows, ...myanmar];
+  }, [filteredItems]);
+
   const exportInventoryExcel = () => {
     exportToExcel({
       filename: 'inventory',
@@ -1029,6 +1092,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       title: language === 'MM' ? 'ရွှေထည် စာရင်း (Inventory)' : 'Gold Inventory Report',
       columns: [
         { header: 'Barcode', value: (i) => i.barcode, width: 16 },
+        { header: 'Qty', value: (i) => i.listQty, width: 8 },
         { header: language === 'MM' ? 'ပစ္စည်းအမည်' : 'Product Name', value: (i) => i.name_mm || i.name, width: 24 },
         { header: 'Category', value: (i) => i.category, width: 14 },
         { header: 'Purity', value: (i) => PURITY_LABELS[i.purity]?.en || i.purity, width: 14 },
@@ -1080,11 +1144,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         { header: language === 'MM' ? 'ခန့်မှန်းဈေး' : 'Est. Price', value: (i) => displayEstimatedValue(i), width: 14 },
         { header: 'Status', value: (i) => i.status, width: 12 },
       ],
-      rows: filteredItems,
+      rows: inventoryListRows,
     });
   };
 
-  const inventoryColumns = useMemo<DataTableColumn<InventoryItem>[]>(
+  const inventoryColumns = useMemo<DataTableColumn<InventoryListRow>[]>(
     () => [
       {
         id: 'barcode',
@@ -1093,6 +1157,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         accessor: (i) => i.barcode,
         cell: (item) => (
           <span className="font-mono text-xs font-bold">{item.barcode}</span>
+        ),
+      },
+      {
+        id: 'qty',
+        header: language === 'MM' ? 'Qty' : 'Qty',
+        slot: 'primary',
+        accessor: (i) => i.listQty,
+        align: 'center',
+        cell: (item) => (
+          <span className="font-mono font-extrabold text-[#996515] dark:text-amber-300">
+            {item.listQty}
+          </span>
         ),
       },
       {
@@ -1351,12 +1427,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               type="button"
               onClick={() => {
                 void (async () => {
+                  const isThai =
+                    item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
                   const ok = await dialog.confirm({
                     title: language === 'MM' ? 'ပစ္စည်း ဖျက်မည်' : 'Delete item',
                     message:
-                      language === 'MM'
-                        ? `"${item.name_mm || item.name}" ကို စာရင်းမှ ဖျက်မလား?`
-                        : `Delete "${item.name_mm || item.name}" from inventory?`,
+                      isThai && item.listQty > 1
+                        ? language === 'MM'
+                          ? `"${item.name_mm || item.name}" (${item.listQty} ခုအနက် ၁ ခု) ကို ဖျက်မလား?`
+                          : `Delete 1 of ${item.listQty} units for "${item.name_mm || item.name}"?`
+                        : language === 'MM'
+                          ? `"${item.name_mm || item.name}" ကို စာရင်းမှ ဖျက်မလား?`
+                          : `Delete "${item.name_mm || item.name}" from inventory?`,
                     confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
                     cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
                     danger: true,
@@ -1622,50 +1704,52 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {language === 'MM'
-              ? 'ပစ္စည်းတစ်ခုချင်းစီတွင် ဘားကုဒ်တစ်ခုနှင့် စတော့တစ်ခုသာရှိသည်။'
-              : 'Each item has its own barcode and a single stock unit.'}
+              ? 'မြန်မာရွှေ — ဘားကုဒ်တစ်ခု/တစ်ထည်။ ထိုင်းရွှေ — ပုံစံတူကို Qty ဖြင့် တစ်ခါတည်းထည့်၊ ဘားကုဒ်တစ်ခုတည်း။'
+              : 'Myanmar: one barcode per piece. Thai: add identical units by Qty with one shared barcode.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={async () => {
-              await api.revalueInventory();
-              await refreshData();
-            }}
-            className="px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-900 text-[#996515] dark:text-amber-300 text-xs font-bold hover:bg-amber-50 dark:hover:bg-amber-950/30 transition flex items-center space-x-1.5"
-            title={language === 'MM' ? 'နေ့စဉ်ဈေးဖြင့် စတော့တန်ဖိုး ပြန်တွက်မည်' : 'Revalue stock from live prices'}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>{language === 'MM' ? 'ဈေးဖြင့် ပြန်တွက်' : 'Revalue'}</span>
-          </button>
+        <div className="flex flex-col gap-2 w-full lg:w-auto">
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <button
+              type="button"
+              onClick={async () => {
+                await api.revalueInventory();
+                await refreshData();
+              }}
+              className="px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-900 text-[#996515] dark:text-amber-300 text-xs font-bold hover:bg-amber-50 dark:hover:bg-amber-950/30 transition inline-flex items-center gap-1.5 whitespace-nowrap"
+              title={language === 'MM' ? 'နေ့စဉ်ဈေးဖြင့် စတော့တန်ဖိုး ပြန်တွက်မည်' : 'Revalue stock from live prices'}
+            >
+              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+              <span>{language === 'MM' ? 'ဈေးဖြင့် ပြန်တွက်' : 'Revalue'}</span>
+            </button>
 
-          <ExcelExportButton
-            language={language}
-            onClick={exportInventoryExcel}
-            disabled={filteredItems.length === 0}
-            className="!py-2 !rounded-xl"
-          />
+            <ExcelExportButton
+              language={language}
+              onClick={exportInventoryExcel}
+              disabled={inventoryListRows.length === 0}
+              className="!py-2 !rounded-xl !text-xs !whitespace-nowrap"
+            />
+          </div>
 
-          {/* Add New — Myanmar / Thai */}
-          <button
-            type="button"
-            onClick={() => openNewItemModal('MYANMAR')}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white text-xs font-bold hover:opacity-95 transition shadow-xs flex items-center space-x-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{language === 'MM' ? 'မြန်မာရွှေ ထည့်မည်' : 'Add Myanmar Gold'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openNewItemModal('THAI')}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white text-xs font-bold hover:opacity-95 transition shadow-xs flex items-center space-x-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{language === 'MM' ? 'ထိုင်းရွှေ ထည့်မည်' : 'Add Thai Gold'}</span>
-          </button>
-
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <button
+              type="button"
+              onClick={() => openNewItemModal('MYANMAR')}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white text-xs font-bold hover:opacity-95 transition shadow-xs inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span>{language === 'MM' ? 'မြန်မာရွှေ ထည့်မည်' : 'Add Myanmar Gold'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openNewItemModal('THAI')}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white text-xs font-bold hover:opacity-95 transition shadow-xs inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span>{language === 'MM' ? 'ထိုင်းရွှေ ထည့်မည်' : 'Add Thai Gold'}</span>
+            </button>
+          </div>
         </div>
 
       </div>
@@ -1732,13 +1816,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </button>
 
         <span className="text-gray-400 dark:text-gray-500 ml-auto">
-          {filteredItems.length} {language === 'MM' ? 'ခု' : 'items'}
+          {inventoryListRows.length} {language === 'MM' ? 'မျိုး' : 'SKUs'}
+          {filteredItems.length !== inventoryListRows.length
+            ? ` · ${filteredItems.filter((i) => i.status === 'IN_STOCK').length} ${
+                language === 'MM' ? 'ခု' : 'units'
+              }`
+            : ''}
         </span>
       </div>
 
       <DataTable
         key={searchResetTick}
-        rows={filteredItems}
+        rows={inventoryListRows}
         columns={inventoryColumns}
         rowKey={(i) => i.id}
         language={language}
@@ -1852,19 +1941,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
               </div>
 
-              {/* Row 2: Item name */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  {language === 'MM' ? 'ပစ္စည်းအမည် (ဥပမာ- နဂါးလိမ်ဆွဲကြိုး):' : 'Product name:'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={language === 'MM' ? 'ရွှေဆွဲကြိုး' : 'Gold necklace'}
-                  value={formNameMM}
-                  onChange={(e) => setFormNameMM(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
-                />
+              {/* Row 2: Item name (+ Thai qty) */}
+              <div className={`grid grid-cols-1 gap-3 ${isThaiEntry && !editingItemId ? 'sm:grid-cols-[1fr_8rem]' : ''}`}>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    {language === 'MM' ? 'ပစ္စည်းအမည် (ဥပမာ- နဂါးလိမ်ဆွဲကြိုး):' : 'Product name:'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={language === 'MM' ? 'ရွှေဆွဲကြိုး' : 'Gold necklace'}
+                    value={formNameMM}
+                    onChange={(e) => setFormNameMM(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
+                  />
+                </div>
+                {isThaiEntry && !editingItemId && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      {language === 'MM' ? 'အရေအတွက် (Qty)' : 'Quantity'}
+                    </label>
+                    <NumberInput
+                      min={1}
+                      max={500}
+                      step={1}
+                      value={formQty}
+                      onChange={(v) => setFormQty(Math.max(1, Math.min(500, Math.floor(Number(v) || 1))))}
+                      className="w-full px-3 py-2 text-xs font-extrabold rounded-xl border border-[#D4AF37]/50 bg-[#FAF8F2] dark:bg-[#201D17] text-[#996515] dark:text-amber-200 font-mono focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
+                      {language === 'MM'
+                        ? 'ပုံစံ/လက်ခတူ — ဘားကုဒ် တစ်ခုတည်း'
+                        : 'Same design/fees — one shared barcode'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Row 3: Myanmar purity + Locked gold path */}

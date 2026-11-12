@@ -1336,15 +1336,67 @@ export const shopService = {
             thaiRatePerKyat: this.getLivePriceForPurity(prices, 'THAI_GOLD'),
           });
 
+    const isThai = itemType === 'THAI_GOLD' || purity === 'THAI_GOLD';
+    const quantity = isThai
+      ? Math.max(1, Math.min(500, Math.floor(num(data.quantity) || 1)))
+      : 1;
+
     const barcode =
       data.barcode && String(data.barcode).trim()
         ? String(data.barcode).trim()
         : await this.allocateUniqueBarcode();
 
+    if (!isThai) {
+      const [existing] = await getPool().query<RowDataPacket[]>(
+        `SELECT id FROM inventory_items WHERE barcode = :code LIMIT 1`,
+        { code: barcode }
+      );
+      if (existing[0]) {
+        throw new HttpError(400, `Barcode "${barcode}" already exists`);
+      }
+    }
+
     const category = await this.assertActiveCategoryCode(data.category);
 
-    const [result] = await getPool().query<ResultSetHeader>(
-      `INSERT INTO inventory_items (
+    const insertParams = {
+      barcode,
+      category,
+      name: data.name,
+      name_mm: data.name_mm,
+      weight_kyat: gross.kyat,
+      weight_pae: gross.pae,
+      weight_yway: gross.yway,
+      gemstone_weight_kyat: gemstone.kyat,
+      gemstone_weight_pae: gemstone.pae,
+      gemstone_weight_yway: gemstone.yway,
+      craft_deduction_pae: craftDedPae,
+      craft_deduction_yway: craftDedYway,
+      profit_deduction_pae: profitDedPae,
+      profit_deduction_yway: profitDedYway,
+      deduction_pae: totalDedPae,
+      deduction_yway: totalDedYway,
+      net_weight_kyat: net.kyat,
+      net_weight_pae: net.pae,
+      net_weight_yway: net.yway,
+      purity,
+      item_type: itemType,
+      thai_weight_unit: thaiUnit,
+      craftsmanship_fee: num(data.craftsmanship_fee),
+      craftsmanship_profit_fee: num(data.craftsmanship_profit_fee),
+      stone_price: num(data.stone_price),
+      stone_profit_price: num(data.stone_profit_price),
+      selling_price_estimated: estimated,
+      craftsmanship_fee_baht: num(data.craftsmanship_fee_baht),
+      craftsmanship_profit_fee_baht: num(data.craftsmanship_profit_fee_baht),
+      selling_price_baht: num(data.selling_price_baht),
+      baht_mmk_rate: data.baht_mmk_rate != null ? num(data.baht_mmk_rate) : null,
+      thai_gold_baht_snapshot:
+        data.thai_gold_baht_snapshot != null ? num(data.thai_gold_baht_snapshot) : null,
+      status: data.status ?? 'IN_STOCK',
+      image_url: data.image_url ?? null,
+    };
+
+    const insertSql = `INSERT INTO inventory_items (
         barcode, category, name, name_mm,
         weight_kyat, weight_pae, weight_yway,
         gemstone_weight_kyat, gemstone_weight_pae, gemstone_weight_yway,
@@ -1366,48 +1418,17 @@ export const shopService = {
         :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :craftsmanship_profit_fee, :stone_price, :stone_profit_price, :selling_price_estimated,
         :craftsmanship_fee_baht, :craftsmanship_profit_fee_baht, :selling_price_baht, :baht_mmk_rate, :thai_gold_baht_snapshot,
         :status, :image_url
-      )`,
-      {
-        barcode,
-        category,
-        name: data.name,
-        name_mm: data.name_mm,
-        weight_kyat: gross.kyat,
-        weight_pae: gross.pae,
-        weight_yway: gross.yway,
-        gemstone_weight_kyat: gemstone.kyat,
-        gemstone_weight_pae: gemstone.pae,
-        gemstone_weight_yway: gemstone.yway,
-        craft_deduction_pae: craftDedPae,
-        craft_deduction_yway: craftDedYway,
-        profit_deduction_pae: profitDedPae,
-        profit_deduction_yway: profitDedYway,
-        deduction_pae: totalDedPae,
-        deduction_yway: totalDedYway,
-        net_weight_kyat: net.kyat,
-        net_weight_pae: net.pae,
-        net_weight_yway: net.yway,
-        purity,
-        item_type: itemType,
-        thai_weight_unit: thaiUnit,
-        craftsmanship_fee: num(data.craftsmanship_fee),
-        craftsmanship_profit_fee: num(data.craftsmanship_profit_fee),
-        stone_price: num(data.stone_price),
-        stone_profit_price: num(data.stone_profit_price),
-        selling_price_estimated: estimated,
-        craftsmanship_fee_baht: num(data.craftsmanship_fee_baht),
-        craftsmanship_profit_fee_baht: num(data.craftsmanship_profit_fee_baht),
-        selling_price_baht: num(data.selling_price_baht),
-        baht_mmk_rate: data.baht_mmk_rate != null ? num(data.baht_mmk_rate) : null,
-        thai_gold_baht_snapshot:
-          data.thai_gold_baht_snapshot != null ? num(data.thai_gold_baht_snapshot) : null,
-        status: data.status ?? 'IN_STOCK',
-        image_url: data.image_url ?? null,
-      } as any
-    );
+      )`;
+
+    let firstId: number | null = null;
+    for (let i = 0; i < quantity; i++) {
+      const [result] = await getPool().query<ResultSetHeader>(insertSql, insertParams as any);
+      if (firstId == null) firstId = result.insertId;
+    }
+
     const [rows] = await getPool().query<RowDataPacket[]>(
       `SELECT * FROM inventory_items WHERE id = :id`,
-      { id: result.insertId }
+      { id: firstId }
     );
     return mapInventory(rows[0]);
   },

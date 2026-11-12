@@ -7,6 +7,7 @@ import { LoginPage } from './components/LoginPage';
 import { ActiveTab } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
 import { InventoryView } from './components/InventoryView';
+import { InventoryStockLedgerView } from './components/InventoryStockLedgerView';
 import { OldGoldView } from './components/OldGoldView';
 import { GoldsmithView } from './components/GoldsmithView';
 import { GoldsmithHandoffView } from './components/GoldsmithHandoffView';
@@ -46,6 +47,7 @@ const ALL_TABS: ActiveTab[] = [
   'pos-history',
   'inventory',
   'inventory-summary',
+  'inventory-stock-ledger',
   'old-gold',
   'old-gold-outflows',
   'goldsmith',
@@ -319,6 +321,9 @@ const MainLayout: React.FC = () => {
           )}
           {activeTab === 'inventory-summary' && can('inventory', 'read') && (
             <InventoryView section="summary" />
+          )}
+          {activeTab === 'inventory-stock-ledger' && can('inventory', 'read') && (
+            <InventoryStockLedgerView />
           )}
           {activeTab === 'old-gold' && can('inventory', 'read') && (
             <OldGoldView section="summary" onNavigate={setActiveTab} />

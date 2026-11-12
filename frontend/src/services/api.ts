@@ -192,7 +192,9 @@ export const api = {
   deleteCustomer: (id: string) =>
     request<void>(`/customers/${id}`, { method: 'DELETE' }),
 
-  addInventoryItem: (item: Omit<InventoryItem, 'id' | 'created_at'>) =>
+  addInventoryItem: (
+    item: Omit<InventoryItem, 'id' | 'created_at'> & { quantity?: number }
+  ) =>
     request<InventoryItem>('/inventory', {
       method: 'POST',
       body: JSON.stringify(item),
