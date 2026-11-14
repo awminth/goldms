@@ -181,7 +181,16 @@ export const InventoryStockLedgerView: React.FC = () => {
       return productCategoryMeta.get(rawCat)!;
     }
 
-    // Try matching item name to known product category names (for legacy Thai gold items with category='THAI_GOLD')
+    // Try matching item category or item name to known product category names
+    for (const meta of productCategoryMeta.values()) {
+      if (
+        (meta.mm && rawCat === meta.mm.trim().toUpperCase()) ||
+        (meta.en && rawCat === meta.en.trim().toUpperCase())
+      ) {
+        return meta;
+      }
+    }
+
     const itemName = `${item.name_mm || ''} ${item.name || ''}`.trim();
     if (itemName) {
       for (const meta of productCategoryMeta.values()) {
@@ -355,13 +364,14 @@ export const InventoryStockLedgerView: React.FC = () => {
       }
 
       const catMeta = resolveProductCategory(item);
-      if (!catMap.has(catMeta.code)) {
-        catMap.set(catMeta.code, {
+      const groupKey = (catMeta.mm || catMeta.code).trim();
+      if (!catMap.has(groupKey)) {
+        catMap.set(groupKey, {
           meta: catMeta,
           subMap: new Map(),
         });
       }
-      const catEntry = catMap.get(catMeta.code)!;
+      const catEntry = catMap.get(groupKey)!;
 
       let subKey = '';
       let subLabelMm = '';
@@ -786,12 +796,7 @@ export const InventoryStockLedgerView: React.FC = () => {
                                 rowSpan={rowSpanCount}
                                 className="px-3.5 py-2.5 font-bold text-gray-900 dark:text-gray-100 align-top sticky left-12 bg-[#FAF8F2] dark:bg-[#181612] z-10 border-r border-gray-200 dark:border-gray-800"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span>{catName}</span>
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-200/60 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200">
-                                    {group.subRows.length}
-                                  </span>
-                                </div>
+                                {catName}
                               </td>
                             )}
                             <td className="px-3.5 py-2 font-semibold border-r border-gray-200 dark:border-gray-800">
