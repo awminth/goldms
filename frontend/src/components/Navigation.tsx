@@ -24,6 +24,7 @@ export type ActiveTab =
   | 'goldsmith'
   | 'goldsmith-handoff'
   | 'order-handoff'
+  | 'gold-origins'
   | 'categories'
   | 'item-types'
   | 'orders'

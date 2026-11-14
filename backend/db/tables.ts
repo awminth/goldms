@@ -318,7 +318,8 @@ export const TABLE_STATEMENTS: string[] = [
     code VARCHAR(50) NOT NULL,
     name_mm VARCHAR(150) NOT NULL,
     name_en VARCHAR(150) NOT NULL,
-    category_group ENUM('PRODUCT', 'GOLD_CLASS', 'OTHER') NOT NULL DEFAULT 'PRODUCT',
+    category_group ENUM('PRODUCT', 'GOLD_CLASS', 'GOLD_ORIGIN', 'OTHER') NOT NULL DEFAULT 'PRODUCT',
+    gold_origin VARCHAR(64) NULL DEFAULT NULL,
     description VARCHAR(500) NULL,
     sort_order INT NOT NULL DEFAULT 0,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -530,16 +531,38 @@ export async function runColumnMigrations(pool: Pool): Promise<void> {
   const catNames = getCols('master_categories');
   if (catNames.size > 0) {
     if (!catNames.has('category_group')) {
-      await pool.query(`ALTER TABLE master_categories ADD COLUMN category_group ENUM('PRODUCT', 'GOLD_CLASS', 'OTHER') NOT NULL DEFAULT 'PRODUCT' AFTER name_en`);
+      await pool.query(`ALTER TABLE master_categories ADD COLUMN category_group ENUM('PRODUCT', 'GOLD_CLASS', 'GOLD_ORIGIN', 'OTHER') NOT NULL DEFAULT 'PRODUCT' AFTER name_en`);
+    } else {
+      try {
+        await pool.query(`ALTER TABLE master_categories MODIFY COLUMN category_group ENUM('PRODUCT', 'GOLD_CLASS', 'GOLD_ORIGIN', 'OTHER') NOT NULL DEFAULT 'PRODUCT'`);
+      } catch {}
+    }
+    if (!catNames.has('gold_origin')) {
+      await pool.query(`ALTER TABLE master_categories ADD COLUMN gold_origin VARCHAR(64) NULL DEFAULT NULL AFTER category_group`);
     }
     if (!catNames.has('description')) {
-      await pool.query(`ALTER TABLE master_categories ADD COLUMN description VARCHAR(500) NULL AFTER category_group`);
+      await pool.query(`ALTER TABLE master_categories ADD COLUMN description VARCHAR(500) NULL AFTER gold_origin`);
     }
     if (!catNames.has('updated_at')) {
       await pool.query(`ALTER TABLE master_categories ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
     }
     try { await pool.query(`ALTER TABLE master_categories ADD KEY idx_master_category_group (category_group)`); } catch {}
     try { await pool.query(`ALTER TABLE master_categories ADD KEY idx_master_category_active (is_active)`); } catch {}
+
+    // Backfill gold_origin on GOLD_CLASS rows where not yet set
+    await pool.query(
+      `UPDATE master_categories
+       SET gold_origin = 'THAI_GOLD'
+       WHERE category_group = 'GOLD_CLASS'
+         AND (gold_origin IS NULL OR gold_origin = '')
+         AND (code IN ('THAI_GOLD', 'TH', 'TH_SECOND') OR name_mm LIKE '%ထိုင်း%' OR name_en LIKE '%Thai%' OR UPPER(TRIM(name_mm)) = 'TH')`
+    );
+    await pool.query(
+      `UPDATE master_categories
+       SET gold_origin = 'MYANMAR_GOLD'
+       WHERE category_group = 'GOLD_CLASS'
+         AND (gold_origin IS NULL OR gold_origin = '')`
+    );
   }
 
   // Auto-mark overdue / restore still-within-contract pawns

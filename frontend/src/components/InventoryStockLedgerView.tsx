@@ -106,7 +106,12 @@ export const InventoryStockLedgerView: React.FC = () => {
     masterCategories,
     shopSettings,
     language,
+    getGoldOriginLabel,
+    isThaiGoldClass,
   } = useGoldShop();
+
+  const myanmarLabel = getGoldOriginLabel('MYANMAR_GOLD');
+  const thaiLabel = getGoldOriginLabel('THAI_GOLD');
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
   const lastDate = todayISO();
@@ -347,7 +352,7 @@ export const InventoryStockLedgerView: React.FC = () => {
     >();
 
     for (const item of inventory) {
-      const isThai = isThaiInventoryItem(item);
+      const isThai = isThaiGoldClass(item.purity, item.item_type) || isThaiInventoryItem(item);
       if (targetTab === 'THAI' && !isThai) continue;
       if (targetTab === 'MYANMAR' && isThai) continue;
 
@@ -385,12 +390,13 @@ export const InventoryStockLedgerView: React.FC = () => {
         subLabelEn = pInfo.en;
         subSort = pInfo.sort;
       } else {
+        const pInfo = resolvePurityInfo(item.purity || 'THAI_GOLD');
         const g = resolveItemGramWeight(item);
-        subKey = g.toFixed(3);
+        subKey = `${pInfo.code}:${g.toFixed(3)}`;
         const lbl = formatGramLabel(g);
-        subLabelMm = lbl;
-        subLabelEn = lbl;
-        subSort = g;
+        subLabelMm = `${pInfo.mm} · ${lbl}`;
+        subLabelEn = `${pInfo.en} · ${lbl}`;
+        subSort = pInfo.sort * 1000 + g;
       }
 
       if (!catEntry.subMap.has(subKey)) {
@@ -473,13 +479,13 @@ export const InventoryStockLedgerView: React.FC = () => {
   const myanmarGroups = useMemo(
     () => buildGroupedLedger('MYANMAR'),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [inventory, outflowByItemId, dateCols, productCategoryMeta, goldClassMeta, kyatToGrams]
+    [inventory, outflowByItemId, dateCols, productCategoryMeta, goldClassMeta, kyatToGrams, isThaiGoldClass]
   );
 
   const thaiGroups = useMemo(
     () => buildGroupedLedger('THAI'),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [inventory, outflowByItemId, dateCols, productCategoryMeta, goldClassMeta, kyatToGrams]
+    [inventory, outflowByItemId, dateCols, productCategoryMeta, goldClassMeta, kyatToGrams, isThaiGoldClass]
   );
 
   const activeGroups = goldTab === 'MYANMAR' ? myanmarGroups : thaiGroups;
@@ -527,27 +533,20 @@ export const InventoryStockLedgerView: React.FC = () => {
           ? 'ရွှေရည်'
           : 'Purity'
         : language === 'MM'
-          ? 'Gram ချိန်'
-          : 'Gram Weight';
+          ? 'ရွှေရည် / Gram ချိန်'
+          : 'Purity / Gram Weight';
 
-    const tabTitle =
-      goldTab === 'MYANMAR'
-        ? language === 'MM'
-          ? 'မြန်မာရွှေ'
-          : 'Myanmar Gold'
-        : language === 'MM'
-          ? 'ထိုင်းရွှေ'
-          : 'Thai Gold';
+    const tabTitle = goldTab === 'MYANMAR' ? myanmarLabel : thaiLabel;
 
     exportToExcel({
       sheetName:
         goldTab === 'MYANMAR'
           ? language === 'MM'
-            ? 'မြန်မာရွှေ လက်ကျန်'
-            : 'Myanmar Gold Ledger'
+            ? `${myanmarLabel} လက်ကျန်`
+            : `${myanmarLabel} Ledger`
           : language === 'MM'
-            ? 'ထိုင်းရွှေ လက်ကျန်'
-            : 'Thai Gold Ledger',
+            ? `${thaiLabel} လက်ကျန်`
+            : `${thaiLabel} Ledger`,
       title:
         language === 'MM'
           ? `နေ့စဉ်လက်ကျန်စာရင်း - ${tabTitle} (${formatDate(dateCols[0])} → ${formatDate(dateCols[dateCols.length - 1])})`
@@ -595,11 +594,11 @@ export const InventoryStockLedgerView: React.FC = () => {
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {goldTab === 'MYANMAR'
               ? language === 'MM'
-                ? 'မြန်မာရွှေ — ပစ္စည်းအမျိုးအစားအလိုက် ရွှေရည်ဖြင့် အုပ်စုခွဲ၍ နေ့စဉ်လက်ကျန်အရေအတွက် ပြသထားပါသည်'
-                : 'Myanmar Gold — grouped by Item Category and Purity for each day'
+                ? `${myanmarLabel} — ပစ္စည်းအမျိုးအစားအလိုက် ရွှေရည်ဖြင့် အုပ်စုခွဲ၍ နေ့စဉ်လက်ကျန်အရေအတွက် ပြသထားပါသည်`
+                : `${myanmarLabel} — grouped by Item Category and Purity for each day`
               : language === 'MM'
-                ? 'ထိုင်းရွှေ — ပစ္စည်းအမျိုးအစားအလိုက် Gram ချိန်ဖြင့် အုပ်စုခွဲ၍ နေ့စဉ်လက်ကျန်အရေအတွက် ပြသထားပါသည်'
-                : 'Thai Gold — grouped by Item Category and Gram weight for each day'}
+                ? `${thaiLabel} — ပစ္စည်းအမျိုးအစားအလိုက် ရွှေရည် နှင့် Gram ချိန်ဖြင့် အုပ်စုခွဲ၍ နေ့စဉ်လက်ကျန်အရေအတွက် ပြသထားပါသည်`
+                : `${thaiLabel} — grouped by Item Category, Purity and Gram weight for each day`}
           </p>
         </div>
 
@@ -655,7 +654,7 @@ export const InventoryStockLedgerView: React.FC = () => {
           }`}
         >
           <Gem className="w-4 h-4 shrink-0" />
-          <span>{language === 'MM' ? 'မြန်မာရွှေ' : 'Myanmar Gold'}</span>
+          <span>{myanmarLabel}</span>
           <span
             className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
               goldTab === 'MYANMAR'
@@ -677,7 +676,7 @@ export const InventoryStockLedgerView: React.FC = () => {
           }`}
         >
           <Layers className="w-4 h-4 shrink-0" />
-          <span>{language === 'MM' ? 'ထိုင်းရွှေ' : 'Thai Gold'}</span>
+          <span>{thaiLabel}</span>
           <span
             className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
               goldTab === 'THAI'
@@ -698,11 +697,11 @@ export const InventoryStockLedgerView: React.FC = () => {
             <span className="font-bold text-gray-900 dark:text-amber-100">
               {goldTab === 'MYANMAR'
                 ? language === 'MM'
-                  ? 'မြန်မာရွှေ — ပစ္စည်းအမျိုးအစား နှင့် ရွှေရည်အလိုက် လက်ကျန်ဇယား'
-                  : 'Myanmar Gold — Stock by Category & Purity'
+                  ? `${myanmarLabel} — ပစ္စည်းအမျိုးအစား နှင့် ရွှေရည်အလိုက် လက်ကျန်ဇယား`
+                  : `${myanmarLabel} — Stock by Category & Purity`
                 : language === 'MM'
-                  ? 'ထိုင်းရွှေ — ပစ္စည်းအမျိုးအစား နှင့် Gram ချိန်အလိုက် လက်ကျန်ဇယား'
-                  : 'Thai Gold — Stock by Category & Gram Weight'}
+                  ? `${thaiLabel} — ပစ္စည်းအမျိုးအစား၊ ရွှေရည် နှင့် Gram ချိန်အလိုက် လက်ကျန်ဇယား`
+                  : `${thaiLabel} — Stock by Category, Purity & Gram Weight`}
             </span>
             <span className="font-mono text-amber-700/70 dark:text-amber-300/70">
               ({formatDate(dateCols[0])}
@@ -739,8 +738,8 @@ export const InventoryStockLedgerView: React.FC = () => {
                       ? 'ရွှေရည်'
                       : 'Purity'
                     : language === 'MM'
-                      ? 'Gram ချိန်'
-                      : 'Gram Weight'}
+                      ? 'ရွှေရည် / Gram ချိန်'
+                      : 'Purity / Gram Weight'}
                 </th>
                 {dateCols.map((d) => (
                   <th

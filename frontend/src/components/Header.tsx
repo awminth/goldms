@@ -41,7 +41,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
     logout,
     can,
     updateShopSettings,
+    getGoldOriginLabel,
   } = useGoldShop();
+  const thaiOriginLabel = getGoldOriginLabel('THAI_GOLD');
 
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [editedMeelin, setEditedMeelin] = useState('');
@@ -135,7 +137,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                 </div>
                 <div className="flex items-center space-x-1">
                   <span className="text-gray-600 dark:text-gray-300 font-medium whitespace-nowrap">
-                    ထိုင်းရွှေ:
+                    {thaiOriginLabel}:
                   </span>
                   <input
                     type="number"
@@ -192,7 +194,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                 )}
                 <span className="text-gray-300 dark:text-gray-700">|</span>
                 <div className="flex items-center space-x-1 whitespace-nowrap">
-                  <span className="text-gray-500 dark:text-gray-400">ထိုင်းရွှေ:</span>
+                  <span className="text-gray-500 dark:text-gray-400">{thaiOriginLabel}:</span>
                   <span className="font-bold text-gray-900 dark:text-amber-300 font-mono">
                     {fmtBaht(thaiBahtStored)} ฿
                   </span>

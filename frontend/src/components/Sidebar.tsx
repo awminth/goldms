@@ -39,6 +39,7 @@ interface SidebarProps {
 }
 
 const SETUP_TABS: ActiveTab[] = [
+  'gold-origins',
   'categories',
   'item-types',
   'users',
@@ -262,6 +263,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     : [];
 
   const setupChildren = [
+    {
+      id: 'gold-origins' as ActiveTab,
+      labelMM: 'ရွှေအမျိုးအစား (မြန်မာ/ထိုင်း)',
+      labelEN: 'Gold Types (Origin)',
+      icon: Gem,
+      visible: can('master', 'read'),
+    },
     {
       id: 'categories' as ActiveTab,
       labelMM: 'Categories (ပဲရည်)',

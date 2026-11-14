@@ -16,6 +16,7 @@ export const TAB_TO_PATH: Record<ActiveTab, string> = {
   goldsmith: 'goldsmith',
   'goldsmith-handoff': 'goldsmith-handoff',
   'order-handoff': 'order-handoff',
+  'gold-origins': 'gold-origins',
   categories: 'categories',
   'item-types': 'item-types',
   orders: 'orders',

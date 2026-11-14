@@ -131,6 +131,12 @@ interface GoldShopContextType {
   deleteCustomer: (id: string) => Promise<void>;
   getLivePriceForPurity: (purity: GoldPurity) => number;
   getBuyPriceForPurity: (purity: GoldPurity) => number;
+  getGoldOriginLabel: (originKey: 'MYANMAR_GOLD' | 'THAI_GOLD' | string) => string;
+  isThaiGoldClass: (purityCode?: string, itemType?: string) => boolean;
+  getGoldOriginForPurity: (
+    purityCode?: string,
+    itemType?: string
+  ) => { label: string; isThai: boolean; originCode: string };
   addMerchantReturn: (data: Record<string, unknown>) => Promise<OldGoldMerchantReturn>;
   updateMerchantReturn: (id: string, data: Record<string, unknown>) => Promise<OldGoldMerchantReturn>;
   deleteMerchantReturn: (id: string) => Promise<void>;
@@ -842,6 +848,90 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyBootstrap(data, setters);
   };
 
+  const getGoldOriginLabel = useCallback(
+    (originKey: 'MYANMAR_GOLD' | 'THAI_GOLD' | string): string => {
+      const key = String(originKey || 'MYANMAR_GOLD').trim();
+      const origins = masterCategories.filter((c) => c.category_group === 'GOLD_ORIGIN');
+      const exactCode = origins.find((c) => c.code === key);
+      if (exactCode) {
+        return language === 'MM' ? exactCode.name_mm : exactCode.name_en || exactCode.name_mm;
+      }
+      const byCalcMode = origins.find((c) => c.gold_origin === key);
+      if (byCalcMode) {
+        return language === 'MM' ? byCalcMode.name_mm : byCalcMode.name_en || byCalcMode.name_mm;
+      }
+      if (key === 'THAI_GOLD' || key === 'ORIGIN_THAI') {
+        return language === 'MM' ? 'ထိုင်းရွှေ' : 'Thai Gold';
+      }
+      return language === 'MM' ? 'မြန်မာရွှေ' : 'Myanmar Gold';
+    },
+    [masterCategories, language]
+  );
+
+  const isThaiGoldClass = useCallback(
+    (purityCode?: string, itemType?: string): boolean => {
+      if (itemType === 'THAI_GOLD') return true;
+      const code = String(purityCode || '').trim();
+      if (!code) return false;
+      const cls = masterCategories.find(
+        (c) => c.category_group === 'GOLD_CLASS' && c.code === code
+      );
+      if (cls?.gold_origin) {
+        if (cls.gold_origin === 'THAI_GOLD' || cls.gold_origin === 'ORIGIN_THAI') return true;
+        if (cls.gold_origin === 'MYANMAR_GOLD' || cls.gold_origin === 'ORIGIN_MYANMAR') return false;
+        const originRow = masterCategories.find(
+          (c) =>
+            c.category_group === 'GOLD_ORIGIN' &&
+            (c.code === cls.gold_origin || c.gold_origin === cls.gold_origin)
+        );
+        if (originRow) return originRow.gold_origin === 'THAI_GOLD';
+      }
+      return code === 'THAI_GOLD' || code === 'TH' || code === 'TH_SECOND';
+    },
+    [masterCategories]
+  );
+
+  const getGoldOriginForPurity = useCallback(
+    (
+      purityCode?: string,
+      itemType?: string
+    ): { label: string; isThai: boolean; originCode: string } => {
+      const code = String(purityCode || '').trim();
+      const cls = masterCategories.find(
+        (c) => c.category_group === 'GOLD_CLASS' && c.code === code
+      );
+      if (cls?.gold_origin) {
+        const originRow = masterCategories.find(
+          (c) =>
+            c.category_group === 'GOLD_ORIGIN' &&
+            (c.code === cls.gold_origin || c.gold_origin === cls.gold_origin)
+        );
+        if (originRow) {
+          const isThai = originRow.gold_origin === 'THAI_GOLD' || itemType === 'THAI_GOLD';
+          return {
+            label: language === 'MM' ? originRow.name_mm : originRow.name_en || originRow.name_mm,
+            isThai,
+            originCode: originRow.code,
+          };
+        }
+        const isThai = cls.gold_origin === 'THAI_GOLD' || cls.gold_origin === 'ORIGIN_THAI' || itemType === 'THAI_GOLD';
+        return {
+          label: getGoldOriginLabel(cls.gold_origin),
+          isThai,
+          originCode: cls.gold_origin,
+        };
+      }
+      const isThai = isThaiGoldClass(purityCode, itemType);
+      const fallbackKey = isThai ? 'THAI_GOLD' : 'MYANMAR_GOLD';
+      return {
+        label: getGoldOriginLabel(fallbackKey),
+        isThai,
+        originCode: fallbackKey,
+      };
+    },
+    [masterCategories, language, getGoldOriginLabel, isThaiGoldClass]
+  );
+
   return (
     <GoldShopContext.Provider
       value={{
@@ -928,6 +1018,9 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deleteCustomer,
         getLivePriceForPurity,
         getBuyPriceForPurity,
+        getGoldOriginLabel,
+        isThaiGoldClass,
+        getGoldOriginForPurity,
         resetToDemoData,
         createMasterCategory,
         updateMasterCategory,

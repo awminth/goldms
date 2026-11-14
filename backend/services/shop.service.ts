@@ -40,7 +40,8 @@ function mapMasterCategory(row: RowDataPacket) {
     code: row.code,
     name_mm: row.name_mm,
     name_en: row.name_en,
-    category_group: (row.category_group as 'PRODUCT' | 'GOLD_CLASS' | 'OTHER') || 'PRODUCT',
+    category_group: (row.category_group as 'PRODUCT' | 'GOLD_CLASS' | 'GOLD_ORIGIN' | 'OTHER') || 'PRODUCT',
+    gold_origin: row.gold_origin ? String(row.gold_origin) : undefined,
     description: row.description ? String(row.description) : '',
     sort_order: Number(row.sort_order || 0),
     is_active: Boolean(Number(row.is_active)),
@@ -50,7 +51,7 @@ function mapMasterCategory(row: RowDataPacket) {
   };
 }
 
-const CATEGORY_GROUPS = new Set(['PRODUCT', 'GOLD_CLASS', 'OTHER']);
+const CATEGORY_GROUPS = new Set(['PRODUCT', 'GOLD_CLASS', 'GOLD_ORIGIN', 'OTHER']);
 
 /** Add calendar months to an ISO yyyy-mm-dd date (local components, no UTC shift). */
 function addMonthsISO(isoDate: string, months: number): string {
@@ -73,9 +74,9 @@ function normalizeCategoryCode(raw: unknown) {
     .replace(/\s+/g, '_');
 }
 
-function normalizeCategoryGroup(raw: unknown): 'PRODUCT' | 'GOLD_CLASS' | 'OTHER' {
+function normalizeCategoryGroup(raw: unknown): 'PRODUCT' | 'GOLD_CLASS' | 'GOLD_ORIGIN' | 'OTHER' {
   const g = String(raw || 'PRODUCT').toUpperCase();
-  return CATEGORY_GROUPS.has(g) ? (g as 'PRODUCT' | 'GOLD_CLASS' | 'OTHER') : 'PRODUCT';
+  return CATEGORY_GROUPS.has(g) ? (g as 'PRODUCT' | 'GOLD_CLASS' | 'GOLD_ORIGIN' | 'OTHER') : 'PRODUCT';
 }
 
 function mapPermissionModule(row: RowDataPacket) {
@@ -756,17 +757,27 @@ export const shopService = {
       activeOnly
         ? `SELECT c.*,
              (SELECT COUNT(*) FROM inventory_items i
-               WHERE i.category = c.code OR i.purity = c.code) +
+               WHERE i.category = c.code OR i.purity = c.code
+                 OR (c.category_group = 'GOLD_ORIGIN' AND i.item_type = COALESCE(c.gold_origin, c.code))) +
              (SELECT COUNT(*) FROM orders o
-               WHERE o.item_type = c.code OR o.purity = c.code) AS usage_count
+               WHERE o.item_type = c.code OR o.purity = c.code) +
+             (SELECT COUNT(*) FROM master_categories mc
+               WHERE c.category_group = 'GOLD_ORIGIN'
+                 AND mc.category_group = 'GOLD_CLASS'
+                 AND (mc.gold_origin = c.code OR mc.gold_origin = c.gold_origin)) AS usage_count
            FROM master_categories c
            WHERE c.is_active = 1
            ORDER BY c.category_group ASC, c.sort_order ASC, c.id ASC`
         : `SELECT c.*,
              (SELECT COUNT(*) FROM inventory_items i
-               WHERE i.category = c.code OR i.purity = c.code) +
+               WHERE i.category = c.code OR i.purity = c.code
+                 OR (c.category_group = 'GOLD_ORIGIN' AND i.item_type = COALESCE(c.gold_origin, c.code))) +
              (SELECT COUNT(*) FROM orders o
-               WHERE o.item_type = c.code OR o.purity = c.code) AS usage_count
+               WHERE o.item_type = c.code OR o.purity = c.code) +
+             (SELECT COUNT(*) FROM master_categories mc
+               WHERE c.category_group = 'GOLD_ORIGIN'
+                 AND mc.category_group = 'GOLD_CLASS'
+                 AND (mc.gold_origin = c.code OR mc.gold_origin = c.gold_origin)) AS usage_count
            FROM master_categories c
            ORDER BY c.category_group ASC, c.sort_order ASC, c.id ASC`
     );
@@ -791,6 +802,14 @@ export const shopService = {
     const code = normalizeCategoryCode(data.code);
     if (!code || !data.name_mm) throw new HttpError(400, 'code and name_mm required');
     const category_group = normalizeCategoryGroup(data.category_group);
+    const gold_origin =
+      data.gold_origin != null && String(data.gold_origin).trim()
+        ? String(data.gold_origin).trim()
+        : category_group === 'GOLD_CLASS'
+          ? 'MYANMAR_GOLD'
+          : category_group === 'GOLD_ORIGIN'
+            ? 'MYANMAR_GOLD'
+            : null;
     const name_mm = String(data.name_mm);
     const name_en = String(data.name_en || data.name_mm);
     const description =
@@ -800,13 +819,14 @@ export const shopService = {
     try {
       const [result] = await getPool().query<ResultSetHeader>(
         `INSERT INTO master_categories
-           (code, name_mm, name_en, category_group, description, sort_order, is_active)
-         VALUES (:code, :name_mm, :name_en, :category_group, :description, :sort_order, :is_active)`,
+           (code, name_mm, name_en, category_group, gold_origin, description, sort_order, is_active)
+         VALUES (:code, :name_mm, :name_en, :category_group, :gold_origin, :description, :sort_order, :is_active)`,
         {
           code,
           name_mm,
           name_en,
           category_group,
+          gold_origin,
           description,
           sort_order: num(data.sort_order),
           is_active: data.is_active === false || data.is_active === 0 ? 0 : 1,
@@ -837,6 +857,7 @@ export const shopService = {
       'name_mm',
       'name_en',
       'category_group',
+      'gold_origin',
       'description',
       'sort_order',
       'is_active',
@@ -852,6 +873,8 @@ export const shopService = {
           params[key] = normalizeCategoryCode(data[key]);
         } else if (key === 'category_group') {
           params[key] = normalizeCategoryGroup(data[key]);
+        } else if (key === 'gold_origin') {
+          params[key] = data[key] == null || String(data[key]).trim() === '' ? null : String(data[key]).trim();
         } else if (key === 'description') {
           params[key] = data[key] == null ? null : String(data[key]).slice(0, 500);
         } else {
@@ -882,12 +905,36 @@ export const shopService = {
           newCode,
           oldCode,
         });
+        await conn.query(`UPDATE inventory_items SET purity = :newCode WHERE purity = :oldCode`, {
+          newCode,
+          oldCode,
+        });
         await conn.query(`UPDATE orders SET item_type = :newCode WHERE item_type = :oldCode`, {
+          newCode,
+          oldCode,
+        });
+        await conn.query(`UPDATE orders SET purity = :newCode WHERE purity = :oldCode`, {
           newCode,
           oldCode,
         });
         await conn.query(
           `UPDATE transaction_items SET category = :newCode WHERE category = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
+          `UPDATE transaction_items SET purity = :newCode WHERE purity = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
+          `UPDATE pawn_records SET purity = :newCode WHERE purity = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
+          `UPDATE goldsmith_jobs SET purity = :newCode WHERE purity = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
+          `UPDATE daily_gold_prices SET gold_type = :newCode WHERE gold_type = :oldCode`,
           { newCode, oldCode }
         );
       }
@@ -915,16 +962,25 @@ export const shopService = {
     );
     if (!rows[0]) throw new HttpError(404, 'Category not found');
     const code = String(rows[0].code);
+    const catGroup = String(rows[0].category_group || '');
+    const originVal = String(rows[0].gold_origin || code);
 
     const [inv] = await getPool().query<RowDataPacket[]>(
-      `SELECT COUNT(*) AS cnt FROM inventory_items WHERE category = :code OR purity = :code`,
-      { code }
+      `SELECT COUNT(*) AS cnt FROM inventory_items WHERE category = :code OR purity = :code OR (:isOrigin = 1 AND item_type = :originVal)`,
+      { code, isOrigin: catGroup === 'GOLD_ORIGIN' ? 1 : 0, originVal }
     );
     const [ord] = await getPool().query<RowDataPacket[]>(
       `SELECT COUNT(*) AS cnt FROM orders WHERE item_type = :code OR purity = :code`,
       { code }
     );
-    const usage = Number(inv[0]?.cnt || 0) + Number(ord[0]?.cnt || 0);
+    const [linkedCats] = await getPool().query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt FROM master_categories WHERE category_group = 'GOLD_CLASS' AND (gold_origin = :code OR gold_origin = :originVal)`,
+      { code, originVal }
+    );
+    const usage =
+      Number(inv[0]?.cnt || 0) +
+      Number(ord[0]?.cnt || 0) +
+      (catGroup === 'GOLD_ORIGIN' ? Number(linkedCats[0]?.cnt || 0) : 0);
     if (usage > 0) {
       await getPool().query(`UPDATE master_categories SET is_active = 0 WHERE id = :id`, {
         id: catId,

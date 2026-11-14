@@ -19,16 +19,36 @@ export const PERMISSION_MODULES = [
   { key: 'permissions', name_mm: 'ခွင့်ပြုချက်များ', name_en: 'Permissions', sort: 130 },
 ] as const;
 
-export type CategoryGroup = 'PRODUCT' | 'GOLD_CLASS' | 'OTHER';
+export type CategoryGroup = 'PRODUCT' | 'GOLD_CLASS' | 'GOLD_ORIGIN' | 'OTHER';
 
 export const DEFAULT_CATEGORIES: Array<{
   code: string;
   name_mm: string;
   name_en: string;
   category_group: CategoryGroup;
+  gold_origin?: string | null;
   description: string;
   sort: number;
 }> = [
+    // —— Base Gold Origins / Types (Setup → ရွှေအမျိုးအစား မြန်မာ/ထိုင်း) ——
+    {
+      code: 'ORIGIN_MYANMAR',
+      name_mm: 'မြန်မာရွှေ',
+      name_en: 'Myanmar Gold',
+      category_group: 'GOLD_ORIGIN',
+      gold_origin: 'MYANMAR_GOLD',
+      description: 'ကျပ် / ပဲ / ရွေး တွက်ချက်မှုစနစ် (Myanmar Gold)',
+      sort: 10,
+    },
+    {
+      code: 'ORIGIN_THAI',
+      name_mm: 'ထိုင်းရွှေ',
+      name_en: 'Thai Gold',
+      category_group: 'GOLD_ORIGIN',
+      gold_origin: 'THAI_GOLD',
+      description: 'Gram / ဘတ် တွက်ချက်မှုစနစ် (Thai Gold)',
+      sort: 20,
+    },
     // —— Product / jewelry item types (Setup → ပစ္စည်းအမျိုးအစား) ——
     {
       code: 'NECKLACE',
@@ -109,6 +129,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: 'မီးလင်း',
       name_en: 'Meelin',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '',
       sort: 10,
     },
@@ -117,6 +138,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '24K',
       name_en: '24K',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: 'မီးလင်း နှင့် တူညီ',
       sort: 20,
     },
@@ -125,6 +147,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '15A',
       name_en: '15A',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '(မီးလင်း × 16) / 17',
       sort: 30,
     },
@@ -133,6 +156,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '15B',
       name_en: '15B',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '(မီးလင်း × 16) / 17.5',
       sort: 40,
     },
@@ -141,6 +165,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '14A',
       name_en: '14A',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '(မီးလင်း × 14) / 16',
       sort: 50,
     },
@@ -149,6 +174,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '13A',
       name_en: '13A',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '(မီးလင်း × 13) / 16',
       sort: 60,
     },
@@ -157,6 +183,7 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '12A',
       name_en: '12A',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '(မီးလင်း × 12) / 16',
       sort: 70,
     },
@@ -165,16 +192,27 @@ export const DEFAULT_CATEGORIES: Array<{
       name_mm: '18K',
       name_en: '18K',
       category_group: 'GOLD_CLASS',
+      gold_origin: 'MYANMAR_GOLD',
       description: '12A နှင့် တူညီ — (မီးလင်း × 12) / 16',
       sort: 80,
     },
     {
       code: 'THAI_GOLD',
-      name_mm: 'ထိုင်းရွှေ',
-      name_en: 'Thai Gold',
+      name_mm: 'TH',
+      name_en: 'TH',
       category_group: 'GOLD_CLASS',
-      description: '',
+      gold_origin: 'THAI_GOLD',
+      description: 'ထိုင်းရွှေ (Thai Gold)',
       sort: 90,
+    },
+    {
+      code: 'TH_SECOND',
+      name_mm: 'ထိုင်းရွှေ Second',
+      name_en: 'Thai Gold Second',
+      category_group: 'GOLD_CLASS',
+      gold_origin: 'THAI_GOLD',
+      description: 'ထိုင်းရွှေ Second',
+      sort: 95,
     },
   ];
 
@@ -263,14 +301,34 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, Crud>> = {
   },
 };
 
-/** Replace GOLD_CLASS list, migrate purity fields, refresh daily prices */
+/** Ensure default categories exist, migrate legacy purity fields once, seed missing daily prices without overwriting user edits */
 export async function ensureDefaultCategories(pool: Pool): Promise<void> {
-  // Remove old gold-class categories not in the new set
-  const placeholders = GOLD_CLASS_CODES.map(() => '?').join(',');
+  // Remove only retired legacy gold-class codes (never delete user-created GOLD_CLASS or GOLD_ORIGIN rows)
+  const legacyCodes = [
+    '16_PE_AUNG',
+    'PE16_AUNG',
+    '15_PE_AUNG',
+    'PE15_AUNG',
+    '15_PE_THIT',
+    'PE15_THIT',
+    'PE15',
+    '1_PHO',
+    '1_2_PHO',
+    'PE14',
+    '14K',
+    'K14',
+    'PE13',
+    'PE12',
+    '18K',
+    'DEPOSIT_GOLD',
+    'THAI_GOLD_CLASS',
+    'WHITE_GOLD',
+  ];
+  const legacyPlaceholders = legacyCodes.map(() => '?').join(',');
   await pool.query(
     `DELETE FROM master_categories
-     WHERE category_group = 'GOLD_CLASS' AND code NOT IN (${placeholders})`,
-    GOLD_CLASS_CODES
+     WHERE category_group = 'GOLD_CLASS' AND code IN (${legacyPlaceholders})`,
+    legacyCodes
   );
 
   // MIXED (အမယ်စုံ) is pawn gold_kind only — never a product / purity category
@@ -281,17 +339,32 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
   for (const c of DEFAULT_CATEGORIES) {
     await pool.query(
       `INSERT INTO master_categories
-         (code, name_mm, name_en, category_group, description, sort_order, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, 1)
+         (code, name_mm, name_en, category_group, gold_origin, description, sort_order, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1)
        ON DUPLICATE KEY UPDATE
-         name_mm = VALUES(name_mm),
-         name_en = VALUES(name_en),
-         category_group = VALUES(category_group),
-         description = VALUES(description),
-         sort_order = VALUES(sort_order),
-         is_active = 1`,
-      [c.code, c.name_mm, c.name_en, c.category_group, c.description, c.sort]
+         gold_origin = COALESCE(NULLIF(gold_origin, ''), VALUES(gold_origin))`,
+      [c.code, c.name_mm, c.name_en, c.category_group, c.gold_origin ?? null, c.description, c.sort]
     );
+  }
+
+  // One-time migration: rename THAI_GOLD GOLD_CLASS display name to 'TH' if it was still 'ထိုင်းရွှေ'
+  try {
+    const [thFlag] = await pool.query<RowDataPacket[]>(
+      `SELECT setting_value FROM shop_settings WHERE setting_key = 'thai_gold_class_th_v1'`
+    );
+    if (!thFlag[0]?.setting_value) {
+      await pool.query(
+        `UPDATE master_categories
+         SET name_mm = 'TH', name_en = 'TH', gold_origin = 'THAI_GOLD'
+         WHERE code = 'THAI_GOLD' AND category_group = 'GOLD_CLASS' AND name_mm = 'ထိုင်းရွှေ'`
+      );
+      await pool.query(
+        `INSERT INTO shop_settings (setting_key, setting_value) VALUES ('thai_gold_class_th_v1', '1')
+         ON DUPLICATE KEY UPDATE setting_value = '1'`
+      );
+    }
+  } catch {
+    /* ignore */
   }
 
   // Remap legacy purity codes on live data only once (flagged in shop_settings)
@@ -391,8 +464,8 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
     ];
 
   await pool.query(
-    `DELETE FROM daily_gold_prices WHERE gold_type NOT IN (${placeholders})`,
-    GOLD_CLASS_CODES
+    `DELETE FROM daily_gold_prices WHERE gold_type IN (${legacyPlaceholders})`,
+    legacyCodes
   );
 
   for (const p of priceSeed) {
@@ -400,8 +473,7 @@ export async function ensureDefaultCategories(pool: Pool): Promise<void> {
       `INSERT INTO daily_gold_prices (gold_type, name_mm, name_en, price_per_kyat, buy_price_per_kyat)
        VALUES (?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
-         name_mm = VALUES(name_mm),
-         name_en = VALUES(name_en)`,
+         gold_type = gold_type`,
       [p.code, p.mm, p.en, p.sell, p.buy]
     );
   }

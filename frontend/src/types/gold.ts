@@ -7,7 +7,8 @@ export type GoldPurity =
   | 'PE13A' // 13A
   | 'PE12A' // 12A
   | 'K18' // 18K — same formula as 12A
-  | 'THAI_GOLD'; // ထိုင်းရွှေ
+  | 'THAI_GOLD' // ထိုင်းရွှေ
+  | (string & {});
 
 export type ItemType = 'MYANMAR_GOLD' | 'THAI_GOLD' | 'WHITE_GOLD' | 'GEMS_JEWELRY';
 
@@ -409,7 +410,7 @@ export interface CreditDebt {
 
 export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER';
 export type PermissionAction = 'create' | 'read' | 'update' | 'delete';
-export type CategoryGroup = 'PRODUCT' | 'GOLD_CLASS' | 'OTHER';
+export type CategoryGroup = 'PRODUCT' | 'GOLD_CLASS' | 'GOLD_ORIGIN' | 'OTHER';
 
 export interface ShopSettings {
   /** 1 ကျပ် = N grams (Myanmar) */
@@ -433,6 +434,7 @@ export interface MasterCategory {
   name_mm: string;
   name_en: string;
   category_group: CategoryGroup;
+  gold_origin?: string;
   description?: string;
   sort_order: number;
   is_active: boolean;

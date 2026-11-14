@@ -53,6 +53,7 @@ const ALL_TABS: ActiveTab[] = [
   'goldsmith',
   'goldsmith-handoff',
   'order-handoff',
+  'gold-origins',
   'categories',
   'item-types',
   'orders',
@@ -339,6 +340,9 @@ const MainLayout: React.FC = () => {
             )}
           {activeTab === 'order-handoff' && can('orders', 'read') && orderHandoffId && (
             <GoldsmithHandoffView orderId={orderHandoffId} onBack={clearOrderHandoff} />
+          )}
+          {activeTab === 'gold-origins' && can('master', 'read') && (
+            <SetupView section="gold-origins" />
           )}
           {activeTab === 'categories' && can('master', 'read') && (
             <SetupView section="categories" />

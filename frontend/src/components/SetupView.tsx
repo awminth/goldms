@@ -31,8 +31,8 @@ import { useClientPagination } from '../hooks/useClientPagination';
 import { PaginationBar } from './PaginationBar';
 import { ModalOverlay } from './ModalOverlay';
 
-type SetupTab = 'categories' | 'item-types' | 'users' | 'customers' | 'permissions' | 'unit-conversion';
-type SetupSection = 'categories' | 'item-types' | 'settings';
+type SetupTab = 'gold-origins' | 'categories' | 'item-types' | 'users' | 'customers' | 'permissions' | 'unit-conversion';
+type SetupSection = 'gold-origins' | 'categories' | 'item-types' | 'settings';
 
 const ROLES: UserRole[] = ['OWNER', 'MANAGER', 'CASHIER'];
 
@@ -70,11 +70,13 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   const defaultTab: SetupTab =
     initialTab ||
-    (section === 'item-types'
-      ? 'item-types'
-      : section === 'settings'
-        ? 'users'
-        : 'categories');
+    (section === 'gold-origins'
+      ? 'gold-origins'
+      : section === 'item-types'
+        ? 'item-types'
+        : section === 'settings'
+          ? 'users'
+          : 'categories');
 
   const [tab, setTab] = useState<SetupTab>(defaultTab);
 
@@ -83,30 +85,38 @@ export const SetupView: React.FC<SetupViewProps> = ({
   }, [section, initialTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const title =
-    section === 'categories'
+    section === 'gold-origins'
       ? language === 'MM'
-        ? 'Categories (ရွှေပဲရည်)'
-        : 'Categories'
-      : section === 'item-types'
+        ? 'ရွှေအမျိုးအစား (မြန်မာရွှေ / ထိုင်းရွှေ)'
+        : 'Gold Types (Origin)'
+      : section === 'categories'
         ? language === 'MM'
-          ? 'ပစ္စည်းအမျိုးအစား'
-          : 'Item Types'
-        : language === 'MM'
-          ? 'Setup စီမံခန့်ခွဲမှု'
-          : 'Setup';
+          ? 'Categories (ရွှေပဲရည်)'
+          : 'Categories'
+        : section === 'item-types'
+          ? language === 'MM'
+            ? 'ပစ္စည်းအမျိုးအစား'
+            : 'Item Types'
+          : language === 'MM'
+            ? 'Setup စီမံခန့်ခွဲမှု'
+            : 'Setup';
 
   const subtitle =
-    section === 'categories'
+    section === 'gold-origins'
       ? language === 'MM'
-        ? 'မီးလင်း၊ 24K၊ 15A၊ 15B၊ 14A၊ 13A၊ 12A၊ 18K၊ ထိုင်းရွှေ'
-        : 'Meelin, 24K, 15A, 15B, 14A, 13A, 12A, 18K, Thai Gold'
-      : section === 'item-types'
+        ? 'မြန်မာရွှေ၊ ထိုင်းရွှေ အမည်များကို စိတ်ကြိုက် ပြင်ဆင်သတ်မှတ်နိုင်ပြီး Categories (ပဲရည်) နှင့် ချိတ်ဆက်အသုံးပြုနိုင်ပါသည်'
+        : 'Customize display names for Myanmar Gold / Thai Gold and link them with purity categories'
+      : section === 'categories'
         ? language === 'MM'
-          ? 'လက်စွပ်၊ ဆွဲကြိုး စသည့် ပစ္စည်းအမျိုးအစားများကို စီမံပါ'
-          : 'Manage jewelry item types (rings, necklaces, etc.)'
-        : language === 'MM'
-          ? 'ဖောက်သည်၊ အသုံးပြုသူ၊ ယူနစ်နှင့် CRUD ခွင့်ပြုချက်'
-          : 'Customers, staff, unit conversion, and permissions';
+          ? 'ရွှေပဲရည် Categories များကို ရွှေအမျိုးအစား (မြန်မာရွှေ / ထိုင်းရွှေ) နှင့် ချိတ်ဆက်၍ စီမံပါ'
+          : 'Manage gold purity categories linked to Gold Origin (Myanmar / Thai)'
+        : section === 'item-types'
+          ? language === 'MM'
+            ? 'လက်စွပ်၊ ဆွဲကြိုး စသည့် ပစ္စည်းအမျိုးအစားများကို စီမံပါ'
+            : 'Manage jewelry item types (rings, necklaces, etc.)'
+          : language === 'MM'
+            ? 'ဖောက်သည်၊ အသုံးပြုသူ၊ ယူနစ်နှင့် CRUD ခွင့်ပြုချက်'
+            : 'Customers, staff, unit conversion, and permissions';
 
   const showSettingsTabs = section === 'settings';
   const settingsTabs = [
@@ -178,6 +188,25 @@ export const SetupView: React.FC<SetupViewProps> = ({
         </div>
       )}
 
+      {section === 'gold-origins' && can('master', 'read') && (
+        <CategoriesPanel
+          language={language}
+          lockedGroup="GOLD_ORIGIN"
+          titleMM="ရွှေအမျိုးအစား (မြန်မာရွှေ / ထိုင်းရွှေ)"
+          titleEN="Gold Types (Origins)"
+          addLabelMM="ရွှေအမျိုးအစား အသစ်"
+          addLabelEN="Add Gold Type"
+          categories={masterCategories.filter((c) => c.category_group === 'GOLD_ORIGIN')}
+          goldOrigins={masterCategories.filter((c) => c.category_group === 'GOLD_ORIGIN')}
+          canCreate={can('master', 'create')}
+          canUpdate={can('master', 'update')}
+          canDelete={can('master', 'delete')}
+          onCreate={createMasterCategory}
+          onUpdate={updateMasterCategory}
+          onDelete={deleteMasterCategory}
+        />
+      )}
+
       {section === 'categories' && can('master', 'read') && (
         <CategoriesPanel
           language={language}
@@ -187,6 +216,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           addLabelMM="Category အသစ်"
           addLabelEN="Add Category"
           categories={masterCategories.filter((c) => c.category_group === 'GOLD_CLASS')}
+          goldOrigins={masterCategories.filter((c) => c.category_group === 'GOLD_ORIGIN')}
           canCreate={can('master', 'create')}
           canUpdate={can('master', 'update')}
           canDelete={can('master', 'delete')}
@@ -207,6 +237,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           categories={masterCategories.filter(
             (c) => (c.category_group || 'PRODUCT') === 'PRODUCT' || c.category_group === 'OTHER'
           )}
+          goldOrigins={masterCategories.filter((c) => c.category_group === 'GOLD_ORIGIN')}
           canCreate={can('master', 'create')}
           canUpdate={can('master', 'update')}
           canDelete={can('master', 'delete')}
@@ -373,6 +404,7 @@ function UnitConversionPanel({
 function CategoriesPanel({
   language,
   categories,
+  goldOrigins,
   canCreate,
   canUpdate,
   canDelete,
@@ -387,6 +419,7 @@ function CategoriesPanel({
 }: {
   language: string;
   categories: MasterCategory[];
+  goldOrigins: MasterCategory[];
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
@@ -400,11 +433,78 @@ function CategoriesPanel({
   addLabelEN: string;
 }) {
   const dialog = useDialog();
+
+  const originOptions = useMemo(() => {
+    const active = goldOrigins.filter((o) => o.is_active);
+    const list = active.length > 0 ? active : goldOrigins;
+    if (list.length === 0) {
+      return [
+        {
+          value: 'MYANMAR_GOLD',
+          label: language === 'MM' ? 'မြန်မာရွှေ' : 'Myanmar Gold',
+          isThai: false,
+        },
+        {
+          value: 'THAI_GOLD',
+          label: language === 'MM' ? 'ထိုင်းရွှေ' : 'Thai Gold',
+          isThai: true,
+        },
+      ];
+    }
+    return list.map((o) => {
+      const value =
+        o.code === 'ORIGIN_MYANMAR'
+          ? 'MYANMAR_GOLD'
+          : o.code === 'ORIGIN_THAI'
+            ? 'THAI_GOLD'
+            : o.gold_origin === 'MYANMAR_GOLD' || o.gold_origin === 'THAI_GOLD'
+              ? o.code
+              : o.code;
+      const isThai = o.gold_origin === 'THAI_GOLD' || o.code === 'ORIGIN_THAI';
+      return {
+        value,
+        label: language === 'MM' ? o.name_mm : o.name_en || o.name_mm,
+        isThai,
+      };
+    });
+  }, [goldOrigins, language]);
+
+  const resolveOriginDisplay = (c: MasterCategory) => {
+    const raw =
+      c.gold_origin ||
+      (c.code === 'THAI_GOLD' || c.code === 'TH' || c.code === 'TH_SECOND'
+        ? 'THAI_GOLD'
+        : 'MYANMAR_GOLD');
+    const matched = goldOrigins.find(
+      (o) =>
+        o.code === raw ||
+        (raw === 'MYANMAR_GOLD' && (o.code === 'ORIGIN_MYANMAR' || o.gold_origin === 'MYANMAR_GOLD')) ||
+        (raw === 'THAI_GOLD' && (o.code === 'ORIGIN_THAI' || o.gold_origin === 'THAI_GOLD'))
+    );
+    const isThai =
+      raw === 'THAI_GOLD' ||
+      raw === 'ORIGIN_THAI' ||
+      matched?.gold_origin === 'THAI_GOLD';
+    const label = matched
+      ? language === 'MM'
+        ? matched.name_mm
+        : matched.name_en || matched.name_mm
+      : isThai
+        ? language === 'MM'
+          ? 'ထိုင်းရွှေ'
+          : 'Thai Gold'
+        : language === 'MM'
+          ? 'မြန်မာရွှေ'
+          : 'Myanmar Gold';
+    return { raw, label, isThai };
+  };
+
   const blank = {
     code: '',
     name_mm: '',
     name_en: '',
     category_group: lockedGroup,
+    gold_origin: 'MYANMAR_GOLD',
     description: '',
     sort_order: 0,
     is_active: true,
@@ -415,6 +515,7 @@ function CategoriesPanel({
   const [form, setForm] = useState(blank);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'OFF'>('ALL');
+  const [originFilter, setOriginFilter] = useState<string>('ALL');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -422,10 +523,12 @@ function CategoriesPanel({
     if (language === 'MM') {
       if (g === 'PRODUCT') return 'ပစ္စည်းအမျိုးအစား';
       if (g === 'GOLD_CLASS') return 'ရွှေပဲရည်';
+      if (g === 'GOLD_ORIGIN') return 'ရွှေအမျိုးအစား';
       return 'အခြား';
     }
     if (g === 'PRODUCT') return 'Item Type';
     if (g === 'GOLD_CLASS') return 'Gold Purity';
+    if (g === 'GOLD_ORIGIN') return 'Gold Origin';
     return 'Other';
   };
 
@@ -434,6 +537,18 @@ function CategoriesPanel({
     return categories.filter((c) => {
       if (statusFilter === 'ACTIVE' && !c.is_active) return false;
       if (statusFilter === 'OFF' && c.is_active) return false;
+      if (lockedGroup === 'GOLD_CLASS' && originFilter !== 'ALL') {
+        const { raw, isThai } = resolveOriginDisplay(c);
+        if (originFilter === 'THAI_GOLD' && !isThai && raw !== 'THAI_GOLD') return false;
+        if (originFilter === 'MYANMAR_GOLD' && (isThai || raw === 'THAI_GOLD')) return false;
+        if (
+          originFilter !== 'MYANMAR_GOLD' &&
+          originFilter !== 'THAI_GOLD' &&
+          raw !== originFilter
+        ) {
+          return false;
+        }
+      }
       if (!q) return true;
       return (
         c.code.toLowerCase().includes(q) ||
@@ -442,9 +557,9 @@ function CategoriesPanel({
         (c.description || '').toLowerCase().includes(q)
       );
     });
-  }, [categories, search, statusFilter]);
+  }, [categories, search, statusFilter, originFilter, lockedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pager = useClientPagination(filtered, [filtered.length, search, statusFilter]);
+  const pager = useClientPagination(filtered, [filtered.length, search, statusFilter, originFilter]);
 
   const openNew = () => {
     setEditing(null);
@@ -452,6 +567,7 @@ function CategoriesPanel({
       ...blank,
       sort_order: (categories.length + 1) * 10,
       category_group: lockedGroup,
+      gold_origin: originOptions[0]?.value || 'MYANMAR_GOLD',
     });
     setShowForm(true);
     setNotice(null);
@@ -459,11 +575,17 @@ function CategoriesPanel({
 
   const openEdit = (c: MasterCategory) => {
     setEditing(c);
+    const defaultOrigin =
+      c.gold_origin ||
+      (c.code === 'THAI_GOLD' || c.code === 'TH' || c.code === 'TH_SECOND' || c.code === 'ORIGIN_THAI'
+        ? 'THAI_GOLD'
+        : 'MYANMAR_GOLD');
     setForm({
       code: c.code,
       name_mm: c.name_mm,
       name_en: c.name_en,
       category_group: lockedGroup,
+      gold_origin: defaultOrigin,
       description: c.description || '',
       sort_order: c.sort_order,
       is_active: c.is_active,
@@ -479,11 +601,15 @@ function CategoriesPanel({
     }
     setBusy(true);
     try {
-      const payload = {
+      const payload: Omit<MasterCategory, 'id' | 'created_at' | 'updated_at' | 'usage_count'> = {
         code: form.code.trim().toUpperCase().replace(/\s+/g, '_'),
         name_mm: form.name_mm.trim(),
         name_en: (form.name_en || form.name_mm).trim(),
         category_group: lockedGroup,
+        gold_origin:
+          lockedGroup === 'GOLD_CLASS' || lockedGroup === 'GOLD_ORIGIN'
+            ? form.gold_origin || 'MYANMAR_GOLD'
+            : undefined,
         description: form.description.trim(),
         sort_order: Number(form.sort_order) || 0,
         is_active: form.is_active,
@@ -578,6 +704,22 @@ function CategoriesPanel({
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
           />
         </div>
+        {lockedGroup === 'GOLD_CLASS' && (
+          <select
+            value={originFilter}
+            onChange={(e) => setOriginFilter(e.target.value)}
+            className="px-2.5 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-semibold"
+          >
+            <option value="ALL">
+              {language === 'MM' ? 'ရွှေအမျိုးအစား အားလုံး' : 'All Gold Origins'}
+            </option>
+            {originOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        )}
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'OFF')}
@@ -603,11 +745,11 @@ function CategoriesPanel({
                 <Tags className="w-4 h-4 text-[#D4AF37]" />
                 {editing
                   ? language === 'MM'
-                    ? `Category ပြင်ဆင်ရန် — ${editing.code}`
-                    : `Edit Category — ${editing.code}`
+                    ? `${groupLabel(lockedGroup)} ပြင်ဆင်ရန် — ${editing.code}`
+                    : `Edit ${groupLabel(lockedGroup)} — ${editing.code}`
                   : language === 'MM'
-                    ? 'Category အသစ်ထည့်ရန်'
-                    : 'Add New Category'}
+                    ? `${groupLabel(lockedGroup)} အသစ်ထည့်ရန်`
+                    : `Add New ${groupLabel(lockedGroup)}`}
               </h3>
               <button
                 type="button"
@@ -628,23 +770,83 @@ function CategoriesPanel({
                   {language === 'MM' ? 'ကုဒ် (Code) *' : 'Code *'}
                 </label>
                 <input
-                  placeholder={language === 'MM' ? 'ဥပမာ — PE15A' : 'E.g. PE15A'}
+                  placeholder={
+                    lockedGroup === 'GOLD_ORIGIN'
+                      ? language === 'MM'
+                        ? 'ဥပမာ — ORIGIN_MYANMAR'
+                        : 'E.g. ORIGIN_MYANMAR'
+                      : language === 'MM'
+                        ? 'ဥပမာ — PE15A / TH_SECOND'
+                        : 'E.g. PE15A / TH_SECOND'
+                  }
                   value={form.code}
-                  disabled={!!editing}
+                  disabled={
+                    !!editing &&
+                    (editing.code === 'ORIGIN_MYANMAR' || editing.code === 'ORIGIN_THAI')
+                  }
                   onChange={(e) =>
                     setForm({ ...form, code: e.target.value.toUpperCase().replace(/\s+/g, '_') })
                   }
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono font-bold"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-mono font-bold disabled:opacity-60"
                 />
               </div>
-              <div>
-                <label className="text-[10px] text-gray-500 mb-1 block font-semibold">
-                  {language === 'MM' ? 'အမျိုးအစား' : 'Type'}
-                </label>
-                <div className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1A1A1A] font-semibold text-gray-700 dark:text-gray-200">
-                  {groupLabel(lockedGroup)}
+              {lockedGroup === 'GOLD_CLASS' ? (
+                <div>
+                  <label className="text-[10px] text-gray-500 mb-1 block font-semibold">
+                    {language === 'MM'
+                      ? 'ရွှေအမျိုးအစား ချိတ်ဆက်ရန် (Gold Origin) *'
+                      : 'Linked Gold Origin *'}
+                  </label>
+                  <select
+                    value={form.gold_origin || 'MYANMAR_GOLD'}
+                    onChange={(e) => setForm({ ...form, gold_origin: e.target.value })}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-semibold text-gray-900 dark:text-white"
+                  >
+                    {originOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
+              ) : lockedGroup === 'GOLD_ORIGIN' ? (
+                <div>
+                  <label className="text-[10px] text-gray-500 mb-1 block font-semibold">
+                    {language === 'MM'
+                      ? 'တွက်ချက်မှုစနစ် (Calculation Mode) *'
+                      : 'Calculation Mode *'}
+                  </label>
+                  <select
+                    value={form.gold_origin || 'MYANMAR_GOLD'}
+                    disabled={
+                      !!editing &&
+                      (editing.code === 'ORIGIN_MYANMAR' || editing.code === 'ORIGIN_THAI')
+                    }
+                    onChange={(e) => setForm({ ...form, gold_origin: e.target.value })}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] font-semibold text-gray-900 dark:text-white disabled:opacity-60"
+                  >
+                    <option value="MYANMAR_GOLD">
+                      {language === 'MM'
+                        ? 'ကျပ် / ပဲ / ရွေး စနစ် (Myanmar Gold)'
+                        : 'Kyat / Pae / Yway (Myanmar Gold)'}
+                    </option>
+                    <option value="THAI_GOLD">
+                      {language === 'MM'
+                        ? 'Gram / ဘတ် စနစ် (Thai Gold)'
+                        : 'Gram / Baht (Thai Gold)'}
+                    </option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] text-gray-500 mb-1 block font-semibold">
+                    {language === 'MM' ? 'အမျိုးအစား' : 'Type'}
+                  </label>
+                  <div className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1A1A1A] font-semibold text-gray-700 dark:text-gray-200">
+                    {groupLabel(lockedGroup)}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="text-[10px] text-gray-500 mb-1 block font-semibold">
                   {language === 'MM' ? 'အမည် (မြန်မာ) *' : 'Name (Myanmar) *'}
@@ -736,7 +938,19 @@ function CategoriesPanel({
             <tr className="text-left text-gray-500">
               <th className="font-semibold">{language === 'MM' ? 'ကုဒ်' : 'Code'}</th>
               <th className="font-semibold">{language === 'MM' ? 'အမည်' : 'Name'}</th>
-              <th className="font-semibold">{language === 'MM' ? 'အမျိုးအစား' : 'Type'}</th>
+              <th className="font-semibold">
+                {lockedGroup === 'GOLD_CLASS'
+                  ? language === 'MM'
+                    ? 'ရွှေအမျိုးအစား'
+                    : 'Gold Origin'
+                  : lockedGroup === 'GOLD_ORIGIN'
+                    ? language === 'MM'
+                      ? 'တွက်ချက်မှုစနစ်'
+                      : 'Calculation Mode'
+                    : language === 'MM'
+                      ? 'အမျိုးအစား'
+                      : 'Type'}
+              </th>
               <th className="font-semibold text-right">{language === 'MM' ? 'အစဉ်' : 'Sort'}</th>
               <th className="font-semibold text-right">{language === 'MM' ? 'အသုံး' : 'Used'}</th>
               <th className="font-semibold">{language === 'MM' ? 'အခြေအနေ' : 'Status'}</th>
@@ -752,32 +966,62 @@ function CategoriesPanel({
                 </td>
               </tr>
             )}
-            {pager.pageItems.map((c) => (
-              <tr key={c.id}>
-                <td className="font-mono font-bold text-gray-900 dark:text-white">{c.code}</td>
-                <td>
-                  <div className="font-semibold text-gray-900 dark:text-white">
-                    {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
-                  </div>
-                  <div className="text-[10px] text-gray-500">
-                    {language === 'MM' ? c.name_en : c.name_mm}
-                  </div>
-                </td>
-                <td>
-                  <span
-                    className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      lockedGroup === 'GOLD_CLASS'
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                        : lockedGroup === 'OTHER'
-                          ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
-                    }`}
-                  >
-                    {groupLabel(lockedGroup)}
-                  </span>
-                </td>
-                <td className="text-right font-mono">{c.sort_order}</td>
-                <td className="text-right font-mono text-gray-600 dark:text-gray-300">{c.usage_count ?? 0}</td>
+            {pager.pageItems.map((c) => {
+              const originInfo = resolveOriginDisplay(c);
+              return (
+                <tr key={c.id}>
+                  <td className="font-mono font-bold text-gray-900 dark:text-white">{c.code}</td>
+                  <td>
+                    <div className="font-semibold text-gray-900 dark:text-white">
+                      {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
+                    </div>
+                    <div className="text-[10px] text-gray-500">
+                      {language === 'MM' ? c.name_en : c.name_mm}
+                    </div>
+                  </td>
+                  <td>
+                    {lockedGroup === 'GOLD_CLASS' ? (
+                      <span
+                        className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          originInfo.isThai
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                        }`}
+                      >
+                        {originInfo.label}
+                      </span>
+                    ) : lockedGroup === 'GOLD_ORIGIN' ? (
+                      <span
+                        className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          c.gold_origin === 'THAI_GOLD' || c.code === 'ORIGIN_THAI'
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                        }`}
+                      >
+                        {c.gold_origin === 'THAI_GOLD' || c.code === 'ORIGIN_THAI'
+                          ? language === 'MM'
+                            ? 'Gram / ဘတ် စနစ်'
+                            : 'Gram / Baht Mode'
+                          : language === 'MM'
+                            ? 'ကျပ် / ပဲ / ရွေး စနစ်'
+                            : 'Kyat / Pae / Yway Mode'}
+                      </span>
+                    ) : (
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          lockedGroup === 'OTHER'
+                            ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
+                        }`}
+                      >
+                        {groupLabel(lockedGroup)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="text-right font-mono">{c.sort_order}</td>
+                  <td className="text-right font-mono text-gray-600 dark:text-gray-300">
+                    {c.usage_count ?? 0}
+                  </td>
                 <td>
                   <span
                     className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -828,7 +1072,7 @@ function CategoriesPanel({
                       <Pencil className="w-3.5 h-3.5 text-[#D4AF37]" />
                     </button>
                   )}
-                  {canDelete && (
+                  {canDelete && c.code !== 'ORIGIN_MYANMAR' && c.code !== 'ORIGIN_THAI' && (
                     <button
                       type="button"
                       onClick={() => void handleDelete(c)}
@@ -839,7 +1083,8 @@ function CategoriesPanel({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         <PaginationBar

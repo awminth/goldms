@@ -64,6 +64,10 @@ import { useDialog } from '../context/DialogContext';
 function resolveGoldClassKey(purity?: string | null, itemType?: string | null): string {
   const p = String(purity || '').trim().toUpperCase();
   const t = String(itemType || '').trim().toUpperCase();
+  if (p && p !== 'THAI_GOLD') {
+    if (p.includes('ထိုင်း') && !p.toLowerCase().includes('second')) return 'THAI_GOLD';
+    return p;
+  }
   if (t === 'THAI_GOLD' || p === 'THAI_GOLD' || p.includes('THAI') || p.includes('ထိုင်း')) {
     return 'THAI_GOLD';
   }
@@ -123,6 +127,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     masterCategories,
     shopSettings,
     getLivePriceForPurity,
+    getGoldOriginLabel,
+    isThaiGoldClass,
+    getGoldOriginForPurity,
   } = useGoldShop();
   const dialog = useDialog();
 
@@ -194,7 +201,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [summaryVLines, setSummaryVLines] = useState<number[]>([]);
 
   const inventoryItemGrams = (item: InventoryItem): number => {
-    const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+    const isThai = isThaiGoldClass(item.purity, item.item_type);
     const unit = Number(item.thai_weight_unit || 0);
     if (isThai && unit > 0) return Number(unit.toFixed(3));
     return Number(
@@ -529,7 +536,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const displayEstimatedValue = (item: InventoryItem): number => {
-    const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+    const isThai = isThaiGoldClass(item.purity, item.item_type);
     if (isThai) return item.selling_price_estimated;
     return myanmarItemEstimatedValue(item);
   };
@@ -607,7 +614,67 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   /** Thai gold only: identical units share one barcode */
   const [formQty, setFormQty] = useState<number>(1);
 
-  const isThaiEntry = formPurity === 'THAI_GOLD' || formItemType === 'THAI_GOLD';
+  const isThaiEntry = isThaiGoldClass(formPurity, formItemType);
+
+  const goldClassCategories = useMemo(() => {
+    const active = masterCategories
+      .filter((c) => c.category_group === 'GOLD_CLASS' && c.is_active)
+      .slice()
+      .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+    if (active.length > 0) return active;
+    return Object.entries(PURITY_LABELS).map(([code, lbl], idx) => ({
+      id: code,
+      code,
+      name_mm: lbl.mm,
+      name_en: lbl.en,
+      category_group: 'GOLD_CLASS' as const,
+      gold_origin: code === 'THAI_GOLD' ? 'THAI_GOLD' : 'MYANMAR_GOLD',
+      sort_order: (idx + 1) * 10,
+      is_active: true,
+    }));
+  }, [masterCategories]);
+
+  const myanmarPurityOptions = useMemo(() => {
+    const list = goldClassCategories.filter((c) => !isThaiGoldClass(c.code, 'MYANMAR_GOLD'));
+    return list.length > 0 ? list : goldClassCategories;
+  }, [goldClassCategories, isThaiGoldClass]);
+
+  const thaiPurityOptions = useMemo(() => {
+    const list = goldClassCategories.filter((c) => {
+      if (c.gold_origin === 'THAI_GOLD' || c.gold_origin === 'ORIGIN_THAI') return true;
+      const originRow = masterCategories.find(
+        (o) =>
+          o.category_group === 'GOLD_ORIGIN' &&
+          (o.code === c.gold_origin || o.gold_origin === c.gold_origin)
+      );
+      if (originRow) return originRow.gold_origin === 'THAI_GOLD';
+      return c.code === 'THAI_GOLD' || c.code === 'TH' || c.code === 'TH_SECOND';
+    });
+    return list.length > 0
+      ? list
+      : [
+          {
+            id: 'THAI_GOLD',
+            code: 'THAI_GOLD',
+            name_mm: 'TH',
+            name_en: 'TH',
+            category_group: 'GOLD_CLASS' as const,
+            gold_origin: 'THAI_GOLD',
+            sort_order: 90,
+            is_active: true,
+          },
+        ];
+  }, [goldClassCategories, masterCategories]);
+
+  const getPurityDisplay = (code: string) => {
+    const found = masterCategories.find(
+      (c) => c.category_group === 'GOLD_CLASS' && c.code === code
+    );
+    if (found) return language === 'MM' ? found.name_mm : found.name_en || found.name_mm;
+    const fallback = PURITY_LABELS[code as keyof typeof PURITY_LABELS];
+    if (fallback) return language === 'MM' ? fallback.mm : fallback.en;
+    return code;
+  };
 
   // Category list from Master Setup (grouped) with fallbacks
   const activeCats = masterCategories.filter((c) => c.is_active);
@@ -640,7 +707,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setFormCategory('NECKLACE');
     if (kind === 'THAI') {
       setFormItemType('THAI_GOLD');
-      setFormPurity('THAI_GOLD');
+      setFormPurity((thaiPurityOptions[0]?.code || 'THAI_GOLD') as GoldPurity);
       setFormThaiGrams(0);
       setShowCustomThaiGram(false);
       setFormGrossKyat(0);
@@ -649,7 +716,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       setFormGrossGrams(0);
     } else {
       setFormItemType('MYANMAR_GOLD');
-      setFormPurity('MEELIN');
+      setFormPurity((myanmarPurityOptions[0]?.code || 'MEELIN') as GoldPurity);
       setFormThaiGrams(0);
       setShowCustomThaiGram(false);
       setFormGrossGrams(0);
@@ -722,13 +789,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setFormProfitDedPae(profitP);
     setFormProfitDedYway(profitY);
     setFormProfitDedGrams(kpyToGrams({ kyat: 0, pae: profitP, yway: profitY }, kyatToGrams));
-    const thaiG =
-      item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD'
-        ? Number(item.thai_weight_unit || 15.2)
-        : 15.2;
+    const isThaiItem = isThaiGoldClass(item.purity, item.item_type);
+    const thaiG = isThaiItem ? Number(item.thai_weight_unit || 15.2) : 15.2;
     setFormThaiGrams(thaiG);
     setShowCustomThaiGram(!THAI_GRAM_PRESETS.includes(thaiG as (typeof THAI_GRAM_PRESETS)[number]));
-    const isThaiItem = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
     if (isThaiItem) {
       const rate =
         Number(item.baht_mmk_rate) > 0
@@ -1062,7 +1126,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const thaiByBarcode = new Map<string, InventoryItem[]>();
 
     for (const item of filteredItems) {
-      const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
+      const isThai = isThaiGoldClass(item.purity, item.item_type);
       if (!isThai) {
         myanmar.push({ ...item, listQty: 1 });
         continue;
@@ -1240,15 +1304,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         id: 'item_type',
         header: language === 'MM' ? 'ရွှေအမျိုး' : 'Gold type',
         slot: 'detail',
-        accessor: (i) => i.item_type,
-        cell: (item) =>
-          item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD'
-            ? language === 'MM'
-              ? 'ထိုင်းရွှေ'
-              : 'Thai Gold'
-            : language === 'MM'
-              ? 'မြန်မာရွှေ'
-              : 'Myanmar Gold',
+        accessor: (i) => getGoldOriginForPurity(i.purity, i.item_type).label,
+        cell: (item) => getGoldOriginForPurity(item.purity, item.item_type).label,
       },
       {
         id: 'purity',
@@ -1257,7 +1314,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         accessor: (i) => i.purity,
         cell: (item) => (
           <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-[#D4AF37]/15 text-[#996515] dark:text-[#FFD700] border border-[#D4AF37]/25 whitespace-nowrap">
-            {PURITY_LABELS[item.purity]?.mm || item.purity}
+            {getPurityDisplay(item.purity)}
           </span>
         ),
       },
@@ -1741,7 +1798,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white text-xs font-bold hover:opacity-95 transition shadow-xs inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              <span>{language === 'MM' ? 'မြန်မာရွှေ ထည့်မည်' : 'Add Myanmar Gold'}</span>
+              <span>
+                {language === 'MM'
+                  ? `${getGoldOriginLabel('MYANMAR_GOLD')} ထည့်မည်`
+                  : `Add ${getGoldOriginLabel('MYANMAR_GOLD')}`}
+              </span>
             </button>
             <button
               type="button"
@@ -1749,7 +1810,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white text-xs font-bold hover:opacity-95 transition shadow-xs inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              <span>{language === 'MM' ? 'ထိုင်းရွှေ ထည့်မည်' : 'Add Thai Gold'}</span>
+              <span>
+                {language === 'MM'
+                  ? `${getGoldOriginLabel('THAI_GOLD')} ထည့်မည်`
+                  : `Add ${getGoldOriginLabel('THAI_GOLD')}`}
+              </span>
             </button>
           </div>
         </div>
@@ -1780,9 +1845,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] dark:text-gray-200 text-xs font-medium"
         >
           <option value="ALL">{language === 'MM' ? 'ရွှေရည်အားလုံး' : 'All Purities'}</option>
-          {Object.entries(PURITY_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {language === 'MM' ? v.mm : v.en}
+          {goldClassCategories.map((c) => (
+            <option key={c.code} value={c.code}>
+              {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
             </option>
           ))}
         </select>
@@ -1857,11 +1922,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       : 'Edit Stock Item'
                     : isThaiEntry
                       ? language === 'MM'
-                        ? 'ထိုင်းရွှေ အသစ်ထည့်သွင်းခြင်း'
-                        : 'Add Thai Gold Item'
+                        ? `${getGoldOriginLabel('THAI_GOLD')} အသစ်ထည့်သွင်းခြင်း`
+                        : `Add ${getGoldOriginLabel('THAI_GOLD')} Item`
                       : language === 'MM'
-                        ? 'မြန်မာရွှေ အသစ်ထည့်သွင်းခြင်း'
-                        : 'Add Myanmar Gold Item'}
+                        ? `${getGoldOriginLabel('MYANMAR_GOLD')} အသစ်ထည့်သွင်းခြင်း`
+                        : `Add ${getGoldOriginLabel('MYANMAR_GOLD')} Item`}
                 </span>
               </h3>
               <button
@@ -1974,28 +2039,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 )}
               </div>
 
-              {/* Row 3: Myanmar purity + Locked gold path */}
+              {/* Row 3: Purity + Locked gold path */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {!isThaiEntry && (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      {language === 'MM' ? 'ရွှေရည် / အရည်အသွေး (Purity):' : 'Purity Standard:'}
-                    </label>
-                    <select
-                      value={formPurity}
-                      onChange={(e) => setFormPurity(e.target.value as GoldPurity)}
-                      className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
-                    >
-                      {Object.entries(PURITY_LABELS)
-                        .filter(([k]) => k !== 'THAI_GOLD')
-                        .map(([k, v]) => (
-                          <option key={k} value={k}>
-                            {language === 'MM' ? v.mm : v.en}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                )}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    {language === 'MM' ? 'ရွှေရည် / အရည်အသွေး (Purity):' : 'Purity Standard:'}
+                  </label>
+                  <select
+                    value={formPurity}
+                    onChange={(e) => setFormPurity(e.target.value as GoldPurity)}
+                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
+                  >
+                    {(isThaiEntry ? thaiPurityOptions : myanmarPurityOptions).map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                     {language === 'MM' ? 'ရွှေအမျိုးအစား:' : 'Gold type:'}
@@ -2007,13 +2068,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         : 'bg-[#FAF8F2] dark:bg-[#201D17] border-[#D4AF37]/40 text-[#996515] dark:text-amber-300'
                     }`}
                   >
-                    {isThaiEntry
-                      ? language === 'MM'
-                        ? 'ထိုင်းရွှေ'
-                        : 'Thai Gold'
-                      : language === 'MM'
-                        ? 'မြန်မာရွှေ'
-                        : 'Myanmar Gold'}
+                    {getGoldOriginForPurity(
+                      formPurity,
+                      isThaiEntry ? 'THAI_GOLD' : 'MYANMAR_GOLD'
+                    ).label}
                   </div>
                 </div>
               </div>
