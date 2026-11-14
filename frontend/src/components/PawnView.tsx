@@ -19,6 +19,7 @@ import {
   Eye,
   Pencil,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -259,6 +260,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     language,
     masterCategories,
     shopSettings,
+    getGoldOriginLabel,
   } = useGoldShop();
   const dialog = useDialog();
 
@@ -267,6 +269,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     section === 'form-create' || section === 'form-interest' || section === 'form-redeem';
 
   const [qSearch, setQSearch] = useState('');
+  const [filterGoldKind, setFilterGoldKind] = useState('ALL');
   const [filterItemType, setFilterItemType] = useState('ALL');
   const [searchTick, setSearchTick] = useState(0);
   const [dateFrom, setDateFrom] = useState('');
@@ -331,8 +334,27 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     formGoldKind === 'THAI' ? 'THAI_GOLD' : formPurity || 'MEELIN';
   const specificPrice = goldPrices.find((p) => p.gold_type === effectivePurity)?.price_per_kyat;
 
+  const goldKindOptions = useMemo(
+    () => [
+      {
+        code: 'MYANMAR',
+        mm: getGoldOriginLabel('MYANMAR_GOLD', 'MM') || 'မြန်မာရွှေ',
+        en: getGoldOriginLabel('MYANMAR_GOLD', 'EN') || 'Myanmar Gold',
+      },
+      { code: 'BAR', mm: 'အခေါက်ရွှေ', en: 'Fine / Bar Gold' },
+      {
+        code: 'THAI',
+        mm: getGoldOriginLabel('THAI_GOLD', 'MM') || 'ထိုင်းရွှေ',
+        en: getGoldOriginLabel('THAI_GOLD', 'EN') || 'Thai Gold',
+      },
+      { code: 'MIXED', mm: 'အမယ်စုံ', en: 'Mixed items' },
+    ],
+    [getGoldOriginLabel]
+  );
+
   const goldKindLabel = (code?: string) => {
-    const g = GOLD_KINDS.find((x) => x.code === code);
+    const upper = String(code || '').trim().toUpperCase();
+    const g = goldKindOptions.find((x) => x.code === upper) || GOLD_KINDS.find((x) => x.code === upper);
     if (g) return language === 'MM' ? g.mm : g.en;
     return code || (language === 'MM' ? 'မြန်မာရွှေ' : 'Myanmar');
   };
@@ -584,17 +606,94 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const redeemTotalKyat = Math.max(0, formLoanKyat + formInterestKyat - Number(discountKyat || 0));
   const redeemTotalBaht = Math.max(0, formLoanBaht + formInterestBaht - Number(discountBaht || 0));
 
+  const pawnById = useMemo(() => {
+    const m = new Map<string, PawnRecord>();
+    for (const p of pawnRecords) m.set(p.id, p);
+    return m;
+  }, [pawnRecords]);
+
+  const isMixedPawnRecord = (r: Record<string, unknown> | PawnRecord): boolean => {
+    const rec = r as Record<string, unknown>;
+    const parent = rec.pawn_id ? pawnById.get(String(rec.pawn_id)) : undefined;
+    const gk = String(rec.gold_kind || parent?.gold_kind || '').trim().toUpperCase();
+    const it = String(rec.item_type || parent?.item_type || '').trim().toUpperCase();
+    return gk === 'MIXED' || it === 'MIXED';
+  };
+
+  const itemTypeLabel = (r: Record<string, unknown> | PawnRecord): string => {
+    if (isMixedPawnRecord(r)) {
+      return language === 'MM' ? 'အမယ်စုံ' : 'Mixed items';
+    }
+    const rec = r as Record<string, unknown>;
+    const parent = rec.pawn_id ? pawnById.get(String(rec.pawn_id)) : undefined;
+    const raw = String(rec.item_type || parent?.item_type || '').trim();
+    if (!raw) return '—';
+    const upper = raw.toUpperCase();
+    const lower = raw.toLowerCase();
+    const opt = itemTypeOptions.find(
+      (o) =>
+        o.code.toUpperCase() === upper ||
+        o.mm.trim().toLowerCase() === lower ||
+        o.en.trim().toLowerCase() === lower
+    );
+    if (opt) return language === 'MM' ? opt.mm : opt.en;
+    const cat = masterCategories.find(
+      (c) =>
+        c.category_group === 'PRODUCT' &&
+        (c.code.toUpperCase() === upper ||
+          c.name_mm.trim().toLowerCase() === lower ||
+          c.name_en.trim().toLowerCase() === lower)
+    );
+    if (cat) return language === 'MM' ? cat.name_mm : cat.name_en;
+    return raw;
+  };
+
+  const handleResetFilters = () => {
+    setQSearch('');
+    setFilterGoldKind('ALL');
+    setFilterItemType('ALL');
+    setDateFrom('');
+    setDateTo('');
+    setSearchTick((n) => n + 1);
+  };
+
   const filterBySearch = (rows: Record<string, unknown>[]) => {
     void searchTick;
     const q = qSearch.trim().toLowerCase();
     if (!q) return rows;
+
+    // Check if the user's search query matches a specific single item type name/code (e.g. "လက်ကောက်")
+    const matchesKnownSingleItemType = itemTypeOptions.some(
+      (o) =>
+        o.mm.trim().toLowerCase() === q ||
+        o.en.trim().toLowerCase() === q ||
+        o.code.trim().toLowerCase() === q
+    );
+
     return rows.filter((r) => {
+      const mixed = isMixedPawnRecord(r);
+      const parent = r.pawn_id ? pawnById.get(String(r.pawn_id)) : undefined;
+
+      // If user searches for a single item type like "လက်ကောက်" and hasn't explicitly filtered for MIXED (အမယ်စုံ),
+      // do not match MIXED (အမယ်စုံ) records just because "လက်ကောက်" appears inside their mixed item list!
+      if (mixed && matchesKnownSingleItemType && filterGoldKind !== 'MIXED') {
+        return false;
+      }
+
+      const effectiveGoldKind = mixed
+        ? 'MIXED'
+        : String(r.gold_kind || parent?.gold_kind || 'MYANMAR');
+      const effectiveItemTypeText = itemTypeLabel(r);
+
       const hay = [
         r.customer_name,
         r.customer_phone,
-        r.item_name,
-        r.item_type,
-        r.gold_kind,
+        // For MIXED records when not explicitly filtering MIXED, exclude item_name if query is a known single item type
+        mixed && matchesKnownSingleItemType && filterGoldKind !== 'MIXED' ? '' : r.item_name,
+        mixed ? 'MIXED အမယ်စုံ' : r.item_type,
+        effectiveItemTypeText,
+        effectiveGoldKind,
+        goldKindLabel(effectiveGoldKind),
         r.purity,
         r.vno,
         r.pawn_ticket_no,
@@ -649,12 +748,6 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     [pawnRecords]
   );
 
-  const pawnById = useMemo(() => {
-    const m = new Map<string, PawnRecord>();
-    for (const p of pawnRecords) m.set(p.id, p);
-    return m;
-  }, [pawnRecords]);
-
   /**
    * Prefer DB covered_until_date (per-payment snapshot). Fallback: recompute from history
    * so old rows still display correctly before migration backfill finishes.
@@ -698,48 +791,68 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     }));
   }, [pawnInterestPayments, pawnById]);
 
+  const filterByGoldKind = (rows: Record<string, unknown>[]) => {
+    if (!filterGoldKind || filterGoldKind === 'ALL') return rows;
+    const target = filterGoldKind.trim().toUpperCase();
+    return rows.filter((r) => {
+      const mixed = isMixedPawnRecord(r);
+      if (target === 'MIXED') return mixed;
+      if (mixed) return false;
+      const parent = r.pawn_id ? pawnById.get(String(r.pawn_id)) : undefined;
+      const gk = String(r.gold_kind || parent?.gold_kind || 'MYANMAR').trim().toUpperCase();
+      return gk === target;
+    });
+  };
+
   const filterByItemType = (rows: Record<string, unknown>[]) => {
     if (!filterItemType || filterItemType === 'ALL') return rows;
     const targetType = filterItemType.trim().toUpperCase();
-    const opt = itemTypeOptions.find((o) => o.code === targetType);
+    const opt = itemTypeOptions.find((o) => o.code.toUpperCase() === targetType);
     const mmWord = opt?.mm?.trim().toLowerCase();
     const enWord = opt?.en?.trim().toLowerCase();
 
     return rows.filter((r) => {
-      const directType = String(r.item_type || '').trim().toUpperCase();
-      if (directType && directType === targetType) return true;
+      // Never match MIXED (အမယ်စုံ) records when filtering for a specific single item type (e.g. လက်ကောက်)
+      if (isMixedPawnRecord(r)) return false;
 
-      if (r.pawn_id) {
-        const parent = pawnById.get(String(r.pawn_id));
-        const parentType = String(parent?.item_type || '').trim().toUpperCase();
-        if (parentType && parentType === targetType) return true;
-        if (parent?.item_name) {
-          const pName = String(parent.item_name).toLowerCase();
-          if (mmWord && pName.includes(mmWord)) return true;
-          if (enWord && pName.includes(enWord)) return true;
-        }
+      const parent = r.pawn_id ? pawnById.get(String(r.pawn_id)) : undefined;
+      const rawType = String(r.item_type || parent?.item_type || '').trim();
+
+      if (rawType) {
+        const directUpper = rawType.toUpperCase();
+        const directLower = rawType.toLowerCase();
+        if (directUpper === targetType) return true;
+        if (mmWord && directLower === mmWord) return true;
+        if (enWord && directLower === enWord) return true;
+        return false;
       }
 
-      const itemName = String(r.item_name || '').toLowerCase();
-      if (mmWord && itemName.includes(mmWord)) return true;
-      if (enWord && itemName.includes(enWord)) return true;
+      // Legacy fallback only when item_type was not saved and record is not MIXED
+      const itemName = String(r.item_name || parent?.item_name || '').trim().toLowerCase();
+      if (!itemName || itemName.includes(',') || itemName.includes('၊')) return false;
+      if (mmWord && itemName === mmWord) return true;
+      if (enWord && itemName === enWord) return true;
 
       return false;
     });
   };
 
   const listPawnRows = filterByItemType(
-    filterBySearch(
-      filterByDateRange(listAllPawns as unknown as Record<string, unknown>[], (r) =>
-        String(r.start_date || '')
+    filterByGoldKind(
+      filterBySearch(
+        filterByDateRange(listAllPawns as unknown as Record<string, unknown>[], (r) =>
+          String(r.start_date || '')
+        )
       )
     )
   ) as unknown as PawnRecord[];
   const listInterestRows = (() => {
     const filtered = filterByItemType(
-      filterBySearch(
-        filterByDateRange(interestRowsWithHistory as unknown as Record<string, unknown>[], (r) =>
-          String(r.payment_date || '')
+      filterByGoldKind(
+        filterBySearch(
+          filterByDateRange(interestRowsWithHistory as unknown as Record<string, unknown>[], (r) =>
+            String(r.payment_date || '')
+          )
         )
       )
     ) as unknown as Array<
@@ -771,9 +884,11 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   }, [listInterestRows]);
   const listRedeemRows = useMemo(() => {
     const filtered = filterByItemType(
-      filterBySearch(
-        filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
-          String(r.redeem_date || '')
+      filterByGoldKind(
+        filterBySearch(
+          filterByDateRange(redeemedPawns as unknown as Record<string, unknown>[], (r) =>
+            String(r.redeem_date || '')
+          )
         )
       )
     ) as unknown as PawnRecord[];
@@ -789,7 +904,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       if (dateCmp !== 0) return dateCmp;
       return Number(b.id) - Number(a.id);
     });
-  }, [redeemedPawns, filterItemType, qSearch, dateFrom, dateTo]);
+  }, [redeemedPawns, filterGoldKind, filterItemType, qSearch, dateFrom, dateTo]);
 
   const redeemGroups = useMemo(() => {
     type GroupType = {
@@ -849,6 +964,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
   const redeemGroupPager = useClientPagination(redeemGroups, [
     searchTick,
     qSearch,
+    filterGoldKind,
     filterItemType,
     dateFrom,
     dateTo,
@@ -859,17 +975,29 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     [pawnRecords]
   );
   const listOverdueRows = filterByItemType(
-    filterByDateRange(overduePawns as unknown as Record<string, unknown>[], (r) =>
-      String(r.start_date || '')
+    filterByGoldKind(
+      filterBySearch(
+        filterByDateRange(overduePawns as unknown as Record<string, unknown>[], (r) =>
+          String(r.start_date || '')
+        )
+      )
     )
   ) as unknown as PawnRecord[];
   const selectList = filterByItemType(
-    filterBySearch(
-      activePawns as unknown as Record<string, unknown>[]
+    filterByGoldKind(
+      filterBySearch(
+        activePawns as unknown as Record<string, unknown>[]
+      )
     )
   ) as unknown as PawnRecord[];
 
-  const selectPager = useClientPagination(selectList, [searchTick, qSearch, filterItemType, section]);
+  const selectPager = useClientPagination(selectList, [
+    searchTick,
+    qSearch,
+    filterGoldKind,
+    filterItemType,
+    section,
+  ]);
 
   const listDateFieldHint = useMemo(() => {
     if (section === 'interest-list') {
@@ -1014,7 +1142,16 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           { header: pawnDateHeader, value: (r) => formatDate(r.start_date), width: 12 },
           { header: 'Name', value: (r) => r.customer_name, width: 18 },
           { header: 'Phone', value: (r) => r.customer_phone, width: 14 },
-          { header: 'Type', value: (r) => goldKindLabel(r.gold_kind), width: 12 },
+          {
+            header: language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Type',
+            value: (r) => itemTypeLabel(r),
+            width: 16,
+          },
+          {
+            header: language === 'MM' ? 'အမျိုးအစား (ရွှေ)' : 'Gold Kind',
+            value: (r) => goldKindLabel(r.gold_kind),
+            width: 14,
+          },
           { header: 'Item', value: (r) => r.item_name, width: 22 },
           { header: 'Weight', value: (r) => weightDecimal(r), width: 10 },
           { header: 'Loan Kyat', value: (r) => r.loan_amount, width: 12 },
@@ -1198,7 +1335,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         customer_name: formName.trim(),
         customer_phone: formPhone.trim(),
         item_name: formItem.trim(),
-        item_type: formItemType,
+        item_type: formGoldKind === 'MIXED' ? 'MIXED' : formItemType,
         gold_kind: formGoldKind,
         purity: effectivePurity,
         weight: net,
@@ -1469,12 +1606,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     if (!detailView) return [];
     if (detailView.kind === 'pawn') {
       const r = detailView.record;
-      const itemTypeOpt = itemTypeOptions.find((o) => o.code === r.item_type);
-      const itemTypeLabel = itemTypeOpt
-        ? language === 'MM'
-          ? itemTypeOpt.mm
-          : itemTypeOpt.en
-        : r.item_type || '—';
+      const resolvedItemTypeLabel = itemTypeLabel(r);
       const purityLabel =
         (r.purity &&
           (language === 'MM'
@@ -1500,7 +1632,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         { label: language === 'MM' ? 'ဖုန်းနံပါတ်' : 'Phone', value: r.customer_phone || '—' },
         {
           label: language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Type',
-          value: itemTypeLabel,
+          value: resolvedItemTypeLabel,
         },
         { label: language === 'MM' ? 'ပစ္စည်းအမည်' : 'Item', value: r.item_name },
         {
@@ -1710,11 +1842,28 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         cell: (r) => <span className="font-semibold truncate block max-w-[120px]">{r.customer_name}</span>,
       },
       {
+        id: 'item_type',
+        header: language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Type',
+        slot: 'primary',
+        accessor: (r) => itemTypeLabel(r),
+        cell: (r) => (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold whitespace-nowrap border ${
+              isMixedPawnRecord(r)
+                ? 'bg-purple-50 text-purple-800 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800'
+                : 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'
+            }`}
+          >
+            {itemTypeLabel(r)}
+          </span>
+        ),
+      },
+      {
         id: 'item',
         header: language === 'MM' ? 'ပစ္စည်း' : 'Item',
         slot: 'primary',
         accessor: (r) => r.item_name,
-        cell: (r) => <span className="truncate block max-w-[120px]">{r.item_name}</span>,
+        cell: (r) => <span className="truncate block max-w-[140px]">{r.item_name}</span>,
       },
       {
         id: 'loan',
@@ -1739,7 +1888,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
       },
       {
         id: 'type',
-        header: language === 'MM' ? 'အမျိုးအစား' : 'Type',
+        header: language === 'MM' ? 'အမျိုးအစား (ရွှေ)' : 'Gold Kind',
         slot: 'detail',
         accessor: (r) => r.gold_kind,
         cell: (r) => goldKindLabel(r.gold_kind),
@@ -1824,7 +1973,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         ),
       },
     ],
-    [language, pawnDateHeader, statusHeader, lastInterestHeader, onEdit]
+    [language, pawnDateHeader, statusHeader, lastInterestHeader, onEdit, masterCategories, goldKindOptions]
   );
 
   const interestListColumns = useMemo<DataTableColumn<PawnInterestPayment>[]>(
@@ -2283,13 +2432,21 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     [language, pawnDateHeader, statusHeader, lastInterestHeader, confiscatePawnRecord, dialog]
   );
 
+  const hasActiveFilters =
+    qSearch.trim() !== '' ||
+    filterGoldKind !== 'ALL' ||
+    filterItemType !== 'ALL' ||
+    dateFrom !== '' ||
+    dateTo !== '';
+
   const searchBar = (
-    <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2 w-full">
-      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center w-full">
-        <div className="relative flex-1 min-w-0">
+    <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2.5 w-full">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-center w-full">
+        {/* Search Input */}
+        <div className="relative sm:col-span-2 lg:col-span-4 min-w-0">
           <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
-            className={`${inputCls} pl-8`}
+            className={`${inputCls} pl-8 h-[34px]`}
             value={qSearch}
             onChange={(e) => setQSearch(e.target.value)}
             onKeyDown={(e) => {
@@ -2303,8 +2460,26 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           />
         </div>
 
-        {/* Item Type Filter Dropdown */}
-        <div className="w-full sm:w-52 shrink-0">
+        {/* Gold Kind (အမျိုးအစား - ရွှေ) Filter Dropdown */}
+        <div className="min-w-0 lg:col-span-3">
+          <select
+            value={filterGoldKind}
+            onChange={(e) => setFilterGoldKind(e.target.value)}
+            className="w-full h-[34px] px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+          >
+            <option value="ALL">
+              {language === 'MM' ? 'အမျိုးအစား(ရွှေ) (အားလုံး)' : 'All Gold Types'}
+            </option>
+            {goldKindOptions.map((opt) => (
+              <option key={opt.code} value={opt.code}>
+                {language === 'MM' ? opt.mm : opt.en}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Item Type (ပစ္စည်းအမျိုးအစား) Filter Dropdown */}
+        <div className="min-w-0 lg:col-span-3">
           <select
             value={filterItemType}
             onChange={(e) => setFilterItemType(e.target.value)}
@@ -2321,61 +2496,56 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setSearchTick((n) => n + 1)}
-          className="h-[34px] px-4 shrink-0 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1"
-        >
-          <Search className="w-3.5 h-3.5" />
-          {language === 'MM' ? 'ရှာဖွေမည်' : 'Search'}
-        </button>
+        {/* Action Buttons: Search & Reset */}
+        <div className="flex items-center gap-2 sm:col-span-2 lg:col-span-2">
+          <button
+            type="button"
+            onClick={() => setSearchTick((n) => n + 1)}
+            className="h-[34px] px-3 flex-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1 whitespace-nowrap transition cursor-pointer"
+          >
+            <Search className="w-3.5 h-3.5 shrink-0" />
+            <span>{language === 'MM' ? 'ရှာဖွေမည်' : 'Search'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleResetFilters}
+            title={language === 'MM' ? 'ရှာဖွေမှု အားလုံး ပြန်ရှင်းမည် (Reset)' : 'Reset all filters'}
+            className={`h-[34px] px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 whitespace-nowrap transition cursor-pointer ${
+              hasActiveFilters
+                ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+                : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+          >
+            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+            <span>Reset</span>
+          </button>
+        </div>
       </div>
 
       {!isForm && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap pt-1 border-t border-gray-100 dark:border-gray-800/70">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300">
             <CalendarDays className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>{language === 'MM' ? 'ရက်စွဲ' : 'Date'}</span>
             <span className="text-[10px] font-normal text-gray-400">({listDateFieldHint})</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
-              <span>{language === 'MM' ? 'မှ' : 'From'}</span>
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300 min-w-0">
+              <span className="shrink-0">{language === 'MM' ? 'မှ' : 'From'}</span>
               <DateInput
                 value={dateFrom}
                 onChange={setDateFrom}
-                className="w-36 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-mono"
+                className="w-full sm:w-36 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-mono"
               />
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300">
-              <span>{language === 'MM' ? 'ထိ' : 'To'}</span>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 dark:text-gray-300 min-w-0">
+              <span className="shrink-0">{language === 'MM' ? 'ထိ' : 'To'}</span>
               <DateInput
                 value={dateTo}
                 onChange={setDateTo}
-                className="w-36 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-mono"
+                className="w-full sm:w-36 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white text-xs font-mono"
               />
             </div>
-            {(dateFrom || dateTo) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setDateFrom('');
-                  setDateTo('');
-                }}
-                className="h-[34px] px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-[11px] font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-              >
-                {language === 'MM' ? 'ရက်စွဲ ရှင်းမည်' : 'Clear dates'}
-              </button>
-            )}
-            {filterItemType !== 'ALL' && (
-              <button
-                type="button"
-                onClick={() => setFilterItemType('ALL')}
-                className="h-[34px] px-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition"
-              >
-                {language === 'MM' ? 'အမျိုးအစား ရှင်းမည်' : 'Clear type'}
-              </button>
-            )}
           </div>
         </div>
       )}
@@ -2404,17 +2574,25 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
         {section === 'form-create' ? (
           <div className="min-w-0 w-full">
             <label className={labelCls}>ပစ္စည်းအမျိုးအစား</label>
-            <select
-              className={inputCls}
-              value={formItemType}
-              onChange={(e) => setFormItemType(e.target.value)}
-            >
-              {itemTypeOptions.map((o) => (
-                <option key={o.code} value={o.code}>
-                  {language === 'MM' ? o.mm : o.en}
-                </option>
-              ))}
-            </select>
+            {isMixedItems ? (
+              <input
+                className={`${inputCls} bg-gray-50 dark:bg-gray-900 font-semibold text-purple-700 dark:text-purple-300`}
+                value={language === 'MM' ? 'အမယ်စုံ' : 'Mixed items'}
+                readOnly
+              />
+            ) : (
+              <select
+                className={inputCls}
+                value={formItemType}
+                onChange={(e) => setFormItemType(e.target.value)}
+              >
+                {itemTypeOptions.map((o) => (
+                  <option key={o.code} value={o.code}>
+                    {language === 'MM' ? o.mm : o.en}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         ) : (
           <div className="min-w-0 w-full">
@@ -2452,7 +2630,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
                 else setFormPurity('MEELIN');
               }}
             >
-              {GOLD_KINDS.map((g) => (
+              {goldKindOptions.map((g) => (
                 <option key={g.code} value={g.code}>
                   {language === 'MM' ? g.mm : g.en}
                 </option>
@@ -2983,7 +3161,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterGoldKind, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => pawnStatusRowClass(effectivePawnStatus(r))}
         />
@@ -2998,7 +3176,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterGoldKind, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'စာရင်းမရှိပါ' : 'No records'}
           rowClassName={(r) => {
             const p = pawnById.get(String(r.pawn_id));
@@ -3270,7 +3448,7 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
           language={language}
           searchable={false}
           selectable={false}
-          resetDeps={[searchTick, qSearch, filterItemType, dateFrom, dateTo, section]}
+          resetDeps={[searchTick, qSearch, filterGoldKind, filterItemType, dateFrom, dateTo, section]}
           emptyMessage={language === 'MM' ? 'ရက်လွန် အပေါင် မရှိပါ' : 'No overdue pawns'}
           rowClassName={() => pawnStatusRowClass('OVERDUE')}
         />
