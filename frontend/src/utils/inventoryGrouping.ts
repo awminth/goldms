@@ -6,6 +6,7 @@ export function inventoryProductKey(item: InventoryItem): string {
   if (isThai) {
     return [
       'THAI',
+      item.category || '',
       (item.name_mm || '').trim(),
       (item.name || '').trim(),
       Number(item.thai_weight_unit || 0).toFixed(2),

@@ -685,7 +685,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setEditingItemId(item.id);
     setFormBarcode(item.barcode);
     setFormNameMM(item.name_mm || item.name || '');
-    setFormCategory(item.category);
+    setFormCategory(
+      item.category && item.category !== 'THAI_GOLD' ? item.category : 'NECKLACE'
+    );
     setFormItemType(item.item_type);
     setFormPurity(item.purity);
     setFormGrossKyat(item.weight_kyat);
@@ -883,7 +885,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const formPreviewItem: InventoryItem = {
     id: editingItemId || 'preview',
     barcode: formBarcode || '000000',
-    category: isThaiEntry ? 'THAI_GOLD' : formCategory,
+    category: formCategory || (isThaiEntry ? 'THAI_GOLD' : 'NECKLACE'),
     name: formNameMM.trim() || 'Preview',
     name_mm: formNameMM.trim() || 'Preview',
     weight_kyat: Number(formGrossKyat || 0),
@@ -955,7 +957,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     const itemPayload = {
       barcode: formBarcode || generateBarcode(),
-      category: isThaiEntry ? 'THAI_GOLD' : formCategory,
+      category: formCategory || (isThaiEntry ? 'THAI_GOLD' : 'NECKLACE'),
       name: itemName,
       name_mm: itemName,
       weight_kyat: Number(formGrossKyat || 0),
@@ -1901,43 +1903,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                     {language === 'MM' ? 'အမျိုးအစား (Category):' : 'Category:'}
                   </label>
-                  {isThaiEntry ? (
-                    <div className="px-3 py-2 text-xs font-bold rounded-xl border border-[#D4AF37]/40 bg-[#FAF8F2] dark:bg-[#201D17] text-[#996515] dark:text-amber-300">
-                      {language === 'MM' ? 'ထိုင်းရွှေ' : 'Thai Gold'}
-                    </div>
-                  ) : (
-                    <select
-                      value={formCategory}
-                      onChange={(e) => setFormCategory(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
-                    >
-                      {categoryGroups.map((g) => {
-                        const opts = CATEGORIES.filter((c) => c.group === g);
-                        if (!opts.length) return null;
-                        const label =
-                          g === 'PRODUCT'
+                  <select
+                    value={formCategory}
+                    onChange={(e) => setFormCategory(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
+                  >
+                    {categoryGroups.map((g) => {
+                      const opts = CATEGORIES.filter((c) => c.group === g);
+                      if (!opts.length) return null;
+                      const label =
+                        g === 'PRODUCT'
+                          ? language === 'MM'
+                            ? 'ပစ္စည်းအမျိုးအစား'
+                            : 'Item Types'
+                          : g === 'GOLD_CLASS'
                             ? language === 'MM'
-                              ? 'ပစ္စည်းအမျိုးအစား'
-                              : 'Item Types'
-                            : g === 'GOLD_CLASS'
-                              ? language === 'MM'
-                                ? 'Categories (ပဲရည်)'
-                                : 'Categories (Purity)'
-                              : language === 'MM'
-                                ? 'အခြား'
-                                : 'Other';
-                        return (
-                          <optgroup key={g} label={label}>
-                            {opts.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {language === 'MM' ? c.mm : c.en}
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      })}
-                    </select>
-                  )}
+                              ? 'Categories (ပဲရည်)'
+                              : 'Categories (Purity)'
+                            : language === 'MM'
+                              ? 'အခြား'
+                              : 'Other';
+                      return (
+                        <optgroup key={g} label={label}>
+                          {opts.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {language === 'MM' ? c.mm : c.en}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
                 </div>
               </div>
 
