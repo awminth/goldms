@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Scanner, useDevices, type IDetectedBarcode, type IScannerError, type IScannerHandle } from '@yudiel/react-qr-scanner';
 import { useGoldShop } from '../context/GoldShopContext';
+import { api } from '../services/api';
 import { InventoryItem, GoldPurity } from '../types/gold';
 import {
   estimateSellingPrice,
@@ -80,6 +81,40 @@ function triggerHaptic() {
   }
 }
 
+function cleanScannedCode(raw: string): string {
+  return normalizeBarcode(raw)
+    .replace(/\s+/g, '')
+    .replace(/^\][A-Za-z][0-9]/, '')
+    .trim();
+}
+
+function findInventoryItem(list: InventoryItem[], raw: string): InventoryItem | undefined {
+  const key = cleanScannedCode(raw).toLowerCase();
+  if (!key) return undefined;
+  const digits = key.replace(/\D/g, '');
+  return list.find((item) => {
+    const itemKey = cleanScannedCode(item.barcode).toLowerCase();
+    if (itemKey === key) return true;
+    const itemDigits = itemKey.replace(/\D/g, '');
+    return digits.length >= 4 && itemDigits === digits;
+  });
+}
+
+function scannerErrorText(error: IScannerError): string {
+  switch (error.kind) {
+    case 'permission-denied':
+      return 'ကင်မရာ အသုံးပြုခွင့် (Permission) ပိတ်ထားပါသည်။ ခွင့်ပြုပေးပါ သို့မဟုတ် လက်ရိုက်စနစ်ဖြင့် အသုံးပြုပါ။';
+    case 'no-camera':
+      return 'ကင်မရာ ရှာမတွေ့ပါ။ လက်ရိုက်စနစ်ဖြင့် ရှာဖွေနိုင်ပါသည်။';
+    case 'in-use':
+      return 'ကင်မရာကို အခြား app က အသုံးပြုနေပါသည်။ အဲ့ဒီ app ကို ပိတ်ပြီး Refresh လုပ်ပါ။';
+    case 'insecure-context':
+      return 'ကင်မရာကို HTTPS မှာသာ ဖွင့်လို့ရပါသည်။';
+    default:
+      return 'ကင်မရာ ဖွင့်မရပါ။ လက်ရိုက်စနစ်ဖြင့် အသုံးပြုနိုင်ပါသည်။';
+  }
+}
+
 export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavigate }) => {
   const { inventory, goldPrices, shopSettings, language, refreshData } = useGoldShop();
 
@@ -94,9 +129,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
   const [copiedCode, setCopiedCode] = useState(false);
 
   // Scanner state
-  const [isScanning, setIsScanning] = useState(false);
-  const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
-  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+  const [cameraNonce, setCameraNonce] = useState(0);
+  const [deviceId, setDeviceId] = useState<string | undefined>(undefined);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
@@ -108,7 +142,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
   // Recent scans list (session-only)
   const [recentScans, setRecentScans] = useState<Array<{ barcode: string; name: string; time: string }>>([]);
 
-  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const videoDevices = useDevices();
+  const scannerRef = useRef<IScannerHandle>(null);
+  const inventoryRef = useRef(inventory);
+  inventoryRef.current = inventory;
+  const pausedRef = useRef(false);
+  const foundLockRef = useRef(false);
+  const recentRejectRef = useRef<{ text: string; at: number } | null>(null);
+  const handleBarcodeFoundRef = useRef<(code: string) => Promise<void>>(async () => {});
   const tagPrintRef = useRef<HTMLDivElement | null>(null);
 
   const handlePrintTag = useReactToPrint({
@@ -153,217 +194,59 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     [goldPrices]
   );
 
-  // Stop camera helper
-  const stopCamera = useCallback(async () => {
-    if (html5QrCodeRef.current) {
+  const handleBarcodeFound = async (rawCode: string) => {
+    const cleanCode = cleanScannedCode(rawCode);
+    if (!cleanCode) return;
+
+    playBeep();
+    triggerHaptic();
+
+    let found = findInventoryItem(inventoryRef.current, cleanCode);
+    if (!found && cleanCode.length >= 4) {
       try {
-        if (html5QrCodeRef.current.isScanning) {
-          await html5QrCodeRef.current.stop();
-        }
-        await html5QrCodeRef.current.clear();
-      } catch (err) {
-        console.warn('Error stopping scanner:', err);
-      }
-      html5QrCodeRef.current = null;
-      setIsScanning(false);
-      setTorchOn(false);
-      setZoomRange(null);
-    }
-  }, []);
-
-  // Process barcode match
-  const handleBarcodeFound = useCallback(
-    async (rawCode: string) => {
-      const cleanCode = normalizeBarcode(rawCode).trim();
-      if (!cleanCode) return;
-
-      playBeep();
-      triggerHaptic();
-
-      // Find in local inventory first
-      let found = inventory.find(
-        (i) =>
-          normalizeBarcode(i.barcode).toLowerCase() === cleanCode.toLowerCase() ||
-          String(i.barcode).trim().toLowerCase() === cleanCode.toLowerCase()
-      );
-
-      // If not found, try refreshing data once in case item was just added
-      if (!found) {
-        try {
-          await refreshData();
-          found = inventory.find(
-            (i) =>
-              normalizeBarcode(i.barcode).toLowerCase() === cleanCode.toLowerCase() ||
-              String(i.barcode).trim().toLowerCase() === cleanCode.toLowerCase()
-          );
-        } catch {
-          // ignore refresh error
-        }
-      }
-
-      if (found) {
-        setSearchError(null);
-        setScannedItem(found);
-        setShowTagPreview(false);
-        // Save to recents
-        setRecentScans((prev) => {
-          const filtered = prev.filter((r) => r.barcode !== found!.barcode);
-          return [
-            {
-              barcode: found!.barcode,
-              name: found!.name_mm || found!.name,
-              time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            },
-            ...filtered.slice(0, 4),
-          ];
-        });
-        // Stop scanning while viewing item details
-        void stopCamera();
-      } else {
-        setSearchError(`ဘားကုဒ် "${cleanCode}" ဖြင့် စာရင်းထဲတွင် ပစ္စည်းရှာမတွေ့ပါ`);
-      }
-    },
-    [inventory, refreshData, stopCamera]
-  );
-
-  // Start Camera
-  const startCamera = useCallback(async () => {
-    setCameraError(null);
-    setSearchError(null);
-
-    try {
-      const devices = await Html5Qrcode.getCameras();
-      if (!devices || devices.length === 0) {
-        setCameraError('ကင်မရာ ရှာမတွေ့ပါ။ လက်ရိုက်စနစ်ဖြင့် ရှာဖွေနိုင်ပါသည်။');
-        setActiveMode('manual');
-        return;
-      }
-
-      setCameras(devices);
-      // Prefer back camera (environment) on phones
-      const backCamIndex = devices.findIndex(
-        (d) =>
-          d.label.toLowerCase().includes('back') ||
-          d.label.toLowerCase().includes('rear') ||
-          d.label.toLowerCase().includes('environment')
-      );
-      const camIndex = backCamIndex !== -1 ? backCamIndex : 0;
-      setCurrentCameraIndex(camIndex);
-      const selectedCameraId = devices[camIndex].id;
-
-      // Stop previous instance cleanly
-      if (html5QrCodeRef.current) {
-        try {
-          if (html5QrCodeRef.current.isScanning) {
-            await html5QrCodeRef.current.stop();
-          }
-          await html5QrCodeRef.current.clear();
-        } catch {
-          // ignore
-        }
-        html5QrCodeRef.current = null;
-      }
-
-      // Configure hardware-accelerated 1D & QR barcode detector
-      html5QrCodeRef.current = new Html5Qrcode('barcode-scanner-viewport', {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.QR_CODE,
-        ],
-        useBarCodeDetectorIfSupported: true,
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true,
-        },
-        verbose: false,
-      });
-
-      const scanner = html5QrCodeRef.current;
-
-      await scanner.start(
-        selectedCameraId,
-        {
-          fps: 20, // High frame rate for instant recognition
-          videoConstraints: {
-            facingMode: { ideal: 'environment' },
-            width: { min: 1280, ideal: 1920 },
-            height: { min: 720, ideal: 1080 },
-            advanced: [{ focusMode: 'continuous' } as any],
-          },
-          // Generous scan box so slight tilts or offsets still get detected
-          qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const width = Math.min(Math.round(viewfinderWidth * 0.92), 360);
-            const height = Math.min(Math.round(width * 0.6), Math.round(viewfinderHeight * 0.75));
-            return { width, height };
-          },
-          disableFlip: true,
-        },
-        (decodedText) => {
-          void handleBarcodeFound(decodedText);
-        },
-        () => {
-          // ignore scan frame misses
-        }
-      );
-
-      setIsScanning(true);
-
-      // Check torch and zoom capabilities
-      try {
-        const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & {
-          torch?: boolean;
-          zoom?: { min: number; max: number; step: number };
-        };
-
-        setHasTorch(Boolean(capabilities && 'torch' in capabilities));
-
-        if (capabilities && 'zoom' in capabilities && capabilities.zoom) {
-          const zMin = capabilities.zoom.min || 1;
-          const zMax = capabilities.zoom.max || 5;
-          const zStep = capabilities.zoom.step || 0.1;
-          setZoomRange({ min: zMin, max: zMax, step: zStep });
-
-          // Default to a comfortable 1.5x - 2.0x zoom for tiny jewelry barcodes if available
-          const defaultZoom = Math.min(Math.max(zMin, 1.8), zMax);
-          try {
-            await scanner.applyVideoConstraints({
-              advanced: [{ zoom: defaultZoom } as any],
-            });
-            setZoomLevel(defaultZoom);
-          } catch {
-            setZoomLevel(1);
-          }
-        } else {
-          setZoomRange(null);
-          setZoomLevel(1);
-        }
+        const data = await api.bootstrap();
+        found = findInventoryItem(data.inventory || [], cleanCode);
+        if (found) void refreshData();
       } catch {
-        setHasTorch(false);
-        setZoomRange(null);
+        // Keep the in-memory result when the network lookup fails.
       }
-    } catch (err: unknown) {
-      console.error('Camera start error:', err);
-      const errMsg = err instanceof Error ? err.message : String(err);
-      if (errMsg.includes('Permission') || errMsg.includes('NotAllowedError')) {
-        setCameraError('ကင်မရာ အသုံးပြုခွင့် (Permission) ပိတ်ထားပါသည်။ ခွင့်ပြုပေးပါ သို့မဟုတ် လက်ရိုက်စနစ်ဖြင့် အသုံးပြုပါ။');
-      } else {
-        setCameraError('ကင်မရာ ဖွင့်မရပါ။ လက်ရိုက်စနစ်ဖြင့် အသုံးပြုနိုင်ပါသည်။');
-      }
-      setActiveMode('manual');
     }
-  }, [handleBarcodeFound]);
 
-  // Set Zoom helper
+    if (found) {
+      foundLockRef.current = true;
+      pausedRef.current = true;
+      recentRejectRef.current = null;
+      setSearchError(null);
+      setScannedItem(found);
+      setShowTagPreview(false);
+      setRecentScans((prev) => {
+        const filtered = prev.filter((r) => r.barcode !== found!.barcode);
+        return [
+          {
+            barcode: found!.barcode,
+            name: found!.name_mm || found!.name,
+            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          },
+          ...filtered.slice(0, 4),
+        ];
+      });
+      return;
+    }
+
+    recentRejectRef.current = { text: cleanCode, at: Date.now() };
+    setSearchError(`ဘားကုဒ် "${cleanCode}" ဖြင့် စာရင်းထဲတွင် ပစ္စည်းရှာမတွေ့ပါ`);
+  };
+  handleBarcodeFoundRef.current = handleBarcodeFound;
+
+  const cameraTrack = () => scannerRef.current?.getStream()?.getVideoTracks()[0] ?? null;
+
   const handleSetZoom = async (val: number) => {
-    if (!html5QrCodeRef.current || !zoomRange) return;
+    const track = cameraTrack();
+    if (!track || !zoomRange) return;
     try {
       const clamped = Math.min(Math.max(zoomRange.min, val), zoomRange.max);
-      await html5QrCodeRef.current.applyVideoConstraints({
-        advanced: [{ zoom: clamped } as any],
+      await track.applyConstraints({
+        advanced: [{ zoom: clamped } as MediaTrackConstraintSet],
       });
       setZoomLevel(clamped);
     } catch (err) {
@@ -371,42 +254,21 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     }
   };
 
-  // Switch camera front/back
-  const switchCamera = async () => {
-    if (cameras.length <= 1) return;
-    const nextIndex = (currentCameraIndex + 1) % cameras.length;
-    setCurrentCameraIndex(nextIndex);
-
-    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-      await html5QrCodeRef.current.stop();
-      await html5QrCodeRef.current.start(
-        cameras[nextIndex].id,
-        {
-          fps: 20,
-          videoConstraints: {
-            width: { min: 1280, ideal: 1920 },
-            height: { min: 720, ideal: 1080 },
-          },
-          qrbox: (w, h) => ({
-            width: Math.min(Math.round(w * 0.92), 360),
-            height: Math.min(Math.round(w * 0.55), Math.round(h * 0.7)),
-          }),
-          disableFlip: true,
-        },
-        (decodedText) => {
-          void handleBarcodeFound(decodedText);
-        },
-        () => {}
-      );
-    }
+  const switchCamera = () => {
+    if (videoDevices.length <= 1) return;
+    const current = videoDevices.findIndex((device) => device.deviceId === deviceId);
+    const next = videoDevices[(current < 0 ? 0 : current + 1) % videoDevices.length];
+    setDeviceId(next?.deviceId);
+    setTorchOn(false);
+    setZoomLevel(2);
   };
 
-  // Toggle Torch/Flashlight
   const toggleTorch = async () => {
-    if (!html5QrCodeRef.current || !hasTorch) return;
+    const track = cameraTrack();
+    if (!track || !hasTorch) return;
     try {
       const nextState = !torchOn;
-      await html5QrCodeRef.current.applyVideoConstraints({
+      await track.applyConstraints({
         advanced: [{ torch: nextState } as MediaTrackConstraintSet],
       });
       setTorchOn(nextState);
@@ -415,42 +277,87 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     }
   };
 
-  // Lifecycle when modal opens/closes
+  const showCamera = isOpen && activeMode === 'camera' && !scannedItem && !cameraError;
+
   useEffect(() => {
-    if (isOpen) {
-      if (activeMode === 'camera' && !scannedItem) {
-        const t = setTimeout(() => {
-          void startCamera();
-        }, 150);
-        return () => clearTimeout(t);
-      }
-    } else {
-      void stopCamera();
+    if (!isOpen) {
+      foundLockRef.current = false;
+      pausedRef.current = false;
       setScannedItem(null);
       setSearchError(null);
+      setCameraError(null);
+      setTorchOn(false);
     }
-  }, [isOpen, activeMode, scannedItem, startCamera, stopCamera]);
+  }, [isOpen]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (html5QrCodeRef.current) {
+    if (!showCamera) return;
+    let cancelled = false;
+    const tune = async () => {
+      const track = cameraTrack();
+      if (!track || cancelled) return false;
+      const caps = (track.getCapabilities?.() ?? {}) as MediaTrackCapabilities & {
+        torch?: boolean;
+        zoom?: { min?: number; max?: number; step?: number };
+      };
+      setHasTorch(Boolean(caps.torch));
+      if (caps.zoom && typeof caps.zoom.max === 'number') {
+        const range = {
+          min: typeof caps.zoom.min === 'number' ? caps.zoom.min : 1,
+          max: caps.zoom.max,
+          step: typeof caps.zoom.step === 'number' && caps.zoom.step > 0 ? caps.zoom.step : 0.1,
+        };
+        const target = Math.min(range.max, Math.max(range.min, 2));
+        const steps = Math.round((target - range.min) / range.step);
+        const zoom = Math.min(range.max, Math.max(range.min, range.min + steps * range.step));
         try {
-          if (html5QrCodeRef.current.isScanning) {
-            void html5QrCodeRef.current.stop();
-          }
-          void html5QrCodeRef.current.clear();
+          await track.applyConstraints({
+            advanced: [{ zoom } as MediaTrackConstraintSet],
+          });
+          if (!cancelled) setZoomLevel(zoom);
         } catch {
-          // ignore
+          if (!cancelled) setZoomLevel(range.min);
         }
+        if (!cancelled) setZoomRange(range);
+      } else if (!cancelled) {
+        setZoomRange(null);
+        setZoomLevel(1);
       }
+      return true;
     };
-  }, []);
+    const timer = window.setInterval(() => {
+      void tune().then((ready) => {
+        if (ready) window.clearInterval(timer);
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [showCamera, cameraNonce, deviceId]);
+
+  const handleLibraryScan = (codes: IDetectedBarcode[]) => {
+    const raw = codes[0]?.rawValue;
+    if (!raw || pausedRef.current || foundLockRef.current) return;
+    const clean = cleanScannedCode(raw);
+    if (clean.length < 4) return;
+    const rejected = recentRejectRef.current;
+    if (rejected && rejected.text === clean && Date.now() - rejected.at < 1200) return;
+    pausedRef.current = true;
+    void handleBarcodeFoundRef.current(clean).finally(() => {
+      if (!foundLockRef.current) {
+        window.setTimeout(() => {
+          pausedRef.current = false;
+        }, 200);
+      }
+    });
+  };
 
   // Handle manual search submit
   const handleManualSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!manualQuery.trim()) return;
+    recentRejectRef.current = null;
     void handleBarcodeFound(manualQuery.trim());
   };
 
@@ -470,16 +377,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     }
   };
 
-  // Resume camera for next item
+  // Resume camera for next item. Opening the camera view starts the session.
   const handleScanNext = () => {
+    foundLockRef.current = false;
+    pausedRef.current = false;
+    recentRejectRef.current = null;
     setScannedItem(null);
     setShowTagPreview(false);
     setSearchError(null);
     setManualQuery('');
+    setCameraError(null);
     setActiveMode('camera');
-    setTimeout(() => {
-      void startCamera();
-    }, 100);
   };
 
   // Copy barcode helper
@@ -501,6 +409,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
         <button
           type="button"
           onClick={() => {
+            foundLockRef.current = false;
+            pausedRef.current = false;
+            recentRejectRef.current = null;
+            setCameraError(null);
             setIsOpen(true);
             setScannedItem(null);
             setShowTagPreview(false);
@@ -578,7 +490,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                     type="button"
                     onClick={() => {
                       setActiveMode('manual');
-                      void stopCamera();
                       setSearchError(null);
                     }}
                     className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
@@ -609,38 +520,76 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">
                           {cameraError}
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => setActiveMode('manual')}
-                          className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs"
-                        >
-                          လက်ရိုက်စနစ်သို့ သွားမည်
-                        </button>
+                        <div className="mt-3 flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCameraError(null);
+                              setCameraNonce((n) => n + 1);
+                            }}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs"
+                          >
+                            ပြန်ကြိုးစားမည်
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMode('manual')}
+                            className="px-4 py-2 bg-white dark:bg-gray-800 border border-amber-300 text-amber-800 dark:text-amber-200 text-xs font-bold rounded-xl"
+                          >
+                            လက်ရိုက်စနစ်သို့ သွားမည်
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className="w-full flex flex-col items-center">
                         {/* Live Camera Viewport Box */}
-                        <div className="relative w-full max-w-md aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-inner border-2 border-amber-500/40 flex items-center justify-center">
-                          <div id="barcode-scanner-viewport" className="w-full h-full object-cover" />
-
-                          {/* Optical Target Overlay */}
-                          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                            {/* Scanning Guide Box */}
-                            <div className="relative w-[88%] h-[58%] border-2 border-amber-400/80 rounded-xl shadow-[0_0_15px_rgba(212,175,55,0.4)] flex items-center justify-center">
-                              {/* Animated Red Laser Line */}
-                              <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-red-500 to-transparent shadow-[0_0_8px_#ef4444] animate-scanner-laser" />
-
-                              {/* Target Corner Accents */}
-                              <span className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-amber-300" />
-                              <span className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-amber-300" />
-                              <span className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-amber-300" />
-                              <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-amber-300" />
+                        <div className="relative w-full max-w-md aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-inner border-2 border-amber-500/40">
+                          <Scanner
+                            key={`${cameraNonce}-${deviceId ?? 'environment'}`}
+                            ref={scannerRef}
+                            onScan={handleLibraryScan}
+                            onError={(error) => {
+                              if (error.kind === 'unknown' || error.kind === 'aborted') return;
+                              setCameraError(scannerErrorText(error));
+                            }}
+                            formats={['code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'qr_code']}
+                            sound={false}
+                            allowMultiple
+                            scanDelay={200}
+                            retryDelay={40}
+                            constraints={
+                              deviceId
+                                ? {
+                                    deviceId: { exact: deviceId },
+                                    width: { ideal: 1920 },
+                                    height: { ideal: 1080 },
+                                  }
+                                : {
+                                    facingMode: { ideal: 'environment' },
+                                    width: { ideal: 1920 },
+                                    height: { ideal: 1080 },
+                                  }
+                            }
+                            components={{ finder: false, torch: false, zoom: false, onOff: false }}
+                            styles={{
+                              container: { width: '100%', height: '100%', position: 'relative' },
+                              video: { width: '100%', height: '100%', objectFit: 'cover' },
+                            }}
+                            classNames={{ container: 'h-full w-full', video: 'h-full w-full object-cover' }}
+                          >
+                            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                              <div className="relative w-[90%] h-[42%] border-2 border-amber-400/80 rounded-xl shadow-[0_0_15px_rgba(212,175,55,0.4)] flex items-center justify-center">
+                                <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-red-500 to-transparent shadow-[0_0_8px_#ef4444] animate-scanner-laser" />
+                                <span className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-amber-300" />
+                                <span className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-amber-300" />
+                                <span className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-amber-300" />
+                                <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-amber-300" />
+                              </div>
+                              <span className="mt-2 text-[11px] font-medium text-white/95 bg-black/70 px-3 py-0.5 rounded-full backdrop-blur-xs">
+                                {language === 'MM' ? 'ဘားကုဒ်ကို အနီရောင်မျဉ်းပေါ်တင်ပြီး ခဏငြိမ်အောင် ကိုင်ထားပါ' : 'Hold the barcode steady on the red line'}
+                              </span>
                             </div>
-
-                            <span className="mt-2 text-[11px] font-medium text-white/95 bg-black/70 px-3 py-0.5 rounded-full backdrop-blur-xs">
-                              {language === 'MM' ? 'Barcode ကို အကွက်ထဲ တည့်တည့်ချိန်ပေးပါ' : 'Align barcode within frame'}
-                            </span>
-                          </div>
+                          </Scanner>
                         </div>
 
                         {/* 💡 Scanner Controls: Zoom, Flashlight, Camera Switch */}
@@ -691,7 +640,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                           )}
 
                           {/* Switch Camera */}
-                          {cameras.length > 1 && (
+                          {videoDevices.length > 1 && (
                             <button
                               type="button"
                               onClick={() => void switchCamera()}
@@ -706,10 +655,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                           {/* Restart */}
                           <button
                             type="button"
-                            onClick={() => {
-                              void stopCamera();
-                              void startCamera();
-                            }}
+                            onClick={() => setCameraNonce((n) => n + 1)}
                             className="px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
                             title="ကင်မရာ ပြန်စမည်"
                           >
@@ -720,7 +666,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
 
                         {/* Scanning Tip Banner */}
                         <p className="mt-2 text-[11px] text-amber-800/90 dark:text-amber-300/90 text-center max-w-sm px-2">
-                          💡 အကြံပြုချက်: ဖုန်းကို ပစ္စည်းနှင့် ၁ ပေခန့် ခွာထားပြီး 2x Zoom (သို့မဟုတ်) မီးဖွင့်၍ ဖတ်ပါက ပိုမိုမြန်ဆန်တိကျပါသည်
+                          💡 ဘားကုဒ်ကို အနီရောင်မျဉ်းပေါ် တည့်တည့်တင်ပြီး ဖုန်းကို မလှုပ်အောင် ခဏကိုင်ထားပါ။ မဖတ်နိုင်ရင် ပိုနီးကပ်ပါ၊ Zoom တိုးပါ၊ သို့မဟုတ် မီးဖွင့်ပါ။
                         </p>
                       </div>
                     )}
