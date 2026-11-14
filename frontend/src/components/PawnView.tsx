@@ -338,14 +338,14 @@ export const PawnView: React.FC<Props> = ({ section, onNavigate, editId, onEdit,
     () => [
       {
         code: 'MYANMAR',
-        mm: getGoldOriginLabel('MYANMAR_GOLD', 'MM') || 'မြန်မာရွှေ',
-        en: getGoldOriginLabel('MYANMAR_GOLD', 'EN') || 'Myanmar Gold',
+        mm: getGoldOriginLabel('MYANMAR_GOLD') || 'မြန်မာရွှေ',
+        en: getGoldOriginLabel('MYANMAR_GOLD') || 'Myanmar Gold',
       },
       { code: 'BAR', mm: 'အခေါက်ရွှေ', en: 'Fine / Bar Gold' },
       {
         code: 'THAI',
-        mm: getGoldOriginLabel('THAI_GOLD', 'MM') || 'ထိုင်းရွှေ',
-        en: getGoldOriginLabel('THAI_GOLD', 'EN') || 'Thai Gold',
+        mm: getGoldOriginLabel('THAI_GOLD') || 'ထိုင်းရွှေ',
+        en: getGoldOriginLabel('THAI_GOLD') || 'Thai Gold',
       },
       { code: 'MIXED', mm: 'အမယ်စုံ', en: 'Mixed items' },
     ],
