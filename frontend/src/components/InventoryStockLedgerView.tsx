@@ -781,22 +781,22 @@ export const InventoryStockLedgerView: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] text-left border-collapse min-w-[600px]">
             <thead>
-              <tr className="bg-gray-50 dark:bg-[#121212] text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-800">
+              <tr className="bg-gray-50 dark:bg-[#121212] text-gray-700 dark:text-gray-200 border-b border-gray-300 dark:border-gray-700">
                 <th
                   rowSpan={2}
-                  className="px-3 py-2.5 font-bold w-12 text-center sticky left-0 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-200 dark:border-gray-800 align-middle"
+                  className="px-3 py-2.5 font-bold w-12 text-center sticky left-0 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-300 dark:border-gray-700 align-middle"
                 >
                   {language === 'MM' ? 'စဉ်' : '#'}
                 </th>
                 <th
                   rowSpan={2}
-                  className="px-3.5 py-2.5 font-bold min-w-[160px] sticky left-12 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-200 dark:border-gray-800 align-middle"
+                  className="px-3.5 py-2.5 font-bold min-w-[160px] sticky left-12 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-300 dark:border-gray-700 align-middle"
                 >
                   {language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Category'}
                 </th>
                 <th
                   rowSpan={2}
-                  className="px-3.5 py-2.5 font-bold min-w-[120px] border-r-2 border-gray-200 dark:border-gray-700 align-middle"
+                  className="px-3.5 py-2.5 font-bold min-w-[120px] border-r-2 border-gray-400 dark:border-gray-600 align-middle"
                 >
                   {goldTab === 'MYANMAR'
                     ? language === 'MM'
@@ -810,22 +810,22 @@ export const InventoryStockLedgerView: React.FC = () => {
                   <th
                     key={d}
                     colSpan={3}
-                    className="px-3 py-2 font-bold text-center font-mono whitespace-nowrap border-r-2 border-gray-200 dark:border-gray-700 bg-gray-100/70 dark:bg-[#161616]"
+                    className="px-3 py-2 font-bold text-center font-mono whitespace-nowrap border-r-2 border-gray-400 dark:border-gray-600 bg-gray-100/80 dark:bg-[#161616]"
                   >
                     {formatDate(d)}
                   </th>
                 ))}
               </tr>
-              <tr className="bg-gray-50/90 dark:bg-[#141414] text-[10px] border-b-2 border-gray-200 dark:border-gray-800">
+              <tr className="bg-gray-50/90 dark:bg-[#141414] text-[10px] border-b-2 border-gray-300 dark:border-gray-700">
                 {dateCols.map((d) => (
                   <React.Fragment key={`${d}-sub`}>
-                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-rose-600 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-950/20 border-r border-gray-100 dark:border-gray-800/60 min-w-[46px]">
+                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-rose-600 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-950/20 border-r border-gray-300 dark:border-gray-700 min-w-[46px]">
                       {language === 'MM' ? 'အလျော့' : 'Out'}
                     </th>
-                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20 border-r border-gray-100 dark:border-gray-800/60 min-w-[46px]">
+                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20 border-r border-gray-300 dark:border-gray-700 min-w-[46px]">
                       {language === 'MM' ? 'အပေါင်း' : 'In'}
                     </th>
-                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-gray-800 dark:text-white bg-white dark:bg-[#1F1F1F] border-r-2 border-gray-200 dark:border-gray-700 min-w-[52px]">
+                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-gray-800 dark:text-white bg-white dark:bg-[#1F1F1F] border-r-2 border-gray-400 dark:border-gray-600 min-w-[52px]">
                       {language === 'MM' ? 'စုစုပေါင်း' : 'Total'}
                     </th>
                   </React.Fragment>
@@ -859,14 +859,14 @@ export const InventoryStockLedgerView: React.FC = () => {
                             key={`${group.categoryCode}-${sr.subKey}`}
                             className={`hover:bg-amber-50/40 dark:hover:bg-amber-950/10 ${
                               isLastInGroup
-                                ? 'border-b-2 border-amber-200/80 dark:border-amber-900/50'
-                                : 'border-b border-gray-100 dark:border-gray-800/80'
+                                ? 'border-b-2 border-amber-300 dark:border-amber-800/80'
+                                : 'border-b border-gray-200 dark:border-gray-700/80'
                             }`}
                           >
                             {sIdx === 0 && (
                               <td
                                 rowSpan={rowSpanCount}
-                                className="px-3 py-2.5 text-center font-mono font-bold text-amber-700 dark:text-amber-400 align-top sticky left-0 bg-[#FAF8F2] dark:bg-[#181612] z-10 border-r border-gray-200 dark:border-gray-800"
+                                className="px-3 py-2.5 text-center font-mono font-bold text-amber-700 dark:text-amber-400 align-top sticky left-0 bg-[#FAF8F2] dark:bg-[#181612] z-10 border-r border-gray-300 dark:border-gray-700"
                               >
                                 {gIdx + 1}
                               </td>
@@ -874,12 +874,12 @@ export const InventoryStockLedgerView: React.FC = () => {
                             {sIdx === 0 && (
                               <td
                                 rowSpan={rowSpanCount}
-                                className="px-3.5 py-2.5 font-bold text-gray-900 dark:text-gray-100 align-top sticky left-12 bg-[#FAF8F2] dark:bg-[#181612] z-10 border-r border-gray-200 dark:border-gray-800"
+                                className="px-3.5 py-2.5 font-bold text-gray-900 dark:text-gray-100 align-top sticky left-12 bg-[#FAF8F2] dark:bg-[#181612] z-10 border-r border-gray-300 dark:border-gray-700"
                               >
                                 {catName}
                               </td>
                             )}
-                            <td className="px-3.5 py-2 font-semibold border-r-2 border-gray-200 dark:border-gray-700">
+                            <td className="px-3.5 py-2 font-semibold border-r-2 border-gray-400 dark:border-gray-600">
                               <span
                                 className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold font-mono ${
                                   goldTab === 'MYANMAR'
@@ -897,28 +897,28 @@ export const InventoryStockLedgerView: React.FC = () => {
                               return (
                                 <React.Fragment key={d}>
                                   <td
-                                    className={`px-2 py-2 text-center font-mono border-r border-gray-100 dark:border-gray-800/50 ${
+                                    className={`px-2 py-2 text-center font-mono border-r border-gray-300 dark:border-gray-700 ${
                                       outQty > 0
                                         ? 'font-bold text-rose-600 dark:text-rose-400 bg-rose-50/40 dark:bg-rose-950/20'
-                                        : 'text-gray-300 dark:text-gray-600'
+                                        : 'text-gray-400 dark:text-gray-600'
                                     }`}
                                   >
                                     {outQty > 0 ? outQty : '-'}
                                   </td>
                                   <td
-                                    className={`px-2 py-2 text-center font-mono border-r border-gray-100 dark:border-gray-800/50 ${
+                                    className={`px-2 py-2 text-center font-mono border-r border-gray-300 dark:border-gray-700 ${
                                       inQty > 0
                                         ? 'font-bold text-blue-600 dark:text-blue-400 bg-blue-50/40 dark:bg-blue-950/20'
-                                        : 'text-gray-300 dark:text-gray-600'
+                                        : 'text-gray-400 dark:text-gray-600'
                                     }`}
                                   >
                                     {inQty > 0 ? inQty : '-'}
                                   </td>
                                   <td
-                                    className={`px-2 py-2 text-center font-mono border-r-2 border-gray-200 dark:border-gray-700 ${
+                                    className={`px-2 py-2 text-center font-mono border-r-2 border-gray-400 dark:border-gray-600 ${
                                       q > 0
                                         ? 'font-bold text-gray-900 dark:text-white bg-white dark:bg-[#222222]'
-                                        : 'text-gray-300 dark:text-gray-600 bg-white/50 dark:bg-[#1A1A1A]'
+                                        : 'text-gray-400 dark:text-gray-600 bg-white/50 dark:bg-[#1A1A1A]'
                                     }`}
                                   >
                                     {q > 0 ? q : '-'}
@@ -936,10 +936,10 @@ export const InventoryStockLedgerView: React.FC = () => {
             </tbody>
             {activeGroups.length > 0 && (
               <tfoot>
-                <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t-2 border-amber-300 dark:border-amber-800 font-bold">
+                <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t-2 border-amber-400 dark:border-amber-700 font-bold">
                   <td
                     colSpan={3}
-                    className="px-3.5 py-2.5 text-amber-950 dark:text-amber-100 sticky left-0 bg-amber-100 dark:bg-[#241c0c] z-10 border-r-2 border-amber-200 dark:border-amber-800/60"
+                    className="px-3.5 py-2.5 text-amber-950 dark:text-amber-100 sticky left-0 bg-amber-100 dark:bg-[#241c0c] z-10 border-r-2 border-gray-400 dark:border-gray-600"
                   >
                     {language === 'MM' ? 'စုစုပေါင်း လက်ကျန် (ခု)' : 'Total Stock On Hand (pcs)'}
                   </td>
@@ -950,28 +950,28 @@ export const InventoryStockLedgerView: React.FC = () => {
                     return (
                       <React.Fragment key={d}>
                         <td
-                          className={`px-2 py-2.5 text-center font-mono border-r border-amber-200/50 dark:border-amber-800/40 ${
+                          className={`px-2 py-2.5 text-center font-mono border-r border-amber-300 dark:border-amber-700/70 ${
                             outTotal > 0
                               ? 'font-extrabold text-rose-600 dark:text-rose-400'
-                              : 'text-amber-900/40 dark:text-amber-200/40'
+                              : 'text-amber-900/50 dark:text-amber-200/40'
                           }`}
                         >
                           {outTotal > 0 ? outTotal : '-'}
                         </td>
                         <td
-                          className={`px-2 py-2.5 text-center font-mono border-r border-amber-200/50 dark:border-amber-800/40 ${
+                          className={`px-2 py-2.5 text-center font-mono border-r border-amber-300 dark:border-amber-700/70 ${
                             inTotal > 0
                               ? 'font-extrabold text-blue-600 dark:text-blue-400'
-                              : 'text-amber-900/40 dark:text-amber-200/40'
+                              : 'text-amber-900/50 dark:text-amber-200/40'
                           }`}
                         >
                           {inTotal > 0 ? inTotal : '-'}
                         </td>
                         <td
-                          className={`px-2 py-2.5 text-center font-mono border-r-2 border-amber-300 dark:border-amber-700 bg-white/80 dark:bg-white/10 ${
+                          className={`px-2 py-2.5 text-center font-mono border-r-2 border-gray-400 dark:border-gray-600 bg-white/80 dark:bg-white/10 ${
                             total > 0
                               ? 'font-extrabold text-gray-900 dark:text-white'
-                              : 'text-amber-900/40 dark:text-amber-200/40'
+                              : 'text-amber-900/50 dark:text-amber-200/40'
                           }`}
                         >
                           {total > 0 ? total : '-'}
