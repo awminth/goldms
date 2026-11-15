@@ -141,14 +141,14 @@
    * flat rows, generous padding, hairline horizontal dividers only
    */
   .data-table-shell .data-table,
-  main table:not(.ui-table-spaced):not(.data-table) {
+  main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) {
     width: 100%;
     border-collapse: collapse !important;
     border-spacing: 0 !important;
   }
 
   .data-table-shell .data-table thead th,
-  main table:not(.ui-table-spaced):not(.data-table) thead th {
+  main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) thead th {
     position: sticky;
     top: 0;
     z-index: 1;
@@ -166,14 +166,14 @@
   }
 
   .dark .data-table-shell .data-table thead th,
-  .dark main table:not(.ui-table-spaced):not(.data-table) thead th {
+  .dark main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) thead th {
     background-color: #1a1a1a !important;
     color: #9ca3af !important;
     border-bottom-color: #2a2a2a !important;
   }
 
   .data-table-shell .data-table tbody td,
-  main table:not(.ui-table-spaced):not(.data-table) tbody td {
+  main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) tbody td {
     padding: 0.95rem 0.75rem !important;
     vertical-align: middle;
     background-color: transparent !important;
@@ -184,29 +184,51 @@
   }
 
   .dark .data-table-shell .data-table tbody td,
-  .dark main table:not(.ui-table-spaced):not(.data-table) tbody td {
+  .dark main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) tbody td {
     background-color: transparent !important;
     border-bottom-color: #2a2a2a !important;
   }
 
   .data-table-shell .data-table tbody tr:last-child td,
-  main table:not(.ui-table-spaced):not(.data-table) tbody tr:last-child td {
+  main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) tbody tr:last-child td {
     border-bottom: none !important;
   }
 
   .data-table-shell .data-table tbody tr,
-  main table:not(.ui-table-spaced):not(.data-table) tbody tr {
+  main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) tbody tr {
     transition: background-color 120ms ease;
   }
 
   .data-table-shell .data-table tbody tr:hover td,
-  main table:not(.ui-table-spaced):not(.data-table) tbody tr:hover td {
+  main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) tbody tr:hover td {
     background-color: rgb(212 175 55 / 0.06) !important;
   }
 
   .dark .data-table-shell .data-table tbody tr:hover td,
-  .dark main table:not(.ui-table-spaced):not(.data-table) tbody tr:hover td {
+  .dark main table:not(.ui-table-spaced):not(.data-table):not(.ledger-table) tbody tr:hover td {
     background-color: color-mix(in srgb, #d4af37 10%, transparent) !important;
+  }
+
+  /* Daily Stock Ledger Table: continuous vertical dividers between date columns from row 1 to bottom */
+  .ledger-table {
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
+  }
+
+  .ledger-table .date-sep-r {
+    border-right: 1.5px solid #b8b0a2 !important;
+  }
+
+  .ledger-table .date-sep-l {
+    border-left: 1.5px solid #b8b0a2 !important;
+  }
+
+  .dark .ledger-table .date-sep-r {
+    border-right: 1.5px solid #3f3f46 !important;
+  }
+
+  .dark .ledger-table .date-sep-l {
+    border-left: 1.5px solid #3f3f46 !important;
   }
 
   .data-table-shell .data-table tbody tr.is-selected td {
