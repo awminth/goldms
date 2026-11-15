@@ -22,7 +22,6 @@ import {
   X,
   Check,
   Search,
-  Power,
   Scale,
   Contact,
 } from 'lucide-react';
@@ -628,12 +627,25 @@ function CategoriesPanel({
   };
 
   const handleDelete = async (c: MasterCategory) => {
+    const usedCount = Number(c.usage_count ?? 0);
+    if (usedCount > 0) {
+      await dialog.alert({
+        title: language === 'MM' ? 'သတိပေးချက် — ဖျက်၍မရပါ' : 'Warning — Cannot Delete',
+        message:
+          language === 'MM'
+            ? `"${c.name_mm || c.code}" (${c.code}) ကို စာရင်း ${usedCount} ခုတွင် အသုံးပြုနေဆဲဖြစ်သောကြောင့် ဖျက်၍မရပါ။`
+            : `"${c.name_en || c.code}" (${c.code}) cannot be deleted because it is currently used in ${usedCount} record(s).`,
+        variant: 'warning',
+      });
+      return;
+    }
+
     const ok = await dialog.confirm({
-      title: language === 'MM' ? 'Category ဖျက်မည်' : 'Delete category',
+      title: language === 'MM' ? 'အမျိုးအစား ဖျက်မည်' : 'Delete Item',
       message:
         language === 'MM'
-          ? `"${c.code}" ကို ဖျက်မလား? အသုံးပြုနေပါက ပိတ် (deactivate) လုပ်ပါမည်။`
-          : `Delete "${c.code}"? If in use it will be deactivated instead.`,
+          ? `"${c.name_mm || c.code}" (${c.code}) ကို အပြီးအတိုင် ဖျက်မလား?`
+          : `Permanently delete "${c.name_en || c.code}" (${c.code})?`,
       confirmLabel: language === 'MM' ? 'ဖျက်မည်' : 'Delete',
       cancelLabel: language === 'MM' ? 'မလုပ်ပါ' : 'Cancel',
       danger: true,
@@ -642,27 +654,20 @@ function CategoriesPanel({
     setBusy(true);
     try {
       await onDelete(c.id);
-      setNotice(
-        language === 'MM'
-          ? 'ဖျက်ပြီး / အသုံးပြုနေပါက ပိတ်ထားပါသည်'
-          : 'Deleted (or deactivated if in use)'
-      );
+      setNotice(language === 'MM' ? 'ဖျက်သိမ်းပြီးပါပြီ' : 'Deleted successfully');
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : 'Delete failed');
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      await dialog.alert({
+        title: language === 'MM' ? 'သတိပေးချက် — ဖျက်၍မရပါ' : 'Warning — Cannot Delete',
+        message: msg,
+        variant: 'warning',
+      });
     } finally {
       setBusy(false);
     }
   };
 
-  const toggleActive = async (c: MasterCategory) => {
-    if (!canUpdate) return;
-    setBusy(true);
-    try {
-      await onUpdate(c.id, { is_active: !c.is_active });
-    } finally {
-      setBusy(false);
-    }
-  };
+  const hideDeactivate = lockedGroup === 'PRODUCT';
 
   const counts = {
     all: categories.length,
@@ -720,15 +725,17 @@ function CategoriesPanel({
             ))}
           </select>
         )}
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'OFF')}
-          className="px-2.5 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
-        >
-          <option value="ALL">{language === 'MM' ? 'အခြေအနေအားလုံး' : 'All status'}</option>
-          <option value="ACTIVE">{language === 'MM' ? 'အသက်ဝင်' : 'Active'}</option>
-          <option value="OFF">{language === 'MM' ? 'ပိတ်ထား' : 'Off'}</option>
-        </select>
+        {!hideDeactivate && (
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'OFF')}
+            className="px-2.5 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
+          >
+            <option value="ALL">{language === 'MM' ? 'အခြေအနေအားလုံး' : 'All status'}</option>
+            <option value="ACTIVE">{language === 'MM' ? 'အသက်ဝင်' : 'Active'}</option>
+            <option value="OFF">{language === 'MM' ? 'ပိတ်ထား' : 'Off'}</option>
+          </select>
+        )}
       </div>
 
       {notice && (
@@ -878,16 +885,18 @@ function CategoriesPanel({
                   className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212]"
                 />
               </div>
-              <div className="flex items-end pb-2">
-                <label className="text-xs flex items-center gap-2 font-semibold text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={form.is_active}
-                    onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-                  />
-                  {language === 'MM' ? 'အသက်ဝင် (Active)' : 'Active'}
-                </label>
-              </div>
+              {!hideDeactivate && (
+                <div className="flex items-end pb-2">
+                  <label className="text-xs flex items-center gap-2 font-semibold text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={form.is_active}
+                      onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                    />
+                    {language === 'MM' ? 'အသက်ဝင် (Active)' : 'Active'}
+                  </label>
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <label className="text-[10px] text-gray-500 mb-1 block font-semibold">
                   {language === 'MM' ? 'ဖော်ပြချက်' : 'Description'}
@@ -953,7 +962,9 @@ function CategoriesPanel({
               </th>
               <th className="font-semibold text-right">{language === 'MM' ? 'အစဉ်' : 'Sort'}</th>
               <th className="font-semibold text-right">{language === 'MM' ? 'အသုံး' : 'Used'}</th>
-              <th className="font-semibold">{language === 'MM' ? 'အခြေအနေ' : 'Status'}</th>
+              {!hideDeactivate && (
+                <th className="font-semibold">{language === 'MM' ? 'အခြေအနေ' : 'Status'}</th>
+              )}
               <th className="font-semibold">{language === 'MM' ? 'ဖော်ပြချက်' : 'Description'}</th>
               <th className="font-semibold text-right" />
             </tr>
@@ -961,7 +972,7 @@ function CategoriesPanel({
           <tbody>
             {pager.pageItems.length === 0 && (
               <tr>
-                <td colSpan={8} className="!bg-transparent py-8 text-center text-gray-400">
+                <td colSpan={hideDeactivate ? 7 : 8} className="!bg-transparent py-8 text-center text-gray-400">
                   {language === 'MM' ? 'စာရင်းမရှိသေးပါ' : 'No records found'}
                 </td>
               </tr>
@@ -1022,47 +1033,27 @@ function CategoriesPanel({
                   <td className="text-right font-mono text-gray-600 dark:text-gray-300">
                     {c.usage_count ?? 0}
                   </td>
-                <td>
-                  <span
-                    className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      c.is_active
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
-                        : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                    }`}
-                  >
-                    {c.is_active
-                      ? language === 'MM'
-                        ? 'အသက်ဝင်'
-                        : 'ACTIVE'
-                      : language === 'MM'
-                        ? 'ပိတ်'
-                        : 'OFF'}
-                  </span>
-                </td>
+                {!hideDeactivate && (
+                  <td>
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        c.is_active
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
+                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                      }`}
+                    >
+                      {c.is_active
+                        ? language === 'MM'
+                          ? 'အသက်ဝင်'
+                          : 'ACTIVE'
+                        : language === 'MM'
+                          ? 'ပိတ်'
+                          : 'OFF'}
+                    </span>
+                  </td>
+                )}
                 <td className="text-gray-500 max-w-[200px] truncate">{c.description || '—'}</td>
                 <td className="text-right whitespace-nowrap space-x-0.5">
-                  {canUpdate && (
-                    <button
-                      type="button"
-                      title={
-                        c.is_active
-                          ? language === 'MM'
-                            ? 'ပိတ်မည်'
-                            : 'Deactivate'
-                          : language === 'MM'
-                            ? 'ဖွင့်မည်'
-                            : 'Activate'
-                      }
-                      onClick={() => void toggleActive(c)}
-                      className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 inline-flex"
-                    >
-                      <Power
-                        className={`w-3.5 h-3.5 ${
-                          c.is_active ? 'text-emerald-600' : 'text-gray-400'
-                        }`}
-                      />
-                    </button>
-                  )}
                   {canUpdate && (
                     <button
                       type="button"

@@ -761,6 +761,12 @@ export const shopService = {
                  OR (c.category_group = 'GOLD_ORIGIN' AND i.item_type = COALESCE(c.gold_origin, c.code))) +
              (SELECT COUNT(*) FROM orders o
                WHERE o.item_type = c.code OR o.purity = c.code) +
+             (SELECT COUNT(*) FROM transaction_items ti
+               WHERE ti.category = c.code OR ti.purity = c.code) +
+             (SELECT COUNT(*) FROM pawn_records p
+               WHERE p.item_type = c.code OR p.purity = c.code) +
+             (SELECT COUNT(*) FROM goldsmith_jobs gj
+               WHERE gj.category = c.code OR gj.source_category = c.code OR gj.purity = c.code) +
              (SELECT COUNT(*) FROM master_categories mc
                WHERE c.category_group = 'GOLD_ORIGIN'
                  AND mc.category_group = 'GOLD_CLASS'
@@ -774,6 +780,12 @@ export const shopService = {
                  OR (c.category_group = 'GOLD_ORIGIN' AND i.item_type = COALESCE(c.gold_origin, c.code))) +
              (SELECT COUNT(*) FROM orders o
                WHERE o.item_type = c.code OR o.purity = c.code) +
+             (SELECT COUNT(*) FROM transaction_items ti
+               WHERE ti.category = c.code OR ti.purity = c.code) +
+             (SELECT COUNT(*) FROM pawn_records p
+               WHERE p.item_type = c.code OR p.purity = c.code) +
+             (SELECT COUNT(*) FROM goldsmith_jobs gj
+               WHERE gj.category = c.code OR gj.source_category = c.code OR gj.purity = c.code) +
              (SELECT COUNT(*) FROM master_categories mc
                WHERE c.category_group = 'GOLD_ORIGIN'
                  AND mc.category_group = 'GOLD_CLASS'
@@ -930,7 +942,19 @@ export const shopService = {
           { newCode, oldCode }
         );
         await conn.query(
+          `UPDATE pawn_records SET item_type = :newCode WHERE item_type = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
           `UPDATE goldsmith_jobs SET purity = :newCode WHERE purity = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
+          `UPDATE goldsmith_jobs SET category = :newCode WHERE category = :oldCode`,
+          { newCode, oldCode }
+        );
+        await conn.query(
+          `UPDATE goldsmith_jobs SET source_category = :newCode WHERE source_category = :oldCode`,
           { newCode, oldCode }
         );
         await conn.query(
@@ -973,6 +997,18 @@ export const shopService = {
       `SELECT COUNT(*) AS cnt FROM orders WHERE item_type = :code OR purity = :code`,
       { code }
     );
+    const [txnItems] = await getPool().query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt FROM transaction_items WHERE category = :code OR purity = :code`,
+      { code }
+    );
+    const [pawns] = await getPool().query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt FROM pawn_records WHERE item_type = :code OR purity = :code`,
+      { code }
+    );
+    const [jobs] = await getPool().query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt FROM goldsmith_jobs WHERE category = :code OR source_category = :code OR purity = :code`,
+      { code }
+    );
     const [linkedCats] = await getPool().query<RowDataPacket[]>(
       `SELECT COUNT(*) AS cnt FROM master_categories WHERE category_group = 'GOLD_CLASS' AND (gold_origin = :code OR gold_origin = :originVal)`,
       { code, originVal }
@@ -980,21 +1016,15 @@ export const shopService = {
     const usage =
       Number(inv[0]?.cnt || 0) +
       Number(ord[0]?.cnt || 0) +
+      Number(txnItems[0]?.cnt || 0) +
+      Number(pawns[0]?.cnt || 0) +
+      Number(jobs[0]?.cnt || 0) +
       (catGroup === 'GOLD_ORIGIN' ? Number(linkedCats[0]?.cnt || 0) : 0);
     if (usage > 0) {
-      await getPool().query(`UPDATE master_categories SET is_active = 0 WHERE id = :id`, {
-        id: catId,
-      });
-      const [updated] = await getPool().query<RowDataPacket[]>(
-        `SELECT * FROM master_categories WHERE id = :id`,
-        { id: catId }
+      throw new HttpError(
+        400,
+        `ဤအမျိုးအစား (${code}) ကို စာရင်း ${usage} ခုတွင် အသုံးပြုနေဆဲဖြစ်သောကြောင့် ဖျက်၍မရပါ။`
       );
-      return {
-        mode: 'deactivated' as const,
-        usage,
-        category: mapMasterCategory(updated[0]),
-        message: `Category is in use (${usage} records). Deactivated instead of deleted.`,
-      };
     }
 
     const [result] = await getPool().query<ResultSetHeader>(

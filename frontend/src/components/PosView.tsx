@@ -914,7 +914,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       clearCustomerDraft();
       setSelectedVoucher(newTxn);
     } catch (err) {
-      await refreshData(true);
+      await refreshData();
       void dialog.alert(
         err instanceof Error
           ? err.message
@@ -1423,7 +1423,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       resetExchangeForm();
       setSelectedVoucher(txn);
     } catch (err) {
-      await refreshData(true);
+      await refreshData();
       void dialog.alert(
         err instanceof Error
           ? err.message

@@ -1301,8 +1301,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         id: 'category',
         header: language === 'MM' ? 'အမျိုးအစား' : 'Category',
         slot: 'detail',
-        accessor: (i) => i.category,
-        cell: (item) => item.category || '—',
+        accessor: (i) => {
+          const cat = masterCategories.find((c) => c.code === i.category);
+          return cat ? (language === 'MM' ? cat.name_mm : cat.name_en || cat.name_mm) : i.category;
+        },
+        cell: (item) => {
+          const cat = masterCategories.find((c) => c.code === item.category);
+          return cat
+            ? language === 'MM'
+              ? cat.name_mm
+              : cat.name_en || cat.name_mm
+            : item.category || '—';
+        },
       },
       {
         id: 'item_type',

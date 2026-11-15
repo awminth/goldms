@@ -18,7 +18,7 @@ export type DialogAlertOptions = {
   message: string;
   okLabel?: string;
   /** Visual tone — success uses check / green (Swal-like) */
-  variant?: 'info' | 'success' | 'error';
+  variant?: 'info' | 'success' | 'warning' | 'error';
 };
 
 type DialogApi = {
@@ -182,11 +182,19 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
                 const iconWrap =
                   variant === 'success'
                     ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
-                    : variant === 'error'
-                      ? 'bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
-                      : 'bg-[#D4AF37]/15 text-[#996515] dark:text-[#E8C96A]';
+                    : variant === 'warning'
+                      ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
+                      : variant === 'error'
+                        ? 'bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                        : 'bg-[#D4AF37]/15 text-[#996515] dark:text-[#E8C96A]';
                 const Icon =
-                  variant === 'success' ? CheckCircle2 : variant === 'error' ? XCircle : Info;
+                  variant === 'success'
+                    ? CheckCircle2
+                    : variant === 'warning'
+                      ? AlertTriangle
+                      : variant === 'error'
+                        ? XCircle
+                        : Info;
                 return (
                   <div
                     className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${iconWrap}`}
@@ -200,9 +208,11 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
                   {pending.title ||
                     (pending.variant === 'success'
                       ? 'Success'
-                      : pending.variant === 'error'
-                        ? 'Error'
-                        : 'Notice')}
+                      : pending.variant === 'warning'
+                        ? 'Warning'
+                        : pending.variant === 'error'
+                          ? 'Error'
+                          : 'Notice')}
                 </h3>
                 <p className="mt-1.5 text-xs text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
                   {pending.message}
@@ -216,9 +226,11 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
                 className={`px-4 py-2 rounded-xl text-white text-xs font-bold ${
                   pending.variant === 'error'
                     ? 'bg-rose-600 hover:bg-rose-700'
-                    : pending.variant === 'success'
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : 'bg-[#D4AF37] hover:bg-[#C5A059]'
+                    : pending.variant === 'warning'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : pending.variant === 'success'
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : 'bg-[#D4AF37] hover:bg-[#C5A059]'
                 }`}
               >
                 {pending.okLabel || 'OK'}
