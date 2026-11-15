@@ -1794,13 +1794,22 @@ export const shopService = {
         );
 
         // Deduct stock: mark linked inventory unit out of IN_STOCK (Thai shared-barcode = one unit row)
-        if ((txnType === 'SALE' || txnType === 'EXCHANGE') && itemId && raw.line_role !== 'TRADE_IN') {
+        if ((txnType === 'SALE' || txnType === 'EXCHANGE') && raw.line_role !== 'TRADE_IN') {
+          if (!itemId) {
+            throw new HttpError(
+              400,
+              `စတော့ (Inventory) ထဲတွင် မရှိသော ပစ္စည်း "${raw.item_name || ''}" ကို ရောင်းချ၍ မရပါ`
+            );
+          }
           const [invLock] = await conn.query<RowDataPacket[]>(
             `SELECT id, status, barcode, name_mm FROM inventory_items WHERE id = :id FOR UPDATE`,
             { id: itemId }
           );
           if (!invLock[0]) {
-            throw new HttpError(404, `Inventory item #${itemId} not found for stock deduct`);
+            throw new HttpError(
+              404,
+              `ပစ္စည်း "${raw.item_name || itemId}" ကို စတော့စာရင်းတွင် မတွေ့ရှိပါ`
+            );
           }
           const st = String(invLock[0].status || '').toUpperCase();
           if (st === 'SOLD') {
@@ -1809,21 +1818,24 @@ export const shopService = {
               `ပစ္စည်း "${invLock[0].name_mm || invLock[0].barcode}" သည် ရောင်းပြီးဖြစ်နေပါသည်`
             );
           }
-          if (st !== 'IN_STOCK' && st !== 'RESERVED') {
+          if (st !== 'IN_STOCK') {
             throw new HttpError(
               400,
-              `ပစ္စည်း "${invLock[0].name_mm || invLock[0].barcode}" ကို ရောင်း၍မရပါ (status: ${st})`
+              `ပစ္စည်း "${invLock[0].name_mm || invLock[0].barcode}" သည် လက်ရှိ စတော့ထဲတွင် မရှိပါ (status: ${st})`
             );
           }
           const [upd] = await conn.query<ResultSetHeader>(
-            `UPDATE inventory_items SET status = 'SOLD' WHERE id = :id AND status IN ('IN_STOCK', 'RESERVED')`,
+            `UPDATE inventory_items SET status = 'SOLD' WHERE id = :id AND status = 'IN_STOCK'`,
             { id: itemId }
           );
           if (!upd.affectedRows) {
             throw new HttpError(409, 'Stock deduct failed — item no longer in stock');
           }
         }
-        if (txnType === 'SHOP_OUT' && itemId) {
+        if (txnType === 'SHOP_OUT') {
+          if (!itemId) {
+            throw new HttpError(400, 'ဆိုင်ထုတ်မည့် ပစ္စည်းသည် စတော့ထဲတွင် ရှိသော ပစ္စည်းဖြစ်ရပါမည်');
+          }
           const [updOut] = await conn.query<ResultSetHeader>(
             `UPDATE inventory_items SET status = 'SHOP_OUT' WHERE id = :id AND status = 'IN_STOCK'`,
             { id: itemId }

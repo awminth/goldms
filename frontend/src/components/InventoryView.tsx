@@ -552,6 +552,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const earliestStockInDate = useMemo(() => {
     let min = '';
     for (const item of inventory) {
+      if (item.status !== 'IN_STOCK') continue;
       const d = toDayISO(item.created_at);
       if (!d) continue;
       if (!min || d < min) min = d;
@@ -1093,8 +1094,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
-  // Filtered inventory list (units)
+  // Filtered inventory list (only IN_STOCK units remain in active inventory; sold/out items leave immediately)
   const filteredItems = inventory.filter((item) => {
+    if (item.status !== 'IN_STOCK') return false;
+
     const matchesCategory =
       selectedCategory === 'ALL' ||
       item.category === selectedCategory ||
@@ -1140,11 +1143,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const thaiRows: InventoryListRow[] = [];
     for (const units of thaiByBarcode.values()) {
       const inStock = units.filter((u) => u.status === 'IN_STOCK');
-      const sample = inStock[0] || units[0];
+      if (inStock.length === 0) continue;
+      const sample = inStock[0];
       thaiRows.push({
         ...sample,
         listQty: inStock.length,
-        status: inStock.length > 0 ? 'IN_STOCK' : sample.status,
+        status: 'IN_STOCK',
       });
     }
 
