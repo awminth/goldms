@@ -226,6 +226,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     getBuyPriceForPurity,
     shopSettings,
     masterCategories,
+    refreshData,
   } = useGoldShop();
   const dialog = useDialog();
 
@@ -368,7 +369,22 @@ export const PosView: React.FC<Props> = ({ mode }) => {
 
   const addItemFromInventory = (itemId: string) => {
     const inv = inventory.find((i) => i.id === itemId);
-    if (!inv) return;
+    if (!inv) {
+      void dialog.alert(
+        language === 'MM'
+          ? 'ရွေးချယ်ထားသော ပစ္စည်းကို စတော့စာရင်းတွင် မတွေ့ရှိပါ'
+          : 'Selected item not found in inventory'
+      );
+      return;
+    }
+    if (inv.status !== 'IN_STOCK') {
+      void dialog.alert(
+        language === 'MM'
+          ? `ပစ္စည်း "${inv.name_mm || inv.name}" (${inv.barcode}) သည် စတော့ထဲတွင် မရှိတော့ပါ (ရောင်းချပြီး သို့မဟုတ် ထုတ်ယူပြီးဖြစ်ပါသည်)`
+          : `Item "${inv.name || inv.name_mm}" (${inv.barcode}) is no longer in stock`
+      );
+      return;
+    }
     if (cartItems.some((c) => c.item_id === inv.id)) {
       void dialog.alert(language === 'MM' ? 'ဤပစ္စည်းသည် စာရင်းထဲတွင် ရောက်ရှိနေပြီးဖြစ်ပါသည်' : 'Item is already in cart');
       return;
@@ -746,6 +762,35 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       void dialog.alert(language === 'MM' ? 'ရောင်းချမည့် ပစ္စည်းထည့်သွင်းပါ' : 'Please add items to sell');
       return;
     }
+    const seenIds = new Set<string>();
+    for (const ci of cartItems) {
+      if (!ci.item_id) {
+        void dialog.alert(
+          language === 'MM'
+            ? `စတော့စာရင်းတွင် မရှိသော ပစ္စည်း ("${ci.item_name}") ကို ရောင်းချ၍ မရပါ`
+            : `Cannot sell item "${ci.item_name}" because it is not linked to inventory`
+        );
+        return;
+      }
+      if (seenIds.has(ci.item_id)) {
+        void dialog.alert(
+          language === 'MM'
+            ? `ပစ္စည်း "${ci.item_name}" သည် ဘောင်ချာထဲတွင် နှစ်ခါထပ်နေပါသည်`
+            : `Duplicate item "${ci.item_name}" in cart`
+        );
+        return;
+      }
+      seenIds.add(ci.item_id);
+      const liveInv = inventory.find((i) => i.id === ci.item_id);
+      if (!liveInv || liveInv.status !== 'IN_STOCK') {
+        void dialog.alert(
+          language === 'MM'
+            ? `ပစ္စည်း "${ci.item_name}" (${ci.barcode || ''}) သည် စတော့ထဲတွင် မရှိတော့ပါ (ရောင်းချပြီးဖြစ်နေပါသည်)`
+            : `Item "${ci.item_name}" is no longer in stock`
+        );
+        return;
+      }
+    }
     if (remainingCreditAmount > 0) {
       void dialog.alert(
         language === 'MM'
@@ -834,39 +879,50 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     const totalMmk = Math.max(0, subtotalApi - discountMmk);
     const remainingMmk = 0;
 
-    const newTxn = await createTransaction({
-      invoice_no: generateInvoiceNo('INV'),
-      customer_id: customerId,
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      transaction_type: 'SALE',
-      items: itemsForApi,
-      gold_price_snapshot: itemsForApi[0]?.gold_price_snapshot || 5750000,
-      craftsmanship_total: craftTotalApi,
-      stone_total: stoneTotalApi,
-      discount_amount: discountMmk,
-      tax_amount: 0,
-      total_amount: totalMmk,
-      paid_amount: totalMmk,
-      remaining_amount: remainingMmk,
-      payment_method: paymentMethod,
-      interest_rate: 0,
-      credit_due_date: undefined,
-      is_installment: false,
-      notes:
-        thaiSaleCurrency === 'BAHT'
-          ? `${saleNotes ? saleNotes + ' — ' : ''}Thai sale priced in Baht (converted to MMK)`
-          : saleNotes,
-    } as Omit<Transaction, 'id' | 'created_at'>);
-    setCartItems([]);
-    setDiscountAmount(0);
-    setAmountPaidInput('');
-    setSaleNotes('');
-    setThaiSaleCurrency('MMK');
-    setInventorySearch('');
-    setPaymentMethod('CASH');
-    clearCustomerDraft();
-    setSelectedVoucher(newTxn);
+    try {
+      const newTxn = await createTransaction({
+        invoice_no: generateInvoiceNo('INV'),
+        customer_id: customerId,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        transaction_type: 'SALE',
+        items: itemsForApi,
+        gold_price_snapshot: itemsForApi[0]?.gold_price_snapshot || 5750000,
+        craftsmanship_total: craftTotalApi,
+        stone_total: stoneTotalApi,
+        discount_amount: discountMmk,
+        tax_amount: 0,
+        total_amount: totalMmk,
+        paid_amount: totalMmk,
+        remaining_amount: remainingMmk,
+        payment_method: paymentMethod,
+        interest_rate: 0,
+        credit_due_date: undefined,
+        is_installment: false,
+        notes:
+          thaiSaleCurrency === 'BAHT'
+            ? `${saleNotes ? saleNotes + ' — ' : ''}Thai sale priced in Baht (converted to MMK)`
+            : saleNotes,
+      } as Omit<Transaction, 'id' | 'created_at'>);
+      setCartItems([]);
+      setDiscountAmount(0);
+      setAmountPaidInput('');
+      setSaleNotes('');
+      setThaiSaleCurrency('MMK');
+      setInventorySearch('');
+      setPaymentMethod('CASH');
+      clearCustomerDraft();
+      setSelectedVoucher(newTxn);
+    } catch (err) {
+      await refreshData(true);
+      void dialog.alert(
+        err instanceof Error
+          ? err.message
+          : language === 'MM'
+            ? 'အရောင်းစာရင်းသွင်းရာတွင် အမှားအယွင်းဖြစ်ပွားပါသည်'
+            : 'Sale failed'
+      );
+    }
   };
 
 
@@ -1277,94 +1333,105 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     const sold = excSold.inv;
     const saleLine = excSold.saleLine;
 
-    const txn = await createTransaction({
-      invoice_no: generateInvoiceNo('EXC'),
-      customer_id: '',
-      customer_name: excSold.customerName || 'ဧည့်သည်',
-      customer_phone: excSold.customerPhone,
-      transaction_type: 'EXCHANGE',
-      items: [
-        {
-          id: `exc-new-${Date.now()}`,
-          transaction_id: '',
-          item_id: excNewItem.id,
-          barcode: excNewItem.barcode,
-          item_name: excNewItem.name_mm || excNewItem.name,
-          category: excNewItem.category,
-          weight: {
-            kyat: excNewItem.weight_kyat,
-            pae: excNewItem.weight_pae,
-            yway: excNewItem.weight_yway,
-          },
-          gemstone_weight: {
-            kyat: excNewItem.gemstone_weight_kyat,
-            pae: excNewItem.gemstone_weight_pae,
-            yway: excNewItem.gemstone_weight_yway,
-          },
-          net_weight: {
-            kyat: excNewItem.net_weight_kyat,
-            pae: excNewItem.net_weight_pae,
-            yway: excNewItem.net_weight_yway,
-          },
-          purity: excNewItem.purity,
-          gold_price_snapshot: getLivePriceForPurity(excNewItem.purity),
-          craftsmanship_fee: excNewItem.craftsmanship_fee,
-          subtotal: excNewPrice,
-          item_type: excNewItem.item_type,
-          thai_weight_unit: excNewItem.thai_weight_unit,
-          line_role: 'NEW_ITEM',
-        } as any,
-        {
-          id: `exc-trade-${Date.now()}`,
-          transaction_id: '',
-          item_id: sold.id,
-          barcode: sold.barcode,
-          item_name: sold.name_mm || sold.name,
-          category: sold.category,
-          weight: {
-            kyat: sold.weight_kyat,
-            pae: sold.weight_pae,
-            yway: sold.weight_yway,
-          },
-          gemstone_weight: {
-            kyat: sold.gemstone_weight_kyat,
-            pae: sold.gemstone_weight_pae,
-            yway: sold.gemstone_weight_yway,
-          },
-          net_weight: {
-            kyat: sold.net_weight_kyat,
-            pae: sold.net_weight_pae,
-            yway: sold.net_weight_yway,
-          },
-          purity: sold.purity,
-          gold_price_snapshot:
-            Number(saleLine.gold_price_snapshot || 0) || getBuyPriceForPurity(sold.purity),
-          craftsmanship_fee: Number(sold.craftsmanship_fee || 0),
-          subtotal: excTradeCredit,
-          item_type: sold.item_type,
-          thai_weight_unit: sold.thai_weight_unit,
-          line_role: 'TRADE_IN',
-        } as any,
-      ],
-      gold_price_snapshot: pure16,
-      craftsmanship_total: excNewItem.craftsmanship_fee,
-      discount_amount: 0,
-      tax_amount: 0,
-      total_amount: excNetDue,
-      paid_amount: paid,
-      remaining_amount: Math.max(0, excNetDue - paid),
-      payment_method: 'CASH',
-      notes:
-        excRefund > 0
-          ? `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode} · ဧည့်သည်ပြန်ရ ${excRefund} MMK`
-          : `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode}`,
-      related_invoice_no: excSold.invoiceNo,
-      add_to_stock: true,
-      use_client_total: true,
-      refund_amount: excRefund,
-    } as any);
-    resetExchangeForm();
-    setSelectedVoucher(txn);
+    try {
+      const txn = await createTransaction({
+        invoice_no: generateInvoiceNo('EXC'),
+        customer_id: '',
+        customer_name: excSold.customerName || 'ဧည့်သည်',
+        customer_phone: excSold.customerPhone,
+        transaction_type: 'EXCHANGE',
+        items: [
+          {
+            id: `exc-new-${Date.now()}`,
+            transaction_id: '',
+            item_id: excNewItem.id,
+            barcode: excNewItem.barcode,
+            item_name: excNewItem.name_mm || excNewItem.name,
+            category: excNewItem.category,
+            weight: {
+              kyat: excNewItem.weight_kyat,
+              pae: excNewItem.weight_pae,
+              yway: excNewItem.weight_yway,
+            },
+            gemstone_weight: {
+              kyat: excNewItem.gemstone_weight_kyat,
+              pae: excNewItem.gemstone_weight_pae,
+              yway: excNewItem.gemstone_weight_yway,
+            },
+            net_weight: {
+              kyat: excNewItem.net_weight_kyat,
+              pae: excNewItem.net_weight_pae,
+              yway: excNewItem.net_weight_yway,
+            },
+            purity: excNewItem.purity,
+            gold_price_snapshot: getLivePriceForPurity(excNewItem.purity),
+            craftsmanship_fee: excNewItem.craftsmanship_fee,
+            subtotal: excNewPrice,
+            item_type: excNewItem.item_type,
+            thai_weight_unit: excNewItem.thai_weight_unit,
+            line_role: 'NEW_ITEM',
+          } as any,
+          {
+            id: `exc-trade-${Date.now()}`,
+            transaction_id: '',
+            item_id: sold.id,
+            barcode: sold.barcode,
+            item_name: sold.name_mm || sold.name,
+            category: sold.category,
+            weight: {
+              kyat: sold.weight_kyat,
+              pae: sold.weight_pae,
+              yway: sold.weight_yway,
+            },
+            gemstone_weight: {
+              kyat: sold.gemstone_weight_kyat,
+              pae: sold.gemstone_weight_pae,
+              yway: sold.gemstone_weight_yway,
+            },
+            net_weight: {
+              kyat: sold.net_weight_kyat,
+              pae: sold.net_weight_pae,
+              yway: sold.net_weight_yway,
+            },
+            purity: sold.purity,
+            gold_price_snapshot:
+              Number(saleLine.gold_price_snapshot || 0) || getBuyPriceForPurity(sold.purity),
+            craftsmanship_fee: Number(sold.craftsmanship_fee || 0),
+            subtotal: excTradeCredit,
+            item_type: sold.item_type,
+            thai_weight_unit: sold.thai_weight_unit,
+            line_role: 'TRADE_IN',
+          } as any,
+        ],
+        gold_price_snapshot: pure16,
+        craftsmanship_total: excNewItem.craftsmanship_fee,
+        discount_amount: 0,
+        tax_amount: 0,
+        total_amount: excNetDue,
+        paid_amount: paid,
+        remaining_amount: Math.max(0, excNetDue - paid),
+        payment_method: 'CASH',
+        notes:
+          excRefund > 0
+            ? `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode} · ဧည့်သည်ပြန်ရ ${excRefund} MMK`
+            : `အလဲအလှယ် — voucher ${excSold.invoiceNo} · ပြန်သွင်း ${sold.barcode} · အသစ် ${excNewItem.barcode}`,
+        related_invoice_no: excSold.invoiceNo,
+        add_to_stock: true,
+        use_client_total: true,
+        refund_amount: excRefund,
+      } as any);
+      resetExchangeForm();
+      setSelectedVoucher(txn);
+    } catch (err) {
+      await refreshData(true);
+      void dialog.alert(
+        err instanceof Error
+          ? err.message
+          : language === 'MM'
+            ? 'အလဲအလှယ် ပြုလုပ်ရာတွင် အမှားအယွင်းဖြစ်ပွားပါသည်'
+            : 'Exchange failed'
+      );
+    }
   };
 
   // -------------------------------------------------------------
