@@ -313,6 +313,8 @@ export const InventoryStockLedgerView: React.FC = () => {
     subLabelMm: string;
     subLabelEn: string;
     subSort: number;
+    outByDay: Record<string, number>;
+    inByDay: Record<string, number>;
     qtyByDay: Record<string, number>;
     anyStock: boolean;
   };
@@ -323,6 +325,8 @@ export const InventoryStockLedgerView: React.FC = () => {
     categoryEn: string;
     categorySort: number;
     subRows: SubRow[];
+    groupOutByDay: Record<string, number>;
+    groupInByDay: Record<string, number>;
     groupTotalsByDay: Record<string, number>;
   };
 
@@ -420,23 +424,41 @@ export const InventoryStockLedgerView: React.FC = () => {
 
     for (const { meta, subMap } of catMap.values()) {
       const subRows: SubRow[] = [];
+      const groupOutByDay: Record<string, number> = {};
+      const groupInByDay: Record<string, number> = {};
       const groupTotalsByDay: Record<string, number> = {};
-      for (const d of dateCols) groupTotalsByDay[d] = 0;
+      for (const d of dateCols) {
+        groupOutByDay[d] = 0;
+        groupInByDay[d] = 0;
+        groupTotalsByDay[d] = 0;
+      }
 
       for (const sub of subMap.values()) {
+        const outByDay: Record<string, number> = {};
+        const inByDay: Record<string, number> = {};
         const qtyByDay: Record<string, number> = {};
         for (const day of dateCols) {
+          let outQty = 0;
+          let inQty = 0;
           let qty = 0;
           for (const u of sub.units) {
+            if (u.created === day) inQty += 1;
+            if (u.outflow && u.outflow === day) outQty += 1;
             if (u.created > day) continue;
             if (u.outflow && u.outflow <= day) continue;
             qty += 1;
           }
+          outByDay[day] = outQty;
+          inByDay[day] = inQty;
           qtyByDay[day] = qty;
         }
-        const anyStock = dateCols.some((d) => (qtyByDay[d] || 0) > 0);
+        const anyStock = dateCols.some(
+          (d) => (qtyByDay[d] || 0) > 0 || (inByDay[d] || 0) > 0 || (outByDay[d] || 0) > 0
+        );
         if (anyStock) {
           for (const d of dateCols) {
+            groupOutByDay[d] = (groupOutByDay[d] || 0) + (outByDay[d] || 0);
+            groupInByDay[d] = (groupInByDay[d] || 0) + (inByDay[d] || 0);
             groupTotalsByDay[d] = (groupTotalsByDay[d] || 0) + (qtyByDay[d] || 0);
           }
           subRows.push({
@@ -444,6 +466,8 @@ export const InventoryStockLedgerView: React.FC = () => {
             subLabelMm: sub.subLabelMm,
             subLabelEn: sub.subLabelEn,
             subSort: sub.subSort,
+            outByDay,
+            inByDay,
             qtyByDay,
             anyStock,
           });
@@ -462,6 +486,8 @@ export const InventoryStockLedgerView: React.FC = () => {
           categoryEn: meta.en,
           categorySort: meta.sort,
           subRows,
+          groupOutByDay,
+          groupInByDay,
           groupTotalsByDay,
         });
       }
@@ -490,15 +516,23 @@ export const InventoryStockLedgerView: React.FC = () => {
 
   const activeGroups = goldTab === 'MYANMAR' ? myanmarGroups : thaiGroups;
 
-  const grandTotalsByDay = useMemo(() => {
+  const grandByDay = useMemo(() => {
+    const out: Record<string, number> = {};
+    const inn: Record<string, number> = {};
     const totals: Record<string, number> = {};
-    for (const d of dateCols) totals[d] = 0;
+    for (const d of dateCols) {
+      out[d] = 0;
+      inn[d] = 0;
+      totals[d] = 0;
+    }
     for (const g of activeGroups) {
       for (const d of dateCols) {
+        out[d] += g.groupOutByDay[d] || 0;
+        inn[d] += g.groupInByDay[d] || 0;
         totals[d] += g.groupTotalsByDay[d] || 0;
       }
     }
-    return totals;
+    return { out, inn, totals };
   }, [activeGroups, dateCols]);
 
   const totalSubRowCount = useMemo(
@@ -511,6 +545,8 @@ export const InventoryStockLedgerView: React.FC = () => {
       idx: number | string;
       categoryName: string;
       subLabel: string;
+      outByDay: Record<string, number>;
+      inByDay: Record<string, number>;
       qtyByDay: Record<string, number>;
     };
 
@@ -522,6 +558,8 @@ export const InventoryStockLedgerView: React.FC = () => {
           idx: sIdx === 0 ? gIdx + 1 : '',
           categoryName: sIdx === 0 ? catLabel : '',
           subLabel: language === 'MM' ? sr.subLabelMm : sr.subLabelEn,
+          outByDay: sr.outByDay,
+          inByDay: sr.inByDay,
           qtyByDay: sr.qtyByDay,
         });
       });
@@ -564,14 +602,32 @@ export const InventoryStockLedgerView: React.FC = () => {
           value: (r) => r.subLabel,
           width: 16,
         },
-        ...dateCols.map((d) => ({
-          header: formatDate(d),
-          value: (r: ExportRow) => {
-            const q = r.qtyByDay[d] || 0;
-            return q > 0 ? q : '—';
+        ...dateCols.flatMap((d) => [
+          {
+            header: `${formatDate(d)} (${language === 'MM' ? 'အလျော့' : 'Out'})`,
+            value: (r: ExportRow) => {
+              const v = r.outByDay[d] || 0;
+              return v > 0 ? v : '-';
+            },
+            width: 12,
           },
-          width: 12,
-        })),
+          {
+            header: `${formatDate(d)} (${language === 'MM' ? 'အပေါင်း' : 'In'})`,
+            value: (r: ExportRow) => {
+              const v = r.inByDay[d] || 0;
+              return v > 0 ? v : '-';
+            },
+            width: 12,
+          },
+          {
+            header: `${formatDate(d)} (${language === 'MM' ? 'စုစုပေါင်း' : 'Total'})`,
+            value: (r: ExportRow) => {
+              const v = r.qtyByDay[d] || 0;
+              return v > 0 ? v : '-';
+            },
+            width: 12,
+          },
+        ]),
       ],
       rows: exportRows,
     });
@@ -726,13 +782,22 @@ export const InventoryStockLedgerView: React.FC = () => {
           <table className="w-full text-[11px] text-left border-collapse min-w-[600px]">
             <thead>
               <tr className="bg-gray-50 dark:bg-[#121212] text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-800">
-                <th className="px-3 py-2.5 font-bold w-12 text-center sticky left-0 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-200 dark:border-gray-800">
+                <th
+                  rowSpan={2}
+                  className="px-3 py-2.5 font-bold w-12 text-center sticky left-0 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-200 dark:border-gray-800 align-middle"
+                >
                   {language === 'MM' ? 'စဉ်' : '#'}
                 </th>
-                <th className="px-3.5 py-2.5 font-bold min-w-[170px] sticky left-12 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-200 dark:border-gray-800">
+                <th
+                  rowSpan={2}
+                  className="px-3.5 py-2.5 font-bold min-w-[160px] sticky left-12 bg-gray-50 dark:bg-[#121212] z-10 border-r border-gray-200 dark:border-gray-800 align-middle"
+                >
                   {language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Category'}
                 </th>
-                <th className="px-3.5 py-2.5 font-bold min-w-[130px] border-r border-gray-200 dark:border-gray-800">
+                <th
+                  rowSpan={2}
+                  className="px-3.5 py-2.5 font-bold min-w-[120px] border-r-2 border-gray-200 dark:border-gray-700 align-middle"
+                >
                   {goldTab === 'MYANMAR'
                     ? language === 'MM'
                       ? 'ရွှေရည်'
@@ -744,10 +809,26 @@ export const InventoryStockLedgerView: React.FC = () => {
                 {dateCols.map((d) => (
                   <th
                     key={d}
-                    className="px-3 py-2.5 font-bold text-center font-mono whitespace-nowrap border-r border-gray-100 dark:border-gray-800/60"
+                    colSpan={3}
+                    className="px-3 py-2 font-bold text-center font-mono whitespace-nowrap border-r-2 border-gray-200 dark:border-gray-700 bg-gray-100/70 dark:bg-[#161616]"
                   >
                     {formatDate(d)}
                   </th>
+                ))}
+              </tr>
+              <tr className="bg-gray-50/90 dark:bg-[#141414] text-[10px] border-b-2 border-gray-200 dark:border-gray-800">
+                {dateCols.map((d) => (
+                  <React.Fragment key={`${d}-sub`}>
+                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-rose-600 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-950/20 border-r border-gray-100 dark:border-gray-800/60 min-w-[46px]">
+                      {language === 'MM' ? 'အလျော့' : 'Out'}
+                    </th>
+                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20 border-r border-gray-100 dark:border-gray-800/60 min-w-[46px]">
+                      {language === 'MM' ? 'အပေါင်း' : 'In'}
+                    </th>
+                    <th className="px-2 py-1.5 font-bold text-center whitespace-nowrap text-gray-800 dark:text-white bg-white dark:bg-[#1F1F1F] border-r-2 border-gray-200 dark:border-gray-700 min-w-[52px]">
+                      {language === 'MM' ? 'စုစုပေါင်း' : 'Total'}
+                    </th>
+                  </React.Fragment>
                 ))}
               </tr>
             </thead>
@@ -755,7 +836,7 @@ export const InventoryStockLedgerView: React.FC = () => {
               {activeGroups.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={3 + dateCols.length}
+                    colSpan={3 + dateCols.length * 3}
                     className="px-3 py-10 text-center text-gray-400 dark:text-gray-500"
                   >
                     {language === 'MM'
@@ -798,7 +879,7 @@ export const InventoryStockLedgerView: React.FC = () => {
                                 {catName}
                               </td>
                             )}
-                            <td className="px-3.5 py-2 font-semibold border-r border-gray-200 dark:border-gray-800">
+                            <td className="px-3.5 py-2 font-semibold border-r-2 border-gray-200 dark:border-gray-700">
                               <span
                                 className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold font-mono ${
                                   goldTab === 'MYANMAR'
@@ -810,18 +891,39 @@ export const InventoryStockLedgerView: React.FC = () => {
                               </span>
                             </td>
                             {dateCols.map((d) => {
+                              const outQty = sr.outByDay[d] || 0;
+                              const inQty = sr.inByDay[d] || 0;
                               const q = sr.qtyByDay[d] || 0;
                               return (
-                                <td
-                                  key={d}
-                                  className={`px-3 py-2 text-center font-mono border-r border-gray-100 dark:border-gray-800/50 ${
-                                    q > 0
-                                      ? 'font-bold text-gray-900 dark:text-gray-100'
-                                      : 'text-gray-300 dark:text-gray-600'
-                                  }`}
-                                >
-                                  {q > 0 ? q : '—'}
-                                </td>
+                                <React.Fragment key={d}>
+                                  <td
+                                    className={`px-2 py-2 text-center font-mono border-r border-gray-100 dark:border-gray-800/50 ${
+                                      outQty > 0
+                                        ? 'font-bold text-rose-600 dark:text-rose-400 bg-rose-50/40 dark:bg-rose-950/20'
+                                        : 'text-gray-300 dark:text-gray-600'
+                                    }`}
+                                  >
+                                    {outQty > 0 ? outQty : '-'}
+                                  </td>
+                                  <td
+                                    className={`px-2 py-2 text-center font-mono border-r border-gray-100 dark:border-gray-800/50 ${
+                                      inQty > 0
+                                        ? 'font-bold text-blue-600 dark:text-blue-400 bg-blue-50/40 dark:bg-blue-950/20'
+                                        : 'text-gray-300 dark:text-gray-600'
+                                    }`}
+                                  >
+                                    {inQty > 0 ? inQty : '-'}
+                                  </td>
+                                  <td
+                                    className={`px-2 py-2 text-center font-mono border-r-2 border-gray-200 dark:border-gray-700 ${
+                                      q > 0
+                                        ? 'font-bold text-gray-900 dark:text-white bg-white dark:bg-[#222222]'
+                                        : 'text-gray-300 dark:text-gray-600 bg-white/50 dark:bg-[#1A1A1A]'
+                                    }`}
+                                  >
+                                    {q > 0 ? q : '-'}
+                                  </td>
+                                </React.Fragment>
                               );
                             })}
                           </tr>
@@ -837,19 +939,44 @@ export const InventoryStockLedgerView: React.FC = () => {
                 <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t-2 border-amber-300 dark:border-amber-800 font-bold">
                   <td
                     colSpan={3}
-                    className="px-3.5 py-2.5 text-amber-950 dark:text-amber-100 sticky left-0 bg-amber-100 dark:bg-[#241c0c] z-10 border-r border-amber-200 dark:border-amber-800/60"
+                    className="px-3.5 py-2.5 text-amber-950 dark:text-amber-100 sticky left-0 bg-amber-100 dark:bg-[#241c0c] z-10 border-r-2 border-amber-200 dark:border-amber-800/60"
                   >
                     {language === 'MM' ? 'စုစုပေါင်း လက်ကျန် (ခု)' : 'Total Stock On Hand (pcs)'}
                   </td>
                   {dateCols.map((d) => {
-                    const total = grandTotalsByDay[d] || 0;
+                    const outTotal = grandByDay.out[d] || 0;
+                    const inTotal = grandByDay.inn[d] || 0;
+                    const total = grandByDay.totals[d] || 0;
                     return (
-                      <td
-                        key={d}
-                        className="px-3 py-2.5 text-center font-mono font-extrabold text-amber-900 dark:text-amber-200 border-r border-amber-200/50 dark:border-amber-800/40"
-                      >
-                        {total > 0 ? total : '—'}
-                      </td>
+                      <React.Fragment key={d}>
+                        <td
+                          className={`px-2 py-2.5 text-center font-mono border-r border-amber-200/50 dark:border-amber-800/40 ${
+                            outTotal > 0
+                              ? 'font-extrabold text-rose-600 dark:text-rose-400'
+                              : 'text-amber-900/40 dark:text-amber-200/40'
+                          }`}
+                        >
+                          {outTotal > 0 ? outTotal : '-'}
+                        </td>
+                        <td
+                          className={`px-2 py-2.5 text-center font-mono border-r border-amber-200/50 dark:border-amber-800/40 ${
+                            inTotal > 0
+                              ? 'font-extrabold text-blue-600 dark:text-blue-400'
+                              : 'text-amber-900/40 dark:text-amber-200/40'
+                          }`}
+                        >
+                          {inTotal > 0 ? inTotal : '-'}
+                        </td>
+                        <td
+                          className={`px-2 py-2.5 text-center font-mono border-r-2 border-amber-300 dark:border-amber-700 bg-white/80 dark:bg-white/10 ${
+                            total > 0
+                              ? 'font-extrabold text-gray-900 dark:text-white'
+                              : 'text-amber-900/40 dark:text-amber-200/40'
+                          }`}
+                        >
+                          {total > 0 ? total : '-'}
+                        </td>
+                      </React.Fragment>
                     );
                   })}
                 </tr>
