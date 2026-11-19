@@ -280,6 +280,26 @@ export const shopController = {
     res.json({ success: true, data: { available } });
   }),
 
+  listOldGoldInflows: asyncHandler(async (_req, res) => {
+    const data = await shopService.listOldGoldInflows();
+    res.json({ success: true, data });
+  }),
+
+  createOldGoldInflow: asyncHandler(async (req, res) => {
+    const data = await shopService.createOldGoldInflow(req.body || {});
+    res.status(201).json({ success: true, data });
+  }),
+
+  updateOldGoldInflow: asyncHandler(async (req, res) => {
+    const data = await shopService.updateOldGoldInflow(req.params.id, req.body || {});
+    res.json({ success: true, data });
+  }),
+
+  deleteOldGoldInflow: asyncHandler(async (req, res) => {
+    const data = await shopService.deleteOldGoldInflow(req.params.id);
+    res.json({ success: true, data });
+  }),
+
   listMerchantReturns: asyncHandler(async (_req, res) => {
     const data = await shopService.listMerchantReturns();
     res.json({ success: true, data });

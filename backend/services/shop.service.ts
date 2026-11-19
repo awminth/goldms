@@ -702,6 +702,7 @@ export const shopService = {
       rolePermissions,
       settings,
       goldsmithJobs,
+      oldGoldInflows,
       merchantReturns,
       shopTransfers,
       melts,
@@ -722,6 +723,7 @@ export const shopService = {
       this.listAllRolePermissions(),
       this.getShopSettings(),
       this.listGoldsmithJobs(),
+      this.listOldGoldInflows(),
       this.listMerchantReturns(),
       this.listShopTransfers(),
       this.listMelts(),
@@ -744,6 +746,7 @@ export const shopService = {
       rolePermissions,
       settings,
       goldsmithJobs,
+      oldGoldInflows,
       merchantReturns,
       shopTransfers,
       melts,
@@ -2559,6 +2562,16 @@ export const shopService = {
       : null;
 
     let inbound = 0;
+    // 0. Manual Inflows (old_gold_inflows)
+    const [manualInflowRows] = await getPool().query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(grams), 0) AS manual_in
+       FROM old_gold_inflows
+       WHERE (:targetCategory IS NULL OR gold_category = :targetCategory)
+         AND (:purity IS NULL OR purity = :purity)`,
+      { targetCategory: targetCategory || null, purity: purity || null }
+    );
+    inbound += num(manualInflowRows[0]?.manual_in);
+
     // 1. Transactions: PURCHASE, SHOP_OUT, OTHER_IN
     for (const t of txns) {
       if (
@@ -2671,6 +2684,258 @@ export const shopService = {
       0,
       Number((inbound - used - returned - transferred - melted - otherOut).toFixed(3))
     );
+  },
+
+  async listOldGoldInflows() {
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT * FROM old_gold_inflows ORDER BY inflow_date DESC, created_at DESC`
+    );
+    return rows.map((r) => ({
+      id: String(r.id),
+      inflow_no: String(r.inflow_no),
+      inflow_date: String(r.inflow_date).slice(0, 10),
+      gold_origin: String(r.gold_origin),
+      gold_category: String(r.gold_category),
+      purity: String(r.purity),
+      purity_name: r.purity_name ? String(r.purity_name) : '',
+      grams: num(r.grams),
+      weight: {
+        kyat: num(r.weight_kyat),
+        pae: num(r.weight_pae),
+        yway: num(r.weight_yway),
+      },
+      description: String(r.description || ''),
+      customer_name: r.customer_name ? String(r.customer_name) : '',
+      customer_phone: r.customer_phone ? String(r.customer_phone) : '',
+      amount: num(r.amount),
+      currency: String(r.currency || 'MMK'),
+      notes: r.notes ? String(r.notes) : '',
+      created_by: r.created_by ? String(r.created_by) : '',
+      created_at: String(r.created_at),
+      updated_at: r.updated_at ? String(r.updated_at) : '',
+    }));
+  },
+
+  async createOldGoldInflow(data: Record<string, unknown>) {
+    const description = String(data.description || '').trim();
+    if (!description) throw new HttpError(400, 'အကြောင်းအရာ (description) ထည့်သွင်းရန် လိုအပ်ပါသည်');
+
+    const grams = num(data.grams);
+    if (grams <= 0) throw new HttpError(400, 'အလေးချိန် (grams) သည် ၀ ထက် ကြီးရပါမည်');
+
+    const inflowDate = String(data.inflow_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const goldOrigin = String(data.gold_origin || 'MYANMAR_GOLD');
+    const purity = String(data.purity || (goldOrigin === 'THAI_GOLD' ? 'THAI_GOLD' : 'MEELIN'));
+    const purityName = data.purity_name ? String(data.purity_name).trim() : null;
+
+    const getCatKey = (pur?: string, origin?: string): 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14' => {
+      const combined = `${String(pur || '')} ${String(origin || '')}`.toUpperCase();
+      if (combined.includes('THAI') || combined.includes('ထိုင်း')) return 'THAI_GOLD';
+      if (
+        combined.includes('MEELIN') ||
+        combined.includes('မီးလင်း') ||
+        combined.includes('အခေါက်') ||
+        combined.includes('K24') ||
+        combined.includes('24K') ||
+        combined.includes('၂၄K') ||
+        combined.includes('16') ||
+        combined.includes('၁၆') ||
+        combined.includes('PAE_16')
+      ) {
+        return 'PAE_16';
+      }
+      if (
+        combined.includes('15') ||
+        combined.includes('၁၅') ||
+        combined.includes('PE15') ||
+        combined.includes('PAE_15')
+      ) {
+        return 'PAE_15';
+      }
+      return 'PAE_14';
+    };
+
+    let goldCategory = String(data.gold_category || '').toUpperCase();
+    if (!['THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14'].includes(goldCategory)) {
+      goldCategory = getCatKey(purity, goldOrigin);
+    }
+
+    const settings = await this.getShopSettings();
+    const kyatToGrams = Number(settings.kyat_to_grams) > 0 ? Number(settings.kyat_to_grams) : KYAT_TO_GRAMS;
+    const kpy = gramsToKpy(grams, kyatToGrams);
+
+    const dateStr = inflowDate.replace(/-/g, '');
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    const inflowNo = String(data.inflow_no || `OGI-${dateStr}-${rand}`);
+
+    const customerName = data.customer_name ? String(data.customer_name).trim() : null;
+    const customerPhone = data.customer_phone ? String(data.customer_phone).trim() : null;
+    const amount = num(data.amount);
+    const currency = String(data.currency || (goldOrigin === 'THAI_GOLD' ? 'THB' : 'MMK'));
+    const notes = data.notes ? String(data.notes).trim() : null;
+    const createdBy = data.created_by ? String(data.created_by).trim() : null;
+
+    const [res] = await getPool().query<ResultSetHeader>(
+      `INSERT INTO old_gold_inflows (
+        inflow_no, inflow_date, gold_origin, gold_category, purity, purity_name,
+        grams, weight_kyat, weight_pae, weight_yway, description,
+        customer_name, customer_phone, amount, currency, notes, created_by
+      ) VALUES (
+        :inflow_no, :inflow_date, :gold_origin, :gold_category, :purity, :purity_name,
+        :grams, :weight_kyat, :weight_pae, :weight_yway, :description,
+        :customer_name, :customer_phone, :amount, :currency, :notes, :created_by
+      )`,
+      {
+        inflow_no: inflowNo,
+        inflow_date: inflowDate,
+        gold_origin: goldOrigin,
+        gold_category: goldCategory,
+        purity,
+        purity_name: purityName,
+        grams,
+        weight_kyat: kpy.kyat,
+        weight_pae: kpy.pae,
+        weight_yway: kpy.yway,
+        description,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        amount,
+        currency,
+        notes,
+        created_by: createdBy,
+      }
+    );
+
+    return {
+      id: String(res.insertId),
+      inflow_no: inflowNo,
+      inflow_date: inflowDate,
+      gold_origin: goldOrigin,
+      gold_category: goldCategory,
+      purity,
+      purity_name: purityName || '',
+      grams,
+      weight: kpy,
+      description,
+      customer_name: customerName || '',
+      customer_phone: customerPhone || '',
+      amount,
+      currency,
+      notes: notes || '',
+      created_by: createdBy || '',
+    };
+  },
+
+  async updateOldGoldInflow(id: string | number, data: Record<string, unknown>) {
+    const numId = Number(id);
+    if (!numId) throw new HttpError(400, 'Invalid id');
+
+    const [existing] = await getPool().query<RowDataPacket[]>(
+      `SELECT * FROM old_gold_inflows WHERE id = :id`,
+      { id: numId }
+    );
+    if (!existing.length) throw new HttpError(404, 'Record not found');
+
+    const description = String(data.description || existing[0].description).trim();
+    if (!description) throw new HttpError(400, 'အကြောင်းအရာ (description) ထည့်သွင်းရန် လိုအပ်ပါသည်');
+
+    const grams = num(data.grams !== undefined ? data.grams : existing[0].grams);
+    if (grams <= 0) throw new HttpError(400, 'အလေးချိန် (grams) သည် ၀ ထက် ကြီးရပါမည်');
+
+    const inflowDate = String(data.inflow_date || existing[0].inflow_date).slice(0, 10);
+    const goldOrigin = String(data.gold_origin || existing[0].gold_origin);
+    const purity = String(data.purity || existing[0].purity);
+    const purityName = data.purity_name !== undefined ? (data.purity_name ? String(data.purity_name).trim() : null) : existing[0].purity_name;
+
+    const getCatKey = (pur?: string, origin?: string): 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14' => {
+      const combined = `${String(pur || '')} ${String(origin || '')}`.toUpperCase();
+      if (combined.includes('THAI') || combined.includes('ထိုင်း')) return 'THAI_GOLD';
+      if (
+        combined.includes('MEELIN') ||
+        combined.includes('မီးလင်း') ||
+        combined.includes('အခေါက်') ||
+        combined.includes('K24') ||
+        combined.includes('24K') ||
+        combined.includes('၂၄K') ||
+        combined.includes('16') ||
+        combined.includes('၁၆') ||
+        combined.includes('PAE_16')
+      ) {
+        return 'PAE_16';
+      }
+      if (
+        combined.includes('15') ||
+        combined.includes('၁၅') ||
+        combined.includes('PE15') ||
+        combined.includes('PAE_15')
+      ) {
+        return 'PAE_15';
+      }
+      return 'PAE_14';
+    };
+
+    let goldCategory = String(data.gold_category || existing[0].gold_category).toUpperCase();
+    if (!['THAI_GOLD', 'PAE_16', 'PAE_15', 'PAE_14'].includes(goldCategory)) {
+      goldCategory = getCatKey(purity, goldOrigin);
+    }
+
+    const settings = await this.getShopSettings();
+    const kyatToGrams = Number(settings.kyat_to_grams) > 0 ? Number(settings.kyat_to_grams) : KYAT_TO_GRAMS;
+    const kpy = gramsToKpy(grams, kyatToGrams);
+
+    const customerName = data.customer_name !== undefined ? (data.customer_name ? String(data.customer_name).trim() : null) : existing[0].customer_name;
+    const customerPhone = data.customer_phone !== undefined ? (data.customer_phone ? String(data.customer_phone).trim() : null) : existing[0].customer_phone;
+    const amount = data.amount !== undefined ? num(data.amount) : num(existing[0].amount);
+    const currency = String(data.currency || existing[0].currency || 'MMK');
+    const notes = data.notes !== undefined ? (data.notes ? String(data.notes).trim() : null) : existing[0].notes;
+
+    await getPool().query(
+      `UPDATE old_gold_inflows SET
+        inflow_date = :inflow_date,
+        gold_origin = :gold_origin,
+        gold_category = :gold_category,
+        purity = :purity,
+        purity_name = :purity_name,
+        grams = :grams,
+        weight_kyat = :weight_kyat,
+        weight_pae = :weight_pae,
+        weight_yway = :weight_yway,
+        description = :description,
+        customer_name = :customer_name,
+        customer_phone = :customer_phone,
+        amount = :amount,
+        currency = :currency,
+        notes = :notes
+      WHERE id = :id`,
+      {
+        id: numId,
+        inflow_date: inflowDate,
+        gold_origin: goldOrigin,
+        gold_category: goldCategory,
+        purity,
+        purity_name: purityName,
+        grams,
+        weight_kyat: kpy.kyat,
+        weight_pae: kpy.pae,
+        weight_yway: kpy.yway,
+        description,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        amount,
+        currency,
+        notes,
+      }
+    );
+
+    return { success: true };
+  },
+
+  async deleteOldGoldInflow(id: string | number) {
+    const numId = Number(id);
+    if (!numId) throw new HttpError(400, 'Invalid id');
+
+    await getPool().query(`DELETE FROM old_gold_inflows WHERE id = :id`, { id: numId });
+    return { success: true };
   },
 
   async listMerchantReturns() {

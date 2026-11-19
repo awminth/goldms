@@ -444,6 +444,34 @@ export const TABLE_STATEMENTS: string[] = [
     KEY idx_other_outflow_gold_category (gold_category)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  `CREATE TABLE IF NOT EXISTS old_gold_inflows (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    inflow_no VARCHAR(100) NOT NULL,
+    inflow_date DATE NOT NULL,
+    gold_origin VARCHAR(50) NOT NULL,
+    gold_category VARCHAR(50) NOT NULL,
+    purity VARCHAR(50) NOT NULL,
+    purity_name VARCHAR(100) NULL,
+    grams DECIMAL(12,3) NOT NULL,
+    weight_kyat DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_pae DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    weight_yway DECIMAL(8,3) NOT NULL DEFAULT 0.00,
+    description VARCHAR(255) NOT NULL,
+    customer_name VARCHAR(150) NULL,
+    customer_phone VARCHAR(50) NULL,
+    amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    currency VARCHAR(10) NOT NULL DEFAULT 'MMK',
+    notes TEXT NULL,
+    created_by VARCHAR(100) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_inflow_no (inflow_no),
+    KEY idx_inflow_date (inflow_date),
+    KEY idx_inflow_gold_category (gold_category),
+    KEY idx_inflow_gold_origin (gold_origin)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS credit_debts (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     debt_no VARCHAR(100) NOT NULL,

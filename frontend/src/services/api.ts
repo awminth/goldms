@@ -15,6 +15,7 @@ import type {
   UserRole,
   ShopSettings,
   GoldsmithJob,
+  OldGoldInflow,
   OldGoldMerchantReturn,
   OldGoldShopTransfer,
   OldGoldMelt,
@@ -93,6 +94,7 @@ export type BootstrapData = {
   rolePermissions?: RolePermission[];
   settings?: ShopSettings;
   goldsmithJobs?: GoldsmithJob[];
+  oldGoldInflows?: OldGoldInflow[];
   merchantReturns?: OldGoldMerchantReturn[];
   shopTransfers?: OldGoldShopTransfer[];
   melts?: OldGoldMelt[];
@@ -259,6 +261,26 @@ export const api = {
     request<void>(`/goldsmith-jobs/${id}/cancel`, {
       method: 'POST',
       body: JSON.stringify({}),
+    }),
+
+  listOldGoldInflows: () =>
+    request<OldGoldInflow[]>('/old-gold/inflows'),
+
+  createOldGoldInflow: (data: Record<string, unknown>) =>
+    request<OldGoldInflow>('/old-gold/inflows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateOldGoldInflow: (id: string, data: Record<string, unknown>) =>
+    request<OldGoldInflow>(`/old-gold/inflows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteOldGoldInflow: (id: string) =>
+    request<void>(`/old-gold/inflows/${id}`, {
+      method: 'DELETE',
     }),
 
   listMerchantReturns: () =>

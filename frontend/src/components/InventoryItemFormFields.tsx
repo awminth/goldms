@@ -124,31 +124,11 @@ export const InventoryItemFormFields: React.FC<Props> = ({ form }) => {
               onChange={(e) => setFormCategory(e.target.value)}
               className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
             >
-              {categoryGroups.map((g) => {
-                const opts = CATEGORIES.filter((c) => c.group === g);
-                if (!opts.length) return null;
-                const label =
-                  g === 'PRODUCT'
-                    ? language === 'MM'
-                      ? 'ပစ္စည်းအမျိုးအစား'
-                      : 'Item Types'
-                    : g === 'GOLD_CLASS'
-                      ? language === 'MM'
-                        ? 'Categories (ပဲရည်)'
-                        : 'Categories (Purity)'
-                      : language === 'MM'
-                        ? 'အခြား'
-                        : 'Other';
-                return (
-                  <optgroup key={g} label={label}>
-                    {opts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {language === 'MM' ? c.mm : c.en}
-                      </option>
-                    ))}
-                  </optgroup>
-                );
-              })}
+              {CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {language === 'MM' ? c.mm : c.en}
+                </option>
+              ))}
             </select>
           )}
         </div>

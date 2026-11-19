@@ -20,6 +20,7 @@ export type ActiveTab =
   | 'inventory-summary'
   | 'inventory-stock-ledger'
   | 'old-gold'
+  | 'old-gold-inflows'
   | 'old-gold-outflows'
   | 'goldsmith'
   | 'goldsmith-handoff'

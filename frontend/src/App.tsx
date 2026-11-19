@@ -9,6 +9,7 @@ import { DashboardView } from './components/DashboardView';
 import { InventoryView } from './components/InventoryView';
 import { InventoryStockLedgerView } from './components/InventoryStockLedgerView';
 import { OldGoldView } from './components/OldGoldView';
+import { OldGoldInflowView } from './components/OldGoldInflowView';
 import { GoldsmithView } from './components/GoldsmithView';
 import { GoldsmithHandoffView } from './components/GoldsmithHandoffView';
 import { PosView } from './components/PosView';
@@ -329,6 +330,10 @@ const MainLayout: React.FC = () => {
           {activeTab === 'old-gold' && can('inventory', 'read') && (
             <OldGoldView section="summary" onNavigate={setActiveTab} />
           )}
+          {activeTab === 'old-gold-inflows' &&
+            (can('old_gold_inflow', 'read') || can('inventory', 'read')) && (
+              <OldGoldInflowView />
+            )}
           {activeTab === 'old-gold-outflows' && can('inventory', 'read') && (
             <OldGoldView section="outflows" onNavigate={setActiveTab} />
           )}

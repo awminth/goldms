@@ -19,6 +19,7 @@ import {
   X,
   Scale,
   List,
+  PackagePlus,
   Percent,
   CheckCircle2,
   AlertOctagon,
@@ -59,6 +60,7 @@ const PAWN_TABS: ActiveTab[] = [
 ];
 
 const OLD_GOLD_TABS: ActiveTab[] = [
+  'old-gold-inflows',
   'old-gold',
   'old-gold-outflows',
 ];
@@ -319,22 +321,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showPawn = pawnChildren.length > 0;
   const pawnChildActive = PAWN_TABS.includes(activeTab);
 
-  const oldGoldChildren = can('inventory', 'read')
-    ? [
-        {
-          id: 'old-gold' as ActiveTab,
-          labelMM: 'အဟောင်းထည် လက်ကျန်',
-          labelEN: 'Old Gold Summary',
-          icon: Scale,
-        },
-        {
-          id: 'old-gold-outflows' as ActiveTab,
-          labelMM: 'အထွက် အသေးစိတ်မှတ်တမ်း',
-          labelEN: 'Outflow Details',
-          icon: List,
-        },
-      ]
-    : [];
+  const oldGoldChildren = [
+    {
+      id: 'old-gold-inflows' as ActiveTab,
+      labelMM: 'အဟောင်းထည် အဝင်',
+      labelEN: 'Old Gold Inflow',
+      icon: PackagePlus,
+      visible: can('old_gold_inflow', 'read') || can('inventory', 'read'),
+    },
+    {
+      id: 'old-gold' as ActiveTab,
+      labelMM: 'အဟောင်းထည် လက်ကျန်',
+      labelEN: 'Old Gold Summary',
+      icon: Scale,
+      visible: can('inventory', 'read'),
+    },
+    {
+      id: 'old-gold-outflows' as ActiveTab,
+      labelMM: 'အထွက် အသေးစိတ်မှတ်တမ်း',
+      labelEN: 'Outflow Details',
+      icon: List,
+      visible: can('inventory', 'read'),
+    },
+  ].filter((c) => c.visible);
   const showOldGold = oldGoldChildren.length > 0;
   const oldGoldChildActive = OLD_GOLD_TABS.includes(activeTab);
 

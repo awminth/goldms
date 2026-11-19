@@ -201,6 +201,27 @@ export interface GoldsmithJob {
   inventory_barcode?: string;
 }
 
+export interface OldGoldInflow {
+  id: string;
+  inflow_no: string;
+  inflow_date: string;
+  gold_origin: string;
+  gold_category: 'THAI_GOLD' | 'PAE_16' | 'PAE_15' | 'PAE_14';
+  purity: string;
+  purity_name?: string;
+  grams: number;
+  weight: WeightKPY;
+  description: string;
+  customer_name?: string;
+  customer_phone?: string;
+  amount?: number;
+  currency?: string;
+  notes?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface OldGoldMerchantReturn {
   id: string;
   return_no: string;

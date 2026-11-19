@@ -49,7 +49,7 @@ import { DateInput } from './DateInput';
 type FlowTab = 'INFLOW' | 'OUTFLOW';
 type CategoryFilter = 'ALL' | OldGoldCategoryKey;
 
-type InflowSource = 'PURCHASE' | 'SHOP_OUT' | 'PAWN_CONFISCATED' | 'OTHER_IN' | 'EXCHANGE';
+type InflowSource = 'PURCHASE' | 'SHOP_OUT' | 'PAWN_CONFISCATED' | 'OTHER_IN' | 'EXCHANGE' | 'MANUAL_INFLOW';
 
 type OldGoldInflowRow = {
   key: string;
@@ -128,6 +128,7 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
     shopSettings,
     masterCategories,
     goldsmithJobs,
+    oldGoldInflows,
     merchantReturns,
     shopTransfers,
     melts,
@@ -322,10 +323,29 @@ export const OldGoldView: React.FC<OldGoldViewProps> = ({
       });
     }
 
+    // 3. Manual Inflows (အဟောင်းထည် အဝင် မှတ်တမ်းများ)
+    for (const ogi of oldGoldInflows || []) {
+      list.push({
+        key: `ogi-${ogi.id}`,
+        source: 'MANUAL_INFLOW' as InflowSource,
+        sourceLabelMm: 'အဟောင်းထည်အဝင်',
+        sourceLabelEn: 'Manual Inflow',
+        invoice_no: ogi.inflow_no,
+        created_at: ogi.inflow_date || ogi.created_at,
+        customer_name: ogi.customer_name || '—',
+        item_name: ogi.description || 'အဟောင်းထည်',
+        category_label: ogi.purity_name || ogi.purity || '—',
+        purity: ogi.purity,
+        goldCategory: ogi.gold_category,
+        weight: ogi.weight || { kyat: 0, pae: 0, yway: 0 },
+        net_grams: Number(ogi.grams.toFixed(3)),
+      });
+    }
+
     return list.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-  }, [transactions, pawnRecords, kyatToGrams, masterCategories, language]);
+  }, [transactions, pawnRecords, oldGoldInflows, kyatToGrams, masterCategories, language]);
 
   // Build Outflow Rows from:
   // 1. Merchant Returns (ကုန်သည်ပြန်ပေး)

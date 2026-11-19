@@ -5,6 +5,7 @@ export const PERMISSION_MODULES = [
   { key: 'pos', name_mm: 'အရောင်း / အဝယ် / အလဲ', name_en: 'Sale / Buy / Exchange', sort: 20 },
   { key: 'pos_history', name_mm: 'ဘောင်ချာမှတ်တမ်း', name_en: 'Voucher History', sort: 25 },
   { key: 'inventory', name_mm: 'အထည်စတော့ & ဘားကုဒ်', name_en: 'Inventory & Barcodes', sort: 30 },
+  { key: 'old_gold_inflow', name_mm: 'အဟောင်းထည် အဝင်', name_en: 'Old Gold Inflow', sort: 32 },
   { key: 'orders', name_mm: 'Order တင်ခြင်း & စရံ', name_en: 'Orders & Deposits', sort: 35 },
   { key: 'goldsmith', name_mm: 'ပန်းထိမ်အပ်', name_en: 'Goldsmith Workshop', sort: 40 },
   { key: 'pawn', name_mm: 'အပေါင် / အတိုး / ရွေး', name_en: 'Pawn / Interest / Redeem', sort: 50 },

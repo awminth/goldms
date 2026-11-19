@@ -12,6 +12,7 @@ export const TAB_TO_PATH: Record<ActiveTab, string> = {
   'inventory-summary': 'inventory-summary',
   'inventory-stock-ledger': 'inventory-stock-ledger',
   'old-gold': 'old-gold',
+  'old-gold-inflows': 'old-gold-inflows',
   'old-gold-outflows': 'old-gold-outflows',
   goldsmith: 'goldsmith',
   'goldsmith-handoff': 'goldsmith-handoff',
@@ -49,6 +50,7 @@ const PATH_TO_TAB: Record<string, ActiveTab> = Object.entries(TAB_TO_PATH).reduc
 
 /** Legacy URL aliases → current tabs */
 PATH_TO_TAB['reports'] = 'financial-report';
+PATH_TO_TAB['old-gold-inflow'] = 'old-gold-inflows';
 PATH_TO_TAB['old-gold-history'] = 'old-gold-outflows';
 PATH_TO_TAB['old-gold-outflow'] = 'old-gold-outflows';
 PATH_TO_TAB['credit-receivable'] = 'credit-debt';

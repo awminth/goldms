@@ -677,11 +677,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return code;
   };
 
-  // Category list from Master Setup (grouped) with fallbacks
-  const activeCats = masterCategories.filter((c) => c.is_active);
+  // Product category list from Master Setup (excludes gold purities/classes) with fallbacks
+  const activeProductCats = masterCategories.filter(
+    (c) => c.is_active && ((c.category_group || 'PRODUCT') === 'PRODUCT' || c.category_group === 'OTHER')
+  );
   const CATEGORIES =
-    activeCats.length > 0
-      ? activeCats.map((c) => ({
+    activeProductCats.length > 0
+      ? activeProductCats.map((c) => ({
           id: c.code,
           mm: c.name_mm,
           en: c.name_en,
@@ -698,7 +700,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           { id: 'ANKLET', mm: 'ခြေချင်း', en: 'Anklet', group: 'PRODUCT' },
         ];
 
-  const categoryGroups = ['PRODUCT', 'GOLD_CLASS', 'OTHER'] as const;
+  const categoryGroups = ['PRODUCT', 'OTHER'] as const;
 
   /** Empty defaults for new Myanmar / Thai item (no sample fees or weights). */
   const resetNewItemForm = (kind: 'MYANMAR' | 'THAI' = 'MYANMAR') => {
@@ -1987,31 +1989,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     onChange={(e) => setFormCategory(e.target.value)}
                     className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white focus:ring-2 focus:ring-[#D4AF37] focus:outline-hidden"
                   >
-                    {categoryGroups.map((g) => {
-                      const opts = CATEGORIES.filter((c) => c.group === g);
-                      if (!opts.length) return null;
-                      const label =
-                        g === 'PRODUCT'
-                          ? language === 'MM'
-                            ? 'ပစ္စည်းအမျိုးအစား'
-                            : 'Item Types'
-                          : g === 'GOLD_CLASS'
-                            ? language === 'MM'
-                              ? 'Categories (ပဲရည်)'
-                              : 'Categories (Purity)'
-                            : language === 'MM'
-                              ? 'အခြား'
-                              : 'Other';
-                      return (
-                        <optgroup key={g} label={label}>
-                          {opts.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {language === 'MM' ? c.mm : c.en}
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
+                    {CATEGORIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {language === 'MM' ? c.mm : c.en}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

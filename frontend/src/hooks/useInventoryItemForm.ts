@@ -126,7 +126,9 @@ export function useInventoryItemForm({
   const isThaiEntry = formPurity === 'THAI_GOLD' || formItemType === 'THAI_GOLD';
 
   const CATEGORIES: InventoryFormCategory[] = useMemo(() => {
-    const activeCats = masterCategories.filter((c) => Boolean(c.is_active));
+    const activeCats = masterCategories.filter(
+      (c) => Boolean(c.is_active) && ((c.category_group || 'PRODUCT') === 'PRODUCT' || c.category_group === 'OTHER')
+    );
     if (activeCats.length > 0) {
       return activeCats.map((c) => ({
         id: c.code,
@@ -147,7 +149,7 @@ export function useInventoryItemForm({
     ];
   }, [masterCategories]);
 
-  const categoryGroups = ['PRODUCT', 'GOLD_CLASS', 'OTHER'] as const;
+  const categoryGroups = ['PRODUCT', 'OTHER'] as const;
 
   const applyGrossFromGrams = (grams: number) => {
     setFormGrossGrams(grams);

@@ -58,6 +58,11 @@ router.post('/goldsmith-jobs/:id/return', shopController.returnGoldsmithJob);
 router.post('/goldsmith-jobs/:id/handoff', shopController.handoffGoldsmithJob);
 router.post('/goldsmith-jobs/:id/cancel', shopController.cancelGoldsmithJob);
 
+router.get('/old-gold/inflows', shopController.listOldGoldInflows);
+router.post('/old-gold/inflows', shopController.createOldGoldInflow);
+router.put('/old-gold/inflows/:id', shopController.updateOldGoldInflow);
+router.delete('/old-gold/inflows/:id', shopController.deleteOldGoldInflow);
+
 router.get('/old-gold/merchant-returns', shopController.listMerchantReturns);
 router.post('/old-gold/merchant-returns', shopController.createMerchantReturn);
 router.put('/old-gold/merchant-returns/:id', shopController.updateMerchantReturn);

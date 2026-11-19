@@ -595,48 +595,32 @@ export const OrdersView: React.FC<Props> = ({ onHandoffOrder }) => {
                     onChange={(e) => setFormCategory(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121212] dark:text-white font-bold"
                   >
-                    {(['PRODUCT', 'GOLD_CLASS', 'OTHER'] as const).map((g) => {
-                      const opts = (
-                        masterCategories.filter((c) => c.is_active).length
-                          ? masterCategories.filter((c) => c.is_active)
-                          : [
-                              {
-                                code: 'RING',
-                                name_mm: 'လက်စွပ်',
-                                name_en: 'Ring',
-                                category_group: 'PRODUCT' as const,
-                              },
-                              {
-                                code: 'NECKLACE',
-                                name_mm: 'ဆွဲကြိုး',
-                                name_en: 'Necklace',
-                                category_group: 'PRODUCT' as const,
-                              },
-                            ]
-                      ).filter((c) => (c.category_group || 'PRODUCT') === g);
-                      if (!opts.length) return null;
-                      const label =
-                        g === 'PRODUCT'
-                          ? language === 'MM'
-                            ? 'ပစ္စည်းအမျိုးအစား'
-                            : 'Item Types'
-                          : g === 'GOLD_CLASS'
-                            ? language === 'MM'
-                              ? 'Categories (ပဲရည်)'
-                              : 'Categories (Purity)'
-                            : language === 'MM'
-                              ? 'အခြား'
-                              : 'Other';
-                      return (
-                        <optgroup key={g} label={label}>
-                          {opts.map((c) => (
-                            <option key={c.code} value={c.code}>
-                              {language === 'MM' ? c.name_mm : c.name_en}
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
+                    {(
+                      masterCategories.filter(
+                        (c) => c.is_active && ((c.category_group || 'PRODUCT') === 'PRODUCT' || c.category_group === 'OTHER')
+                      ).length > 0
+                        ? masterCategories.filter(
+                            (c) => c.is_active && ((c.category_group || 'PRODUCT') === 'PRODUCT' || c.category_group === 'OTHER')
+                          )
+                        : [
+                            {
+                              code: 'RING',
+                              name_mm: 'လက်စွပ်',
+                              name_en: 'Ring',
+                              category_group: 'PRODUCT' as const,
+                            },
+                            {
+                              code: 'NECKLACE',
+                              name_mm: 'ဆွဲကြိုး',
+                              name_en: 'Necklace',
+                              category_group: 'PRODUCT' as const,
+                            },
+                          ]
+                    ).map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {language === 'MM' ? c.name_mm : c.name_en}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

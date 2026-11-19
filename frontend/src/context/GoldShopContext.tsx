@@ -17,6 +17,7 @@ import {
   UserRole,
   ShopSettings,
   GoldsmithJob,
+  OldGoldInflow,
   OldGoldMerchantReturn,
   OldGoldShopTransfer,
   OldGoldMelt,
@@ -35,6 +36,7 @@ interface GoldShopContextType {
   transactions: Transaction[];
   customOrders: CustomOrder[];
   goldsmithJobs: GoldsmithJob[];
+  oldGoldInflows: OldGoldInflow[];
   merchantReturns: OldGoldMerchantReturn[];
   shopTransfers: OldGoldShopTransfer[];
   melts: OldGoldMelt[];
@@ -137,6 +139,9 @@ interface GoldShopContextType {
     purityCode?: string,
     itemType?: string
   ) => { label: string; isThai: boolean; originCode: string };
+  addOldGoldInflow: (data: Record<string, unknown>) => Promise<OldGoldInflow>;
+  updateOldGoldInflow: (id: string, data: Record<string, unknown>) => Promise<OldGoldInflow>;
+  deleteOldGoldInflow: (id: string) => Promise<void>;
   addMerchantReturn: (data: Record<string, unknown>) => Promise<OldGoldMerchantReturn>;
   updateMerchantReturn: (id: string, data: Record<string, unknown>) => Promise<OldGoldMerchantReturn>;
   deleteMerchantReturn: (id: string) => Promise<void>;
@@ -188,6 +193,7 @@ function applyBootstrap(
     setTransactions: (v: Transaction[]) => void;
     setCustomOrders: (v: CustomOrder[]) => void;
     setGoldsmithJobs: (v: GoldsmithJob[]) => void;
+    setOldGoldInflows: (v: OldGoldInflow[]) => void;
     setMerchantReturns: (v: OldGoldMerchantReturn[]) => void;
     setShopTransfers: (v: OldGoldShopTransfer[]) => void;
     setMelts: (v: OldGoldMelt[]) => void;
@@ -209,6 +215,7 @@ function applyBootstrap(
   setters.setTransactions(data.transactions);
   setters.setCustomOrders(data.orders);
   setters.setGoldsmithJobs(data.goldsmithJobs || []);
+  setters.setOldGoldInflows(data.oldGoldInflows || []);
   setters.setMerchantReturns(data.merchantReturns || []);
   setters.setShopTransfers(data.shopTransfers || []);
   setters.setMelts(data.melts || []);
@@ -262,6 +269,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [customOrders, setCustomOrders] = useState<CustomOrder[]>([]);
   const [goldsmithJobs, setGoldsmithJobs] = useState<GoldsmithJob[]>([]);
+  const [oldGoldInflows, setOldGoldInflows] = useState<OldGoldInflow[]>([]);
   const [merchantReturns, setMerchantReturns] = useState<OldGoldMerchantReturn[]>([]);
   const [shopTransfers, setShopTransfers] = useState<OldGoldShopTransfer[]>([]);
   const [melts, setMelts] = useState<OldGoldMelt[]>([]);
@@ -296,6 +304,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setTransactions,
     setCustomOrders,
     setGoldsmithJobs,
+    setOldGoldInflows,
     setMerchantReturns,
     setShopTransfers,
     setMelts,
@@ -393,6 +402,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setTransactions([]);
     setCustomOrders([]);
     setGoldsmithJobs([]);
+    setOldGoldInflows([]);
     setMerchantReturns([]);
     setShopTransfers([]);
     setMelts([]);
@@ -761,6 +771,26 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const addOldGoldInflow = async (data: Record<string, unknown>) => {
+    const created = await api.createOldGoldInflow(data);
+    setOldGoldInflows((prev) => [created, ...prev]);
+    await invalidateAndRefresh();
+    return created;
+  };
+
+  const updateOldGoldInflow = async (id: string, data: Record<string, unknown>) => {
+    const updated = await api.updateOldGoldInflow(id, data);
+    setOldGoldInflows((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    await invalidateAndRefresh();
+    return updated;
+  };
+
+  const deleteOldGoldInflow = async (id: string) => {
+    await api.deleteOldGoldInflow(id);
+    setOldGoldInflows((prev) => prev.filter((r) => r.id !== id));
+    await invalidateAndRefresh();
+  };
+
   const addMerchantReturn = async (data: Record<string, unknown>) => {
     const created = await api.createMerchantReturn(data);
     setMerchantReturns((prev) => [created, ...prev]);
@@ -941,6 +971,7 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         transactions,
         customOrders,
         goldsmithJobs,
+        oldGoldInflows,
         merchantReturns,
         shopTransfers,
         melts,
@@ -984,6 +1015,9 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         returnGoldsmithJob,
         cancelGoldsmithJob,
         handoffGoldsmithJob,
+        addOldGoldInflow,
+        updateOldGoldInflow,
+        deleteOldGoldInflow,
         addMerchantReturn,
         updateMerchantReturn,
         deleteMerchantReturn,
