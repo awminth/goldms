@@ -606,61 +606,22 @@ export const OldGoldInflowView: React.FC = () => {
             <Calendar className="w-3.5 h-3.5" />
             <span>{language === 'MM' ? 'ရက်စွဲအပိုင်းအခြား:' : 'Date Range:'}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <DateInput
-              value={startDate}
-              onChange={setStartDate}
-              className="w-36 h-8 px-2.5 text-xs font-mono bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
-            />
+          <div className="flex items-center gap-2">
+            <div className="w-36 shrink-0">
+              <DateInput
+                value={startDate}
+                onChange={setStartDate}
+                className="w-full h-8 px-2.5 text-xs font-mono bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+              />
+            </div>
             <span className="text-gray-400">-</span>
-            <DateInput
-              value={endDate}
-              onChange={setEndDate}
-              className="w-36 h-8 px-2.5 text-xs font-mono bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setStartDate(daysAgoISO(6));
-                setEndDate(todayISO());
-              }}
-              className={`h-8 px-2.5 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
-                startDate === daysAgoISO(6) && endDate === todayISO()
-                  ? 'bg-amber-600 text-white border-amber-600'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              {language === 'MM' ? '၇ ရက်' : '7 Days'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const t = todayISO();
-                setStartDate(t);
-                setEndDate(t);
-              }}
-              className={`h-8 px-2.5 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
-                startDate === todayISO() && endDate === todayISO()
-                  ? 'bg-amber-600 text-white border-amber-600'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              {language === 'MM' ? 'ယနေ့' : 'Today'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStartDate('');
-                setEndDate('');
-              }}
-              className={`h-8 px-2.5 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
-                !startDate && !endDate
-                  ? 'bg-amber-600 text-white border-amber-600'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#121212] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              {language === 'MM' ? 'အားလုံး' : 'All'}
-            </button>
+            <div className="w-36 shrink-0">
+              <DateInput
+                value={endDate}
+                onChange={setEndDate}
+                className="w-full h-8 px-2.5 text-xs font-mono bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+              />
+            </div>
           </div>
         </div>
       </div>
