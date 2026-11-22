@@ -1,8 +1,10 @@
 import React, { forwardRef } from 'react';
 import type { InventoryItem } from '../types/gold';
+import { useGoldShop } from '../context/GoldShopContext';
 import {
   KYAT_TO_GRAMS,
   PURITY_LABELS,
+  isThaiPurityCode,
   kpyToGrams,
   kpyToYway,
   mmkToBaht,
@@ -86,8 +88,18 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
     },
     ref
   ) {
-    const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
-    const purityLabel = PURITY_LABELS[item.purity]?.mm || item.purity;
+    const { masterCategories, isThaiGoldClass } = useGoldShop();
+    const isThai = isThaiGoldClass
+      ? isThaiGoldClass(item.purity, item.item_type)
+      : isThaiPurityCode(item.purity, item.item_type);
+    const matchedClass = masterCategories.find(
+      (c) => c.category_group === 'GOLD_CLASS' && c.code === item.purity
+    );
+    const purityLabel =
+      matchedClass?.name_mm ||
+      matchedClass?.name_en ||
+      PURITY_LABELS[item.purity]?.mm ||
+      item.purity;
 
     const gross = {
       kyat: Number(item.weight_kyat || 0),
@@ -173,7 +185,7 @@ export const InventoryBarcodeTag = forwardRef<HTMLDivElement, InventoryBarcodeTa
 
     const detailsCol = (
       <div key="col-details" className={`barcode-tag-head-col barcode-tag-head-right barcode-tag-col-details ${isDense ? 'is-dense' : ''}`}>
-        <div className="barcode-tag-purity">{isThai ? 'ထိုင်း' : purityLabel}</div>
+        <div className="barcode-tag-purity">{purityLabel}</div>
         {rightValues.map((v, i) => (
           <div key={`${i}-${v}`} className="barcode-tag-row-value">
             {v}
