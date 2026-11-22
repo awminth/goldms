@@ -784,19 +784,19 @@ export const InventoryStockLedgerView: React.FC = () => {
               <tr className="bg-gray-50 dark:bg-[#121212] text-gray-700 dark:text-gray-200 border-b border-gray-300 dark:border-gray-700">
                 <th
                   rowSpan={2}
-                  className="px-3 py-2.5 font-bold w-12 text-center sticky left-0 bg-gray-50 dark:bg-[#121212] z-10 align-middle"
+                  className="px-3 py-2.5 font-bold w-12 min-w-[48px] max-w-[48px] text-center sticky left-0 bg-gray-50 dark:bg-[#121212] z-20 align-middle"
                 >
                   {language === 'MM' ? 'စဉ်' : '#'}
                 </th>
                 <th
                   rowSpan={2}
-                  className="px-3.5 py-2.5 font-bold min-w-[160px] sticky left-12 bg-gray-50 dark:bg-[#121212] z-10 align-middle"
+                  className="px-3.5 py-2.5 font-bold w-[160px] min-w-[160px] max-w-[160px] sticky left-[48px] bg-gray-50 dark:bg-[#121212] z-20 align-middle"
                 >
                   {language === 'MM' ? 'ပစ္စည်းအမျိုးအစား' : 'Item Category'}
                 </th>
                 <th
                   rowSpan={2}
-                  className="px-3.5 py-2.5 font-bold min-w-[120px] align-middle date-sep-r"
+                  className="px-3.5 py-2.5 font-bold w-[135px] min-w-[135px] max-w-[135px] sticky left-[208px] bg-gray-50 dark:bg-[#121212] z-20 align-middle date-sep-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)]"
                 >
                   {goldTab === 'MYANMAR'
                     ? language === 'MM'
@@ -866,7 +866,7 @@ export const InventoryStockLedgerView: React.FC = () => {
                             {sIdx === 0 && (
                               <td
                                 rowSpan={rowSpanCount}
-                                className="px-3 py-2.5 text-center font-mono font-bold text-amber-700 dark:text-amber-400 align-top sticky left-0 bg-[#FAF8F2] dark:bg-[#181612] z-10"
+                                className="px-3 py-2.5 w-12 min-w-[48px] max-w-[48px] text-center font-mono font-bold text-amber-700 dark:text-amber-400 align-top sticky left-0 bg-[#FAF8F2] dark:bg-[#181612] z-10"
                               >
                                 {gIdx + 1}
                               </td>
@@ -874,14 +874,14 @@ export const InventoryStockLedgerView: React.FC = () => {
                             {sIdx === 0 && (
                               <td
                                 rowSpan={rowSpanCount}
-                                className="px-3.5 py-2.5 font-bold text-gray-900 dark:text-gray-100 align-top sticky left-12 bg-[#FAF8F2] dark:bg-[#181612] z-10"
+                                className="px-3.5 py-2.5 w-[160px] min-w-[160px] max-w-[160px] font-bold text-gray-900 dark:text-gray-100 align-top sticky left-[48px] bg-[#FAF8F2] dark:bg-[#181612] z-10"
                               >
                                 {catName}
                               </td>
                             )}
-                            <td className="px-3.5 py-2 font-semibold date-sep-r">
+                            <td className="px-3.5 py-2 w-[135px] min-w-[135px] max-w-[135px] font-semibold sticky left-[208px] bg-[#FAF8F2] dark:bg-[#181612] z-10 date-sep-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)]">
                               <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold font-mono ${
+                                className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold font-mono whitespace-nowrap ${
                                   goldTab === 'MYANMAR'
                                     ? 'bg-[#D4AF37]/15 text-[#996515] dark:text-[#FFD700] border border-[#D4AF37]/30'
                                     : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30'
@@ -939,7 +939,7 @@ export const InventoryStockLedgerView: React.FC = () => {
                 <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t-2 border-amber-300 dark:border-amber-700 font-bold">
                   <td
                     colSpan={3}
-                    className="px-3.5 py-2.5 text-amber-950 dark:text-amber-100 sticky left-0 bg-amber-100 dark:bg-[#241c0c] z-10 date-sep-r"
+                    className="px-3.5 py-2.5 text-amber-950 dark:text-amber-100 sticky left-0 bg-amber-100 dark:bg-[#241c0c] z-20 date-sep-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)]"
                   >
                     {language === 'MM' ? 'စုစုပေါင်း လက်ကျန် (ခု)' : 'Total Stock On Hand (pcs)'}
                   </td>
