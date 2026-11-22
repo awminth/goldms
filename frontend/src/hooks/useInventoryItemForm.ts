@@ -16,6 +16,7 @@ import {
   bahtToMmk,
   mmkToBahtFromSell,
   resolveBahtMmkRate,
+  isThaiPurityCode,
 } from '../utils/goldCalculations';
 
 export type InventoryFormCategory = {
@@ -123,7 +124,27 @@ export function useInventoryItemForm({
   const [formStonePrice, setFormStonePrice] = useState<number>(0);
   const [formStoneProfit, setFormStoneProfit] = useState<number>(0);
 
-  const isThaiEntry = formPurity === 'THAI_GOLD' || formItemType === 'THAI_GOLD';
+  const isThaiGoldClass = (purityCode?: string, itemType?: string): boolean => {
+    if (itemType === 'THAI_GOLD') return true;
+    const code = String(purityCode || '').trim();
+    if (!code) return false;
+    const cls = masterCategories.find(
+      (c) => c.category_group === 'GOLD_CLASS' && c.code === code
+    );
+    if (cls?.gold_origin) {
+      if (cls.gold_origin === 'THAI_GOLD' || cls.gold_origin === 'ORIGIN_THAI') return true;
+      if (cls.gold_origin === 'MYANMAR_GOLD' || cls.gold_origin === 'ORIGIN_MYANMAR') return false;
+      const originRow = masterCategories.find(
+        (c) =>
+          c.category_group === 'GOLD_ORIGIN' &&
+          (c.code === cls.gold_origin || c.gold_origin === cls.gold_origin)
+      );
+      if (originRow) return originRow.gold_origin === 'THAI_GOLD';
+    }
+    return isThaiPurityCode(code, itemType);
+  };
+
+  const isThaiEntry = isThaiGoldClass(formPurity, formItemType);
 
   const CATEGORIES: InventoryFormCategory[] = useMemo(() => {
     const activeCats = masterCategories.filter(
@@ -312,13 +333,10 @@ export function useInventoryItemForm({
     setFormProfitDedPae(profitP);
     setFormProfitDedYway(profitY);
     setFormProfitDedGrams(kpyToGrams({ kyat: 0, pae: profitP, yway: profitY }, kyatToGrams));
-    const thaiG =
-      item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD'
-        ? Number(item.thai_weight_unit || 15.2)
-        : 15.2;
+    const isThaiItem = isThaiGoldClass(item.purity, item.item_type);
+    const thaiG = isThaiItem ? Number(item.thai_weight_unit || 15.2) : 15.2;
     setFormThaiGrams(thaiG);
     setShowCustomThaiGram(!THAI_GRAM_PRESETS.includes(thaiG as (typeof THAI_GRAM_PRESETS)[number]));
-    const isThaiItem = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
     if (isThaiItem) {
       // Prefer frozen Baht fields from stock-in; else reverse with item/current rate
       const rate =

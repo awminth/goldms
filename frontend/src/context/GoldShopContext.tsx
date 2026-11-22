@@ -477,8 +477,13 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const getLivePriceForPurity = (purity: GoldPurity): number => {
     const specific = goldPrices.find((p) => p.gold_type === purity);
     if (specific && specific.price_per_kyat > 0) return specific.price_per_kyat;
+    if (isThaiGoldClass(purity)) {
+      const thaiRow = goldPrices.find((p) => p.gold_type === 'THAI_GOLD');
+      if (thaiRow && thaiRow.price_per_kyat > 0) return thaiRow.price_per_kyat;
+      const meelin = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+      return Math.round(meelin * (PURITY_MULTIPLIERS.THAI_GOLD || 0.965));
+    }
     const meelin = goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
-    if (purity === 'THAI_GOLD') return Math.round(meelin * (PURITY_MULTIPLIERS.THAI_GOLD || 0.965));
     const derived = derivePriceFromMeelin(meelin, purity);
     return derived > 0 ? derived : meelin;
   };
@@ -488,9 +493,17 @@ export const GoldShopProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (specific?.buy_price_per_kyat && specific.buy_price_per_kyat > 0) {
       return specific.buy_price_per_kyat;
     }
+    if (isThaiGoldClass(purity)) {
+      const thaiRow = goldPrices.find((p) => p.gold_type === 'THAI_GOLD');
+      if (thaiRow?.buy_price_per_kyat && thaiRow.buy_price_per_kyat > 0) {
+        return thaiRow.buy_price_per_kyat;
+      }
+      const meelinBuy =
+        goldPrices.find((p) => p.gold_type === 'MEELIN')?.buy_price_per_kyat || 5700000;
+      return Math.round(meelinBuy * (PURITY_MULTIPLIERS.THAI_GOLD || 0.965));
+    }
     const meelinBuy =
       goldPrices.find((p) => p.gold_type === 'MEELIN')?.buy_price_per_kyat || 5700000;
-    if (purity === 'THAI_GOLD') return Math.round(meelinBuy * (PURITY_MULTIPLIERS.THAI_GOLD || 0.965));
     const derived = derivePriceFromMeelin(meelinBuy, purity);
     return derived > 0 ? derived : meelinBuy;
   };

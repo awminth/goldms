@@ -537,7 +537,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const displayEstimatedValue = (item: InventoryItem): number => {
     const isThai = isThaiGoldClass(item.purity, item.item_type);
-    if (isThai) return item.selling_price_estimated;
+    if (isThai) {
+      const grams = Number(item.thai_weight_unit || 0);
+      if (grams > 0) {
+        const craftBahtStored =
+          Number(item.craftsmanship_fee_baht || 0) +
+          Number(item.craftsmanship_profit_fee_baht || 0);
+        const craftMmkStored =
+          Number(item.craftsmanship_fee || 0) + Number(item.craftsmanship_profit_fee || 0);
+        const itemRate = Number(item.baht_mmk_rate) > 0 ? Number(item.baht_mmk_rate) : sellRate;
+        const craftBaht =
+          craftBahtStored > 0 || craftMmkStored === 0
+            ? craftBahtStored
+            : mmkToBahtFromSell(craftMmkStored, itemRate);
+        const calc = calculateThaiGoldPrice(grams, thaiBahtRate, craftBaht);
+        return Math.round(bahtToMmk(calc.totalPrice, sellRate));
+      }
+      return item.selling_price_estimated;
+    }
     return myanmarItemEstimatedValue(item);
   };
 

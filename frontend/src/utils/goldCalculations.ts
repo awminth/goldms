@@ -46,7 +46,7 @@ export const PURITY_MULTIPLIERS: Record<GoldPurity, number> = {
   THAI_GOLD: 0.965,
 };
 
-export const PURITY_LABELS: Record<GoldPurity, { mm: string; en: string; code: string }> = {
+export const PURITY_LABELS: Record<string, { mm: string; en: string; code: string }> = {
   MEELIN: { mm: 'မီးလင်း', en: 'Meelin', code: 'MEELIN' },
   K24: { mm: '24K', en: '24K', code: 'K24' },
   PE15A: { mm: '15A', en: '15A', code: '15A' },
@@ -56,7 +56,15 @@ export const PURITY_LABELS: Record<GoldPurity, { mm: string; en: string; code: s
   PE12A: { mm: '12A', en: '12A', code: '12A' },
   K18: { mm: '18K', en: '18K', code: '18K' },
   THAI_GOLD: { mm: 'ထိုင်းရွှေ', en: 'Thai Gold', code: 'THAI' },
+  TH: { mm: 'TH', en: 'TH', code: 'TH' },
+  TH_SECOND: { mm: 'ထိုင်းရွှေ Second', en: 'Thai Gold Second', code: 'TH_SECOND' },
 };
+
+export function isThaiPurityCode(purity?: string, itemType?: string): boolean {
+  if (itemType === 'THAI_GOLD') return true;
+  const p = String(purity || '').trim().toUpperCase();
+  return p === 'THAI_GOLD' || p === 'TH' || p === 'TH_SECOND' || p.startsWith('THAI') || p.startsWith('TH_');
+}
 
 export function derivePriceFromMeelin(meelinPrice: number, purity: GoldPurity | string): number {
   const factor = MEELIN_PRICE_FACTOR[purity as GoldPurity];
@@ -182,7 +190,7 @@ export function calculateSaleLineBreakdown(params: {
 } {
   const craft = Number(params.craftsmanshipFee || 0);
   const stone = Math.max(0, Number(params.stonePrice || 0));
-  if (params.itemType === 'THAI_GOLD' || params.purity === 'THAI_GOLD') {
+  if (isThaiPurityCode(params.purity, params.itemType)) {
     const unit = Number(params.thaiWeightUnit || 0);
     if (unit > 0) {
       const thai = calculateThaiGoldPrice(

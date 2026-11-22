@@ -29,6 +29,7 @@ import {
   resolveBahtMmkRate,
   calculateThaiGoldPrice,
   normalizeBarcode,
+  isThaiPurityCode,
 } from '../utils/goldCalculations';
 import {
   ReceiptText,
@@ -86,7 +87,7 @@ function thaiFxRates(shopSettings?: {
   };
 }
 
-/** Thai sale line from inventory frozen Baht/MMK (not live FX). */
+/** Thai sale line calculated from live daily Thai Gold Baht rate & FX rate (with fallback to stored price if weight unit is missing). */
 function buildThaiSaleLine(
   inv: Pick<
     InventoryItem,
@@ -110,29 +111,45 @@ function buildThaiSaleLine(
     baht_to_mmk_sell?: number;
   }
 ): ThaiLineAmounts {
-  const { bahtMmkRate } = thaiFxRates(shopSettings);
+  const { thaiBahtRate, bahtMmkRate } = thaiFxRates(shopSettings);
   const itemRate =
     Number(inv.baht_mmk_rate) > 0 ? Number(inv.baht_mmk_rate) : bahtMmkRate;
 
-  const craftMmk =
+  const craftMmkStored =
     Number(inv.craftsmanship_fee || 0) + Number(inv.craftsmanship_profit_fee || 0);
   const craftBahtStored =
     Number(inv.craftsmanship_fee_baht || 0) +
     Number(inv.craftsmanship_profit_fee_baht || 0);
   const craftBaht =
-    craftBahtStored > 0 ? craftBahtStored : mmkToBaht(craftMmk, itemRate);
+    craftBahtStored > 0 || craftMmkStored === 0
+      ? craftBahtStored
+      : mmkToBaht(craftMmkStored, itemRate);
+  const craftMmk = Math.round(bahtToMmk(craftBaht, bahtMmkRate));
 
-  const sellMmk = Number(inv.selling_price_estimated || 0);
-  const sellBahtStored = Number(inv.selling_price_baht || 0);
-  const sellBaht =
-    sellBahtStored > 0 ? sellBahtStored : mmkToBaht(sellMmk, itemRate);
+  const grams = Number(inv.thai_weight_unit || 0);
+  let goldBaht: number;
+  let sellBaht: number;
+  let goldMmk: number;
+  let sellMmk: number;
 
-  const goldMmk = Math.max(0, sellMmk - craftMmk);
-  const goldBaht = Math.max(0, sellBaht - craftBaht);
-  const thaiSnap =
-    Number(inv.thai_gold_baht_snapshot) > 0
-      ? Number(inv.thai_gold_baht_snapshot)
-      : shopSettings?.thai_gold_baht || 65000;
+  if (grams > 0) {
+    const calc = calculateThaiGoldPrice(grams, thaiBahtRate, craftBaht);
+    goldBaht = calc.baseGoldPrice;
+    sellBaht = calc.totalPrice;
+    sellMmk = Math.round(bahtToMmk(sellBaht, bahtMmkRate));
+    goldMmk = Math.max(0, sellMmk - craftMmk);
+  } else {
+    const sellMmkStored = Number(inv.selling_price_estimated || 0);
+    const sellBahtStored = Number(inv.selling_price_baht || 0);
+    sellBaht =
+      sellBahtStored > 0 ? sellBahtStored : mmkToBaht(sellMmkStored, itemRate);
+    sellMmk =
+      sellBaht > 0 ? Math.round(bahtToMmk(sellBaht, bahtMmkRate)) : sellMmkStored;
+    goldBaht = Math.max(0, sellBaht - craftBaht);
+    goldMmk = Math.max(0, sellMmk - craftMmk);
+  }
+
+  const thaiSnap = thaiBahtRate;
 
   if (currency === 'BAHT') {
     return {
@@ -151,7 +168,7 @@ function buildThaiSaleLine(
     stone_price: 0,
     wastage_amount: 0,
     subtotal: Math.max(0, Math.round(sellMmk)),
-    gold_price_snapshot: Math.round(bahtToMmk(thaiSnap, itemRate)),
+    gold_price_snapshot: Math.round(bahtToMmk(thaiSnap, bahtMmkRate)),
   };
 }
 
@@ -224,10 +241,24 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     setSelectedVoucher,
     getLivePriceForPurity,
     getBuyPriceForPurity,
+    isThaiGoldClass,
     shopSettings,
     masterCategories,
     refreshData,
   } = useGoldShop();
+
+  const getPurityLabel = (code?: string) => {
+    if (!code) return '';
+    const found = masterCategories.find(
+      (c) => c.category_group === 'GOLD_CLASS' && c.code === code
+    );
+    if (found) {
+      return language === 'MM' ? found.name_mm : found.name_en || found.name_mm;
+    }
+    const fallback = PURITY_LABELS[code];
+    if (fallback) return language === 'MM' ? fallback.mm : fallback.en;
+    return code;
+  };
   const dialog = useDialog();
 
   const kyatToGrams = shopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
@@ -303,7 +334,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
   );
 
   const isThaiItem = (i: { item_type?: string; purity?: string }) =>
-    i.item_type === 'THAI_GOLD' || i.purity === 'THAI_GOLD';
+    isThaiGoldClass(i.purity, i.item_type);
 
   const filteredStock = useMemo(() => {
     const raw = inventorySearch.trim();
@@ -956,7 +987,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
     () => Number(shopSettings?.thai_gold_baht || 65000)
   );
 
-  const isPurThai = purPurity === 'THAI_GOLD';
+  const isPurThai = isThaiGoldClass(purPurity);
   const fxRate = resolveBahtMmkRate(shopSettings);
   const purMarketRateMmk = getBuyPriceForPurity(purPurity);
   const purThaiMarketBaht = Number(shopSettings?.thai_gold_baht || 65000);
@@ -992,7 +1023,7 @@ export const PosView: React.FC<Props> = ({ mode }) => {
       : Number(mmkToBaht(Number(purManualAmount) || 0, fxRate).toFixed(2));
 
   useEffect(() => {
-    if (purPurity === 'THAI_GOLD') {
+    if (isThaiGoldClass(purPurity)) {
       setPurBuyPriceBahtInput(Number(shopSettings?.thai_gold_baht || 65000));
     } else {
       setPurBuyPriceInput(getBuyPriceForPurity(purPurity));
@@ -1922,10 +1953,10 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                                         ? 'ထိုင်းရွှေ'
                                         : 'Thai Gold'
                                       : item.category}{' '}
-                                    · {PURITY_LABELS[item.purity]?.mm || item.purity}
+                                    · {getPurityLabel(item.purity)}
                                   </div>
                                   <div className="font-mono font-semibold text-gray-700 dark:text-gray-300">
-                                    {item.item_type === 'THAI_GOLD' && item.thai_weight_unit
+                                    {isThaiItem(item) && item.thai_weight_unit
                                       ? `${item.thai_weight_unit} g`
                                       : formatKPYMyanmar({
                                           kyat: item.net_weight_kyat,
@@ -1986,8 +2017,8 @@ export const PosView: React.FC<Props> = ({ mode }) => {
                                         ? 'ထိုင်းရွှေ'
                                         : 'Thai Gold'
                                       : item.category}{' '}
-                                    · {PURITY_LABELS[item.purity]?.mm || item.purity} ·{' '}
-                                    {item.item_type === 'THAI_GOLD' && item.thai_weight_unit
+                                    · {getPurityLabel(item.purity)} ·{' '}
+                                    {isThaiItem(item) && item.thai_weight_unit
                                       ? `${item.thai_weight_unit} g`
                                       : formatKPYMyanmar({
                                           kyat: item.net_weight_kyat,

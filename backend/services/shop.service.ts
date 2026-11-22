@@ -18,6 +18,7 @@ import {
   kpyToGrams,
   gramsToKpy,
   KYAT_TO_GRAMS,
+  isThaiPurityCode,
   type WeightKPY,
 } from '../utils/goldCalculations.js';
 
@@ -683,6 +684,7 @@ export const shopService = {
       }
     }
     await upsert('thai_gold_baht', data.thai_gold_baht);
+    await this.revalueInStockInventory();
     return this.getShopSettings();
   },
 
@@ -1208,8 +1210,13 @@ export const shopService = {
   getLivePriceForPurity(prices: ReturnType<typeof mapPrice>[], purity: string): number {
     const specific = prices.find((p) => p.gold_type === purity);
     if (specific && specific.price_per_kyat > 0) return specific.price_per_kyat;
+    if (isThaiPurityCode(purity)) {
+      const thaiRow = prices.find((p) => p.gold_type === 'THAI_GOLD');
+      if (thaiRow && thaiRow.price_per_kyat > 0) return thaiRow.price_per_kyat;
+      const meelin = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+      return Math.round(meelin * 0.965);
+    }
     const meelin = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
-    if (purity === 'THAI_GOLD') return Math.round(meelin * 0.965);
     const derived = derivePriceFromMeelin(meelin, purity);
     return derived > 0 ? derived : meelin;
   },
@@ -1219,9 +1226,17 @@ export const shopService = {
     if (specific?.buy_price_per_kyat && specific.buy_price_per_kyat > 0) {
       return specific.buy_price_per_kyat;
     }
+    if (isThaiPurityCode(purity)) {
+      const thaiRow = prices.find((p) => p.gold_type === 'THAI_GOLD');
+      if (thaiRow?.buy_price_per_kyat && thaiRow.buy_price_per_kyat > 0) {
+        return thaiRow.buy_price_per_kyat;
+      }
+      const meelinBuy =
+        prices.find((p) => p.gold_type === 'MEELIN')?.buy_price_per_kyat || 5700000;
+      return Math.round(meelinBuy * 0.965);
+    }
     const meelinBuy =
       prices.find((p) => p.gold_type === 'MEELIN')?.buy_price_per_kyat || 5700000;
-    if (purity === 'THAI_GOLD') return Math.round(meelinBuy * 0.965);
     const derived = derivePriceFromMeelin(meelinBuy, purity);
     return derived > 0 ? derived : meelinBuy;
   },
@@ -1238,19 +1253,86 @@ export const shopService = {
     return Date.now().toString().slice(-8);
   },
 
-  /** Recalculate selling_price_estimated for Myanmar IN_STOCK items from live daily prices.
-   * Thai items keep stock-in Baht/MMK freeze — not revalued. */
+  /** Recalculate selling_price_estimated (and Thai selling_price_baht) for all IN_STOCK items from live daily prices & shop settings. */
   async revalueInStockInventory() {
-    const prices = await this.listPrices();
+    const [prices, settings, categories] = await Promise.all([
+      this.listPrices(),
+      this.getShopSettings(),
+      this.listMasterCategories(false),
+    ]);
     const pure16 = prices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
     const thaiRate = this.getLivePriceForPurity(prices, 'THAI_GOLD');
+    const thaiBahtRate = Number(settings.thai_gold_baht) > 0 ? Number(settings.thai_gold_baht) : 65000;
+    const bahtMmkRate = Number(settings.baht_mmk_rate) > 0 ? Number(settings.baht_mmk_rate) : 100000 / 765;
+
+    const isThaiRow = (purity?: string, itemType?: string): boolean => {
+      if (itemType === 'THAI_GOLD') return true;
+      const code = String(purity || '').trim();
+      if (!code) return false;
+      const cls = categories.find((c) => c.category_group === 'GOLD_CLASS' && c.code === code);
+      if (cls?.gold_origin) {
+        if (cls.gold_origin === 'THAI_GOLD' || cls.gold_origin === 'ORIGIN_THAI') return true;
+        if (cls.gold_origin === 'MYANMAR_GOLD' || cls.gold_origin === 'ORIGIN_MYANMAR') return false;
+        const originRow = categories.find(
+          (c) =>
+            c.category_group === 'GOLD_ORIGIN' &&
+            (c.code === cls.gold_origin || c.gold_origin === cls.gold_origin)
+        );
+        if (originRow) return originRow.gold_origin === 'THAI_GOLD';
+      }
+      return isThaiPurityCode(code, itemType);
+    };
+
     const [rows] = await getPool().query<RowDataPacket[]>(
-      `SELECT * FROM inventory_items
-       WHERE status = 'IN_STOCK'
-         AND item_type <> 'THAI_GOLD'
-         AND purity <> 'THAI_GOLD'`
+      `SELECT * FROM inventory_items WHERE status = 'IN_STOCK'`
     );
     for (const row of rows) {
+      if (isThaiRow(row.purity, row.item_type)) {
+        const grams = num(row.thai_weight_unit);
+        if (grams > 0) {
+          const itemRate = num(row.baht_mmk_rate) > 0 ? num(row.baht_mmk_rate) : bahtMmkRate;
+          const craftFeeBaht =
+            num(row.craftsmanship_fee_baht) > 0 || num(row.craftsmanship_fee) === 0
+              ? num(row.craftsmanship_fee_baht)
+              : Number((num(row.craftsmanship_fee) / itemRate).toFixed(2));
+          const craftProfitBaht =
+            num(row.craftsmanship_profit_fee_baht) > 0 || num(row.craftsmanship_profit_fee) === 0
+              ? num(row.craftsmanship_profit_fee_baht)
+              : Number((num(row.craftsmanship_profit_fee) / itemRate).toFixed(2));
+          const craftTotalBaht = craftFeeBaht + craftProfitBaht;
+          const thaiCalc = calculateThaiGoldPrice(grams, thaiBahtRate, craftTotalBaht);
+          const sellBaht = thaiCalc.totalPrice;
+          const craftFeeMmk = Math.round(craftFeeBaht * bahtMmkRate);
+          const craftProfitMmk = Math.round(craftProfitBaht * bahtMmkRate);
+          const sellMmk = Math.round(sellBaht * bahtMmkRate);
+
+          await getPool().query(
+            `UPDATE inventory_items
+             SET selling_price_baht = :sellBaht,
+                 selling_price_estimated = :sellMmk,
+                 craftsmanship_fee_baht = :craftFeeBaht,
+                 craftsmanship_profit_fee_baht = :craftProfitBaht,
+                 craftsmanship_fee = :craftFeeMmk,
+                 craftsmanship_profit_fee = :craftProfitMmk,
+                 baht_mmk_rate = :bahtMmkRate,
+                 thai_gold_baht_snapshot = :thaiBahtRate
+             WHERE id = :id`,
+            {
+              sellBaht,
+              sellMmk,
+              craftFeeBaht,
+              craftProfitBaht,
+              craftFeeMmk,
+              craftProfitMmk,
+              bahtMmkRate,
+              thaiBahtRate,
+              id: row.id,
+            }
+          );
+        }
+        continue;
+      }
+
       const net: WeightKPY = {
         kyat: num(row.net_weight_kyat),
         pae: num(row.net_weight_pae),
@@ -1425,7 +1507,7 @@ export const shopService = {
             thaiRatePerKyat: this.getLivePriceForPurity(prices, 'THAI_GOLD'),
           });
 
-    const isThai = itemType === 'THAI_GOLD' || purity === 'THAI_GOLD';
+    const isThai = isThaiPurityCode(purity, itemType);
     const quantity = isThai
       ? Math.max(1, Math.min(500, Math.floor(num(data.quantity) || 1)))
       : 1;
@@ -5283,7 +5365,7 @@ export const shopService = {
     for (const r of rows) {
       const itemType = String(r.item_type || '');
       const purity = String(r.purity || '');
-      const isThai = itemType === 'THAI_GOLD' || purity === 'THAI_GOLD';
+      const isThai = isThaiPurityCode(purity, itemType);
       const category = String(r.category || 'OTHER') || 'OTHER';
       const amount = num(r.subtotal);
       if (isThai) {

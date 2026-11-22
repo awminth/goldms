@@ -193,6 +193,12 @@ export function calculateThaiGoldPrice(
   };
 }
 
+export function isThaiPurityCode(purity?: string, itemType?: string): boolean {
+  if (itemType === 'THAI_GOLD') return true;
+  const p = String(purity || '').trim().toUpperCase();
+  return p === 'THAI_GOLD' || p === 'TH' || p === 'TH_SECOND' || p.startsWith('THAI') || p.startsWith('TH_');
+}
+
 export function calculateSaleLineBreakdown(params: {
   purity: string;
   itemType?: string;
@@ -212,7 +218,7 @@ export function calculateSaleLineBreakdown(params: {
 } {
   const craft = Number(params.craftsmanshipFee || 0);
   const stone = Math.max(0, Number(params.stonePrice || 0));
-  if (params.itemType === 'THAI_GOLD' || params.purity === 'THAI_GOLD') {
+  if (isThaiPurityCode(params.purity, params.itemType)) {
     const unit = Number(params.thaiWeightUnit || 0);
     if (unit > 0) {
       const thai = calculateThaiGoldPrice(
