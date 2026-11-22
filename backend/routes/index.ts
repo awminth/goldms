@@ -39,6 +39,7 @@ router.get('/inventory', shopController.listInventory);
 router.post('/inventory', shopController.addInventory);
 router.post('/inventory/barcode', shopController.allocateBarcode);
 router.post('/inventory/revalue', shopController.revalueInventory);
+router.post('/inventory/:id/add-qty', shopController.addInventoryQuantity);
 router.put('/inventory/:id', shopController.updateInventory);
 router.delete('/inventory/:id', shopController.deleteInventory);
 

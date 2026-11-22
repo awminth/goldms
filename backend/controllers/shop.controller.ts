@@ -194,6 +194,11 @@ export const shopController = {
     res.json({ success: true, data });
   }),
 
+  addInventoryQuantity: asyncHandler(async (req, res) => {
+    const data = await shopService.addInventoryItemQuantity(req.params.id, req.body?.quantity);
+    res.status(201).json({ success: true, data });
+  }),
+
   deleteInventory: asyncHandler(async (req, res) => {
     await shopService.deleteInventoryItem(req.params.id);
     res.json({ success: true });

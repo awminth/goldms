@@ -119,6 +119,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     transactions,
     goldsmithJobs,
     addInventoryItem,
+    addInventoryQuantity,
     updateInventoryItem,
     deleteInventoryItem,
     goldPrices,
@@ -1141,38 +1142,78 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return matchesCategory && matchesPurity && matchesDate;
   });
 
-  /** Thai identical barcodes collapse to one row with qty; Myanmar stays 1 row = 1 unit */
+  /** Identical barcodes collapse to one row with qty (both Thai & Myanmar restocks) */
   type InventoryListRow = InventoryItem & { listQty: number };
   const inventoryListRows = useMemo((): InventoryListRow[] => {
-    const myanmar: InventoryListRow[] = [];
+    const myanmarByBarcode = new Map<string, InventoryItem[]>();
     const thaiByBarcode = new Map<string, InventoryItem[]>();
 
     for (const item of filteredItems) {
       const isThai = isThaiGoldClass(item.purity, item.item_type);
-      if (!isThai) {
-        myanmar.push({ ...item, listQty: 1 });
-        continue;
-      }
       const key = String(item.barcode || '').trim().toLowerCase() || `id:${item.id}`;
-      const list = thaiByBarcode.get(key) || [];
+      const targetMap = isThai ? thaiByBarcode : myanmarByBarcode;
+      const list = targetMap.get(key) || [];
       list.push(item);
-      thaiByBarcode.set(key, list);
+      targetMap.set(key, list);
     }
 
-    const thaiRows: InventoryListRow[] = [];
-    for (const units of thaiByBarcode.values()) {
-      const inStock = units.filter((u) => u.status === 'IN_STOCK');
-      if (inStock.length === 0) continue;
-      const sample = inStock[0];
-      thaiRows.push({
-        ...sample,
-        listQty: inStock.length,
-        status: 'IN_STOCK',
+    const buildRows = (map: Map<string, InventoryItem[]>): InventoryListRow[] => {
+      const rows: InventoryListRow[] = [];
+      for (const units of map.values()) {
+        const inStock = units.filter((u) => u.status === 'IN_STOCK');
+        if (inStock.length === 0) continue;
+        const sample = inStock[0];
+        rows.push({
+          ...sample,
+          listQty: inStock.length,
+          status: 'IN_STOCK',
+        });
+      }
+      return rows;
+    };
+
+    return [...buildRows(thaiByBarcode), ...buildRows(myanmarByBarcode)];
+  }, [filteredItems, isThaiGoldClass]);
+
+  const [addQtyItem, setAddQtyItem] = useState<InventoryListRow | null>(null);
+  const [addQtyCount, setAddQtyCount] = useState<number>(1);
+  const [addingQty, setAddingQty] = useState<boolean>(false);
+
+  const openAddQtyModal = (item: InventoryListRow) => {
+    setAddQtyItem(item);
+    setAddQtyCount(1);
+  };
+
+  const handleConfirmAddQty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addQtyItem) return;
+    const qty = Math.max(1, Math.min(500, Math.floor(Number(addQtyCount) || 0)));
+    if (!(qty > 0)) return;
+    setAddingQty(true);
+    try {
+      await addInventoryQuantity(addQtyItem.id, qty);
+      const targetName = addQtyItem.name_mm || addQtyItem.name;
+      const prevQty = addQtyItem.listQty;
+      setAddQtyItem(null);
+      setAddQtyCount(1);
+      await dialog.alert({
+        title: language === 'MM' ? 'အောင်မြင်ပါသည်' : 'Success',
+        message:
+          language === 'MM'
+            ? `"${targetName}" အတွက် အရေအတွက် +${qty} ခု ထပ်တိုးပြီးပါပြီ (စုစုပေါင်း ${prevQty + qty} ခု)`
+            : `Added +${qty} units to "${targetName}" (Total: ${prevQty + qty})`,
+        variant: 'success',
       });
+    } catch (err) {
+      await dialog.alert({
+        title: language === 'MM' ? 'မအောင်မြင်ပါ' : 'Failed',
+        message: err instanceof Error ? err.message : 'Failed to add quantity',
+        variant: 'error',
+      });
+    } finally {
+      setAddingQty(false);
     }
-
-    return [...thaiRows, ...myanmar];
-  }, [filteredItems]);
+  };
 
   const exportInventoryExcel = () => {
     exportToExcel({
@@ -1255,9 +1296,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         accessor: (i) => i.listQty,
         align: 'center',
         cell: (item) => (
-          <span className="font-mono font-extrabold text-[#996515] dark:text-amber-300">
-            {item.listQty}
-          </span>
+          <div
+            className="inline-flex items-center justify-center gap-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="font-mono font-extrabold text-[#996515] dark:text-amber-300">
+              {item.listQty}
+            </span>
+            <button
+              type="button"
+              onClick={() => openAddQtyModal(item)}
+              className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition cursor-pointer"
+              title={language === 'MM' ? 'Qty ထပ်တိုးရန်' : 'Add Qty'}
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
         ),
       },
       {
@@ -1501,6 +1555,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <div className="flex items-center justify-center space-x-1" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
+              onClick={() => openAddQtyModal(item)}
+              className="px-1.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 text-[10px] font-bold inline-flex items-center gap-0.5 transition cursor-pointer"
+              title={language === 'MM' ? 'အရေအတွက် (Qty) ထပ်တိုးမည်' : 'Add Quantity'}
+            >
+              <Plus className="w-3 h-3" />
+              <span>Qty</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setTagItem(item)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-[#D4AF37]"
               title="Print Barcode Tag"
@@ -1519,12 +1582,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               type="button"
               onClick={() => {
                 void (async () => {
-                  const isThai =
-                    item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
                   const ok = await dialog.confirm({
                     title: language === 'MM' ? 'ပစ္စည်း ဖျက်မည်' : 'Delete item',
                     message:
-                      isThai && item.listQty > 1
+                      item.listQty > 1
                         ? language === 'MM'
                           ? `"${item.name_mm || item.name}" (${item.listQty} ခုအနက် ၁ ခု) ကို ဖျက်မလား?`
                           : `Delete 1 of ${item.listQty} units for "${item.name_mm || item.name}"?`
@@ -2504,6 +2565,177 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             </form>
 
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Quick Add Quantity (+Qty) Modal */}
+      {addQtyItem && (
+        <ModalOverlay onClose={() => !addingQty && setAddQtyItem(null)}>
+          <div className="bg-white dark:bg-[#1A1A1A] rounded-2xl max-w-md w-full p-5 shadow-2xl border border-gray-200 dark:border-gray-800">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800">
+              <h3 className="font-bold text-gray-900 dark:text-white text-sm flex items-center gap-2">
+                <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>
+                  {language === 'MM'
+                    ? 'ရှိပြီးသားပစ္စည်း အရေအတွက် (Qty) ထပ်တိုးရန်'
+                    : 'Add Quantity to Existing Item'}
+                </span>
+              </h3>
+              <button
+                type="button"
+                disabled={addingQty}
+                onClick={() => setAddQtyItem(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmAddQty} className="mt-4 space-y-4 text-xs">
+              {/* Item Read-Only Summary */}
+              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-[#141414] border border-gray-200 dark:border-gray-800 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                    {addQtyItem.name_mm || addQtyItem.name}
+                  </span>
+                  <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 shrink-0">
+                    {addQtyItem.barcode}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-600 dark:text-gray-400">
+                  <span>
+                    {getGoldOriginForPurity(addQtyItem.purity, addQtyItem.item_type).label} ·{' '}
+                    <strong className="text-gray-800 dark:text-gray-200">
+                      {getPurityDisplay(addQtyItem.purity)}
+                    </strong>
+                  </span>
+                  <span className="font-mono font-bold text-gray-800 dark:text-gray-200">
+                    {isThaiGoldClass(addQtyItem.purity, addQtyItem.item_type) &&
+                    addQtyItem.thai_weight_unit
+                      ? `${Number(addQtyItem.thai_weight_unit).toFixed(2)} g`
+                      : `${kpyToGrams(
+                          {
+                            kyat: addQtyItem.net_weight_kyat,
+                            pae: addQtyItem.net_weight_pae,
+                            yway: addQtyItem.net_weight_yway,
+                          },
+                          kyatToGrams
+                        ).toFixed(3)} g (${formatKPYMyanmar({
+                          kyat: addQtyItem.net_weight_kyat,
+                          pae: addQtyItem.net_weight_pae,
+                          yway: addQtyItem.net_weight_yway,
+                        })})`}
+                  </span>
+                </div>
+                <div className="pt-1.5 border-t border-gray-200/70 dark:border-gray-800 flex items-center justify-between text-[11px]">
+                  <span className="text-gray-500">
+                    {language === 'MM' ? 'လက်ရှိ ဆိုင်ရှိအရေအတွက်:' : 'Current In-Stock Qty:'}
+                  </span>
+                  <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400">
+                    {addQtyItem.listQty} {language === 'MM' ? 'ခု' : 'pcs'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Quantity Input & Quick Buttons */}
+              <div className="space-y-2">
+                <label className="block font-bold text-gray-700 dark:text-gray-300">
+                  {language === 'MM' ? 'ထပ်တိုးမည့် အရေအတွက် (Add Qty) *' : 'Quantity to Add *'}
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddQtyCount((c) => Math.max(1, (Number(c) || 1) - 1))}
+                    className="w-10 h-10 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-base text-gray-700 dark:text-gray-200 cursor-pointer"
+                  >
+                    −
+                  </button>
+                  <NumberInput
+                    min={1}
+                    max={500}
+                    step={1}
+                    value={addQtyCount}
+                    onChange={(v) =>
+                      setAddQtyCount(Math.max(1, Math.min(500, Math.floor(Number(v) || 1))))
+                    }
+                    className="flex-1 h-10 px-3 text-center font-mono text-sm font-extrabold rounded-xl border border-emerald-400 dark:border-emerald-700 bg-white dark:bg-[#121212] text-gray-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAddQtyCount((c) => Math.min(500, (Number(c) || 1) + 1))}
+                    className="w-10 h-10 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-base text-gray-700 dark:text-gray-200 cursor-pointer"
+                  >
+                    +
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[1, 2, 3, 5, 10, 20].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAddQtyCount(preset)}
+                      className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold border transition cursor-pointer ${
+                        addQtyCount === preset
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-gray-50 dark:bg-[#121212] border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-emerald-400'
+                      }`}
+                    >
+                      +{preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Resulting Total Preview */}
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-1">
+                <div className="flex items-center justify-between font-bold text-emerald-900 dark:text-emerald-200">
+                  <span>
+                    {language === 'MM'
+                      ? 'ထပ်တိုးပြီး စုစုပေါင်း ဆိုင်ရှိအရေအတွက်:'
+                      : 'New Total In-Stock Qty:'}
+                  </span>
+                  <span className="font-mono text-sm font-extrabold text-emerald-700 dark:text-emerald-300">
+                    {addQtyItem.listQty} + {addQtyCount} = {addQtyItem.listQty + addQtyCount}{' '}
+                    {language === 'MM' ? 'ခု' : 'pcs'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80">
+                  {language === 'MM'
+                    ? '✓ ထပ်တိုးလိုက်သော အရေအတွက်သည် ယနေ့အဝင်စာရင်း (အထည်စတော့စာရင်းချုပ် နှင့် နေ့စဉ်လက်ကျန်စာရင်း) များတွင် အလိုအလျောက် အကျုံးဝင်ပါမည်။'
+                    : '✓ Added units are recorded as today’s stock inflow in Stock Summary & Daily Stock Ledger.'}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-800">
+                <button
+                  type="button"
+                  disabled={addingQty}
+                  onClick={() => setAddQtyItem(null)}
+                  className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-xs transition cursor-pointer"
+                >
+                  {language === 'MM' ? 'မလုပ်ပါ' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingQty}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>
+                    {addingQty
+                      ? language === 'MM'
+                        ? 'ထပ်တိုးနေသည်...'
+                        : 'Adding...'
+                      : language === 'MM'
+                        ? `+${addQtyCount} ခု ထပ်တိုးသိမ်းမည်`
+                        : `Add +${addQtyCount} Qty`}
+                  </span>
+                </button>
+              </div>
+            </form>
           </div>
         </ModalOverlay>
       )}

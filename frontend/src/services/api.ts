@@ -208,6 +208,12 @@ export const api = {
       body: JSON.stringify(updates),
     }),
 
+  addInventoryItemQuantity: (id: string, quantity: number) =>
+    request<InventoryItem[]>(`/inventory/${id}/add-qty`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity }),
+    }),
+
   deleteInventoryItem: (id: string) =>
     request<void>(`/inventory/${id}`, { method: 'DELETE' }),
 

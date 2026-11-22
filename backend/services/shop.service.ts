@@ -1643,6 +1643,95 @@ export const shopService = {
     return mapInventory(rows[0]);
   },
 
+  async addInventoryItemQuantity(id: string, quantityRaw: unknown) {
+    const itemId = parseId(id);
+    const quantity = Math.max(1, Math.min(500, Math.floor(num(quantityRaw) || 0)));
+    if (!(quantity > 0)) {
+      throw new HttpError(400, 'Quantity must be at least 1');
+    }
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT * FROM inventory_items WHERE id = :id LIMIT 1`,
+      { id: itemId }
+    );
+    const src = rows[0];
+    if (!src) throw new HttpError(404, 'Inventory item not found');
+
+    const insertSql = `INSERT INTO inventory_items (
+        barcode, category, name, name_mm,
+        weight_kyat, weight_pae, weight_yway,
+        gemstone_weight_kyat, gemstone_weight_pae, gemstone_weight_yway,
+        craft_deduction_pae, craft_deduction_yway,
+        profit_deduction_pae, profit_deduction_yway,
+        deduction_pae, deduction_yway,
+        net_weight_kyat, net_weight_pae, net_weight_yway,
+        purity, item_type, thai_weight_unit, craftsmanship_fee, craftsmanship_profit_fee, stone_price, stone_profit_price, selling_price_estimated,
+        craftsmanship_fee_baht, craftsmanship_profit_fee_baht, selling_price_baht, baht_mmk_rate, thai_gold_baht_snapshot,
+        status, image_url
+      ) VALUES (
+        :barcode, :category, :name, :name_mm,
+        :weight_kyat, :weight_pae, :weight_yway,
+        :gemstone_weight_kyat, :gemstone_weight_pae, :gemstone_weight_yway,
+        :craft_deduction_pae, :craft_deduction_yway,
+        :profit_deduction_pae, :profit_deduction_yway,
+        :deduction_pae, :deduction_yway,
+        :net_weight_kyat, :net_weight_pae, :net_weight_yway,
+        :purity, :item_type, :thai_weight_unit, :craftsmanship_fee, :craftsmanship_profit_fee, :stone_price, :stone_profit_price, :selling_price_estimated,
+        :craftsmanship_fee_baht, :craftsmanship_profit_fee_baht, :selling_price_baht, :baht_mmk_rate, :thai_gold_baht_snapshot,
+        'IN_STOCK', :image_url
+      )`;
+
+    const insertParams = {
+      barcode: src.barcode,
+      category: src.category,
+      name: src.name,
+      name_mm: src.name_mm,
+      weight_kyat: num(src.weight_kyat),
+      weight_pae: num(src.weight_pae),
+      weight_yway: num(src.weight_yway),
+      gemstone_weight_kyat: num(src.gemstone_weight_kyat),
+      gemstone_weight_pae: num(src.gemstone_weight_pae),
+      gemstone_weight_yway: num(src.gemstone_weight_yway),
+      craft_deduction_pae: num(src.craft_deduction_pae),
+      craft_deduction_yway: num(src.craft_deduction_yway),
+      profit_deduction_pae: num(src.profit_deduction_pae),
+      profit_deduction_yway: num(src.profit_deduction_yway),
+      deduction_pae: num(src.deduction_pae),
+      deduction_yway: num(src.deduction_yway),
+      net_weight_kyat: num(src.net_weight_kyat),
+      net_weight_pae: num(src.net_weight_pae),
+      net_weight_yway: num(src.net_weight_yway),
+      purity: src.purity,
+      item_type: src.item_type,
+      thai_weight_unit: src.thai_weight_unit != null ? num(src.thai_weight_unit) : null,
+      craftsmanship_fee: num(src.craftsmanship_fee),
+      craftsmanship_profit_fee: num(src.craftsmanship_profit_fee),
+      stone_price: num(src.stone_price),
+      stone_profit_price: num(src.stone_profit_price),
+      selling_price_estimated: num(src.selling_price_estimated),
+      craftsmanship_fee_baht: num(src.craftsmanship_fee_baht),
+      craftsmanship_profit_fee_baht: num(src.craftsmanship_profit_fee_baht),
+      selling_price_baht: num(src.selling_price_baht),
+      baht_mmk_rate: src.baht_mmk_rate != null ? num(src.baht_mmk_rate) : null,
+      thai_gold_baht_snapshot:
+        src.thai_gold_baht_snapshot != null ? num(src.thai_gold_baht_snapshot) : null,
+      image_url: src.image_url ?? null,
+    };
+
+    const createdIds: number[] = [];
+    for (let i = 0; i < quantity; i++) {
+      const [res] = await getPool().query<ResultSetHeader>(insertSql, insertParams as any);
+      createdIds.push(res.insertId);
+    }
+
+    await this.revalueInStockInventory();
+
+    const [newRows] = await getPool().query<RowDataPacket[]>(
+      `SELECT * FROM inventory_items WHERE id IN (${createdIds.map(() => '?').join(',')})`,
+      createdIds
+    );
+    return newRows.map(mapInventory);
+  },
+
   async deleteInventoryItem(id: string) {
     const [result] = await getPool().query<ResultSetHeader>(
       `DELETE FROM inventory_items WHERE id = :id`,
