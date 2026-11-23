@@ -67,6 +67,7 @@ type MasterCategory = {
   name_mm: string;
   name_en: string;
   category_group?: string;
+  gold_origin?: string;
   is_active?: boolean;
 };
 

@@ -7,12 +7,14 @@ type ModalOverlayProps = {
   className?: string;
   /** Called when backdrop itself is clicked (not inner panel) */
   onBackdropClick?: () => void;
+  /** Alias for onBackdropClick */
+  onClose?: () => void;
 };
 
 /**
  * App-wide modal backdrop — always locks page scroll while mounted.
  */
-export function ModalOverlay({ children, className = '', onBackdropClick }: ModalOverlayProps) {
+export function ModalOverlay({ children, className = '', onBackdropClick, onClose }: ModalOverlayProps) {
   useBodyScrollLock(true);
 
   return (
@@ -23,7 +25,10 @@ export function ModalOverlay({ children, className = '', onBackdropClick }: Moda
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onBackdropClick?.();
+        if (e.target === e.currentTarget) {
+          onBackdropClick?.();
+          onClose?.();
+        }
       }}
     >
       {children}

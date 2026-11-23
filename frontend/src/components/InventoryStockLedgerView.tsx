@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { CalendarDays, RotateCcw, BookOpen, Gem, Layers } from 'lucide-react';
+import { CalendarDays, RotateCcw, BookOpen, Gem, Layers, Filter } from 'lucide-react';
 import { useGoldShop } from '../context/GoldShopContext';
 import { InventoryItem } from '../types/gold';
 import { formatDate, todayISO } from '../utils/dateFormat';
@@ -7,6 +7,7 @@ import {
   kpyToGrams,
   KYAT_TO_GRAMS,
   PURITY_LABELS,
+  THAI_GRAM_PRESETS,
 } from '../utils/goldCalculations';
 import { DateInput } from './DateInput';
 import { ExcelExportButton } from './ExcelExportButton';
@@ -120,29 +121,36 @@ export const InventoryStockLedgerView: React.FC = () => {
   const [goldTab, setGoldTab] = useState<GoldKindTab>('MYANMAR');
   const [from, setFrom] = useState<string>(() => defaultFromDate);
   const [to, setTo] = useState<string>(() => lastDate);
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [selectedPurity, setSelectedPurity] = useState<string>('ALL');
+  const [selectedGram, setSelectedGram] = useState<string>('ALL');
 
   const productCategoryMeta = useMemo(() => {
     const map = new Map<
       string,
       { code: string; mm: string; en: string; sort: number }
     >();
-
-    Object.entries(FALLBACK_PRODUCT_CATEGORIES).forEach(([code, info]) => {
-      map.set(code, { code, mm: info.mm, en: info.en, sort: info.sort });
-    });
+    const seenMm = new Set<string>();
 
     masterCategories
       .filter((c) => c.category_group === 'PRODUCT')
       .forEach((c, idx) => {
         const code = String(c.code || '').trim().toUpperCase();
         if (!code) return;
+        const mm = (c.name_mm || code).trim();
+        seenMm.add(mm.toUpperCase());
         map.set(code, {
           code,
-          mm: c.name_mm || code,
+          mm,
           en: c.name_en || c.name_mm || code,
           sort: Number(c.sort_order ?? (idx + 1) * 10),
         });
       });
+
+    Object.entries(FALLBACK_PRODUCT_CATEGORIES).forEach(([code, info]) => {
+      if (map.has(code) || seenMm.has(info.mm.trim().toUpperCase())) return;
+      map.set(code, { code, mm: info.mm, en: info.en, sort: info.sort + 1000 });
+    });
 
     return map;
   }, [masterCategories]);
@@ -313,6 +321,10 @@ export const InventoryStockLedgerView: React.FC = () => {
     subLabelMm: string;
     subLabelEn: string;
     subSort: number;
+    purityCode: string;
+    gramKey: string;
+    gramValue: number;
+    gramLabel: string;
     outByDay: Record<string, number>;
     inByDay: Record<string, number>;
     qtyByDay: Record<string, number>;
@@ -349,6 +361,10 @@ export const InventoryStockLedgerView: React.FC = () => {
             subLabelMm: string;
             subLabelEn: string;
             subSort: number;
+            purityCode: string;
+            gramKey: string;
+            gramValue: number;
+            gramLabel: string;
             units: UnitMeta[];
           }
         >;
@@ -386,6 +402,10 @@ export const InventoryStockLedgerView: React.FC = () => {
       let subLabelMm = '';
       let subLabelEn = '';
       let subSort = 0;
+      let purityCode = '';
+      let gramKey = '';
+      let gramValue = 0;
+      let gramLabel = '';
 
       if (targetTab === 'MYANMAR') {
         const pInfo = resolvePurityInfo(item.purity);
@@ -393,14 +413,20 @@ export const InventoryStockLedgerView: React.FC = () => {
         subLabelMm = pInfo.mm;
         subLabelEn = pInfo.en;
         subSort = pInfo.sort;
+        purityCode = pInfo.code;
       } else {
         const pInfo = resolvePurityInfo(item.purity || 'THAI_GOLD');
         const g = resolveItemGramWeight(item);
-        subKey = `${pInfo.code}:${g.toFixed(3)}`;
+        const gKey = g.toFixed(3);
+        subKey = `${pInfo.code}:${gKey}`;
         const lbl = formatGramLabel(g);
         subLabelMm = `${pInfo.mm} · ${lbl}`;
         subLabelEn = `${pInfo.en} · ${lbl}`;
         subSort = pInfo.sort * 1000 + g;
+        purityCode = pInfo.code;
+        gramKey = gKey;
+        gramValue = g;
+        gramLabel = lbl;
       }
 
       if (!catEntry.subMap.has(subKey)) {
@@ -409,6 +435,10 @@ export const InventoryStockLedgerView: React.FC = () => {
           subLabelMm,
           subLabelEn,
           subSort,
+          purityCode,
+          gramKey,
+          gramValue,
+          gramLabel,
           units: [],
         });
       }
@@ -466,6 +496,10 @@ export const InventoryStockLedgerView: React.FC = () => {
             subLabelMm: sub.subLabelMm,
             subLabelEn: sub.subLabelEn,
             subSort: sub.subSort,
+            purityCode: sub.purityCode,
+            gramKey: sub.gramKey,
+            gramValue: sub.gramValue,
+            gramLabel: sub.gramLabel,
             outByDay,
             inByDay,
             qtyByDay,
@@ -514,7 +548,135 @@ export const InventoryStockLedgerView: React.FC = () => {
     [inventory, outflowByItemId, dateCols, productCategoryMeta, goldClassMeta, kyatToGrams, isThaiGoldClass]
   );
 
-  const activeGroups = goldTab === 'MYANMAR' ? myanmarGroups : thaiGroups;
+  const rawActiveGroups = goldTab === 'MYANMAR' ? myanmarGroups : thaiGroups;
+
+  const categoryDropdownOptions = useMemo(() => {
+    const map = new Map<string, { code: string; mm: string; en: string; sort: number }>();
+    const seenMm = new Set<string>();
+
+    rawActiveGroups.forEach((g) => {
+      const mmKey = g.categoryMm.trim().toUpperCase();
+      seenMm.add(mmKey);
+      map.set(g.categoryCode, {
+        code: g.categoryCode,
+        mm: g.categoryMm,
+        en: g.categoryEn,
+        sort: g.categorySort,
+      });
+    });
+
+    masterCategories
+      .filter((c) => c.category_group === 'PRODUCT')
+      .forEach((c, idx) => {
+        const code = String(c.code || '').trim().toUpperCase();
+        if (!code || code === 'THAI_GOLD') return;
+        const mm = (c.name_mm || code).trim();
+        const mmKey = mm.toUpperCase();
+        if (map.has(code) || seenMm.has(mmKey)) return;
+        seenMm.add(mmKey);
+        map.set(code, {
+          code,
+          mm,
+          en: c.name_en || c.name_mm || code,
+          sort: Number(c.sort_order ?? (idx + 1) * 10),
+        });
+      });
+
+    return Array.from(map.values()).sort(
+      (a, b) => a.sort - b.sort || a.mm.localeCompare(b.mm)
+    );
+  }, [masterCategories, rawActiveGroups]);
+
+  const myanmarPurityDropdownOptions = useMemo(() => {
+    const map = new Map<string, { code: string; mm: string; en: string; sort: number }>();
+    masterCategories
+      .filter((c) => c.category_group === 'GOLD_CLASS')
+      .forEach((c, idx) => {
+        const code = String(c.code || '').trim().toUpperCase();
+        if (!code || isThaiGoldClass(code, c.gold_origin)) return;
+        map.set(code, {
+          code,
+          mm: c.name_mm || code,
+          en: c.name_en || c.name_mm || code,
+          sort: Number(c.sort_order ?? (idx + 1) * 10),
+        });
+      });
+    myanmarGroups.forEach((g) => {
+      g.subRows.forEach((sr) => {
+        if (sr.purityCode && !map.has(sr.purityCode)) {
+          const pInfo = resolvePurityInfo(sr.purityCode);
+          map.set(sr.purityCode, pInfo);
+        }
+      });
+    });
+    return Array.from(map.values()).sort(
+      (a, b) => a.sort - b.sort || a.mm.localeCompare(b.mm)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterCategories, myanmarGroups, isThaiGoldClass, goldClassMeta]);
+
+  const thaiGramDropdownOptions = useMemo(() => {
+    const map = new Map<string, { key: string; grams: number; label: string }>();
+    for (const preset of THAI_GRAM_PRESETS) {
+      const g = Number(preset);
+      const key = g.toFixed(3);
+      map.set(key, { key, grams: g, label: formatGramLabel(g) });
+    }
+    thaiGroups.forEach((g) => {
+      g.subRows.forEach((sr) => {
+        if (sr.gramKey && !map.has(sr.gramKey)) {
+          map.set(sr.gramKey, {
+            key: sr.gramKey,
+            grams: sr.gramValue,
+            label: sr.gramLabel || formatGramLabel(sr.gramValue),
+          });
+        }
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.grams - b.grams);
+  }, [thaiGroups]);
+
+  const activeGroups = useMemo((): CategoryGroup[] => {
+    const out: CategoryGroup[] = [];
+    for (const g of rawActiveGroups) {
+      if (selectedCategory !== 'ALL' && g.categoryCode !== selectedCategory) {
+        continue;
+      }
+      const matchingSubs = g.subRows.filter((sr) => {
+        if (goldTab === 'MYANMAR') {
+          return selectedPurity === 'ALL' || sr.purityCode === selectedPurity;
+        }
+        return selectedGram === 'ALL' || sr.gramKey === selectedGram;
+      });
+      if (matchingSubs.length === 0) continue;
+
+      const groupOutByDay: Record<string, number> = {};
+      const groupInByDay: Record<string, number> = {};
+      const groupTotalsByDay: Record<string, number> = {};
+      for (const d of dateCols) {
+        let o = 0;
+        let i = 0;
+        let q = 0;
+        for (const sr of matchingSubs) {
+          o += sr.outByDay[d] || 0;
+          i += sr.inByDay[d] || 0;
+          q += sr.qtyByDay[d] || 0;
+        }
+        groupOutByDay[d] = o;
+        groupInByDay[d] = i;
+        groupTotalsByDay[d] = q;
+      }
+
+      out.push({
+        ...g,
+        subRows: matchingSubs,
+        groupOutByDay,
+        groupInByDay,
+        groupTotalsByDay,
+      });
+    }
+    return out;
+  }, [rawActiveGroups, selectedCategory, selectedPurity, selectedGram, goldTab, dateCols]);
 
   const grandByDay = useMemo(() => {
     const out: Record<string, number> = {};
@@ -575,6 +737,35 @@ export const InventoryStockLedgerView: React.FC = () => {
           : 'Purity / Gram Weight';
 
     const tabTitle = goldTab === 'MYANMAR' ? myanmarLabel : thaiLabel;
+    const filterParts: string[] = [];
+    if (selectedCategory !== 'ALL') {
+      const catOpt = categoryDropdownOptions.find((c) => c.code === selectedCategory);
+      filterParts.push(
+        catOpt ? (language === 'MM' ? catOpt.mm : catOpt.en) : selectedCategory
+      );
+    }
+    if (goldTab === 'MYANMAR' && selectedPurity !== 'ALL') {
+      const purOpt = myanmarPurityDropdownOptions.find((p) => p.code === selectedPurity);
+      filterParts.push(
+        purOpt ? (language === 'MM' ? purOpt.mm : purOpt.en) : selectedPurity
+      );
+    }
+    if (goldTab === 'THAI' && selectedGram !== 'ALL') {
+      const gOpt = thaiGramDropdownOptions.find((g) => g.key === selectedGram);
+      filterParts.push(gOpt ? gOpt.label : `${Number(selectedGram)} g`);
+    }
+    const filterSuffix = filterParts.length > 0 ? ` [${filterParts.join(' / ')}]` : '';
+
+    if (exportRows.length > 0) {
+      exportRows.push({
+        idx: '',
+        categoryName: language === 'MM' ? 'စုစုပေါင်း လက်ကျန် (ခု)' : 'Total Stock On Hand (pcs)',
+        subLabel: '',
+        outByDay: grandByDay.out,
+        inByDay: grandByDay.inn,
+        qtyByDay: grandByDay.totals,
+      });
+    }
 
     exportToExcel({
       sheetName:
@@ -587,8 +778,8 @@ export const InventoryStockLedgerView: React.FC = () => {
             : `${thaiLabel} Ledger`,
       title:
         language === 'MM'
-          ? `နေ့စဉ်လက်ကျန်စာရင်း - ${tabTitle} (${formatDate(dateCols[0])} → ${formatDate(dateCols[dateCols.length - 1])})`
-          : `Daily Stock Ledger - ${tabTitle} (${formatDate(dateCols[0])} → ${formatDate(dateCols[dateCols.length - 1])})`,
+          ? `နေ့စဉ်လက်ကျန်စာရင်း - ${tabTitle}${filterSuffix} (${formatDate(dateCols[0])} → ${formatDate(dateCols[dateCols.length - 1])})`
+          : `Daily Stock Ledger - ${tabTitle}${filterSuffix} (${formatDate(dateCols[0])} → ${formatDate(dateCols[dateCols.length - 1])})`,
       filename: `stock_ledger_${goldTab.toLowerCase()}_${dateCols[0] || lastDate}_${dateCols[dateCols.length - 1] || lastDate}`,
       columns: [
         { header: language === 'MM' ? 'စဉ်' : '#', value: (r) => r.idx, width: 6 },
@@ -682,9 +873,12 @@ export const InventoryStockLedgerView: React.FC = () => {
               const t = todayISO();
               setFrom(addDaysISO(t, -6));
               setTo(t);
+              setSelectedCategory('ALL');
+              setSelectedPurity('ALL');
+              setSelectedGram('ALL');
             }}
             className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer flex items-center gap-1.5"
-            title={language === 'MM' ? '၇ ရက်စာ မူလရက်စွဲသို့ ပြန်ထားရန်' : 'Reset to default 7 days'}
+            title={language === 'MM' ? '၇ ရက်စာ မူလရက်စွဲ နှင့် Filter များ ပြန်ထားရန်' : 'Reset to default 7 days & filters'}
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>{language === 'MM' ? 'Reset' : 'Reset'}</span>
@@ -698,51 +892,127 @@ export const InventoryStockLedgerView: React.FC = () => {
         </div>
       </div>
 
-      {/* Nav Links: မြန်မာရွှေ | ထိုင်းရွှေ */}
-      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-[#1A1A1A] p-2 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
-        <button
-          type="button"
-          onClick={() => setGoldTab('MYANMAR')}
-          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            goldTab === 'MYANMAR'
-              ? 'bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-300 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515]'
-          }`}
-        >
-          <Gem className="w-4 h-4 shrink-0" />
-          <span>{myanmarLabel}</span>
-          <span
-            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+      {/* Nav Links: မြန်မာရွှေ | ထိုင်းရွှေ + Dropdown Search Boxes */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-[#1A1A1A] p-2.5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setGoldTab('MYANMAR');
+              setSelectedCategory('ALL');
+              setSelectedPurity('ALL');
+              setSelectedGram('ALL');
+            }}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               goldTab === 'MYANMAR'
-                ? 'bg-black/25 text-white'
-                : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                ? 'bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515]'
             }`}
           >
-            {myanmarGroups.length} {language === 'MM' ? 'အုပ်စု' : 'groups'}
-          </span>
-        </button>
+            <Gem className="w-4 h-4 shrink-0" />
+            <span>{myanmarLabel}</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+                goldTab === 'MYANMAR'
+                  ? 'bg-black/25 text-white'
+                  : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+              }`}
+            >
+              {goldTab === 'MYANMAR' ? activeGroups.length : myanmarGroups.length}{' '}
+              {language === 'MM' ? 'အုပ်စု' : 'groups'}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setGoldTab('THAI')}
-          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            goldTab === 'THAI'
-              ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-300 hover:bg-blue-50/60 dark:hover:bg-[#222222] hover:text-blue-600'
-          }`}
-        >
-          <Layers className="w-4 h-4 shrink-0" />
-          <span>{thaiLabel}</span>
-          <span
-            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+          <button
+            type="button"
+            onClick={() => {
+              setGoldTab('THAI');
+              setSelectedCategory('ALL');
+              setSelectedPurity('ALL');
+              setSelectedGram('ALL');
+            }}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               goldTab === 'THAI'
-                ? 'bg-black/25 text-white'
-                : 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300'
+                ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-blue-50/60 dark:hover:bg-[#222222] hover:text-blue-600'
             }`}
           >
-            {thaiGroups.length} {language === 'MM' ? 'အုပ်စု' : 'groups'}
-          </span>
-        </button>
+            <Layers className="w-4 h-4 shrink-0" />
+            <span>{thaiLabel}</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+                goldTab === 'THAI'
+                  ? 'bg-black/25 text-white'
+                  : 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300'
+              }`}
+            >
+              {goldTab === 'THAI' ? activeGroups.length : thaiGroups.length}{' '}
+              {language === 'MM' ? 'အုပ်စု' : 'groups'}
+            </span>
+          </button>
+        </div>
+
+        {/* 2 Dropdown Search Boxes:
+            - မြန်မာရွှေ: ပစ္စည်းအမျိုးအစား + ရွှေရည်
+            - ထိုင်းရွှေ: ပစ္စည်းအမျိုးအစား + ဂရမ်ချိန် */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 text-[11px] font-bold text-gray-500 dark:text-gray-400 px-1">
+            <Filter className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
+            <span>{language === 'MM' ? 'ရှာဖွေရန်:' : 'Filter:'}</span>
+          </div>
+
+          {/* Dropdown 1: ပစ္စည်းအမျိုးအစား */}
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            aria-label={language === 'MM' ? 'ပစ္စည်းအမျိုးအစား ရွေးချယ်ရန်' : 'Select Item Category'}
+            className="h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-xs font-bold text-gray-800 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-[#D4AF37]/40 cursor-pointer"
+          >
+            <option value="ALL">
+              {language === 'MM' ? 'ပစ္စည်းအမျိုးအစား အားလုံး' : 'All Item Categories'}
+            </option>
+            {categoryDropdownOptions.map((c) => (
+              <option key={c.code} value={c.code}>
+                {language === 'MM' ? c.mm : c.en}
+              </option>
+            ))}
+          </select>
+
+          {/* Dropdown 2: မြန်မာရွှေ -> ရွှေရည် | ထိုင်းရွှေ -> ဂရမ်ချိန် */}
+          {goldTab === 'MYANMAR' ? (
+            <select
+              value={selectedPurity}
+              onChange={(e) => setSelectedPurity(e.target.value)}
+              aria-label={language === 'MM' ? 'ရွှေရည် ရွေးချယ်ရန်' : 'Select Purity'}
+              className="h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-xs font-bold text-gray-800 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-[#D4AF37]/40 cursor-pointer"
+            >
+              <option value="ALL">
+                {language === 'MM' ? 'ရွှေရည် အားလုံး' : 'All Purities'}
+              </option>
+              {myanmarPurityDropdownOptions.map((p) => (
+                <option key={p.code} value={p.code}>
+                  {language === 'MM' ? p.mm : p.en}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select
+              value={selectedGram}
+              onChange={(e) => setSelectedGram(e.target.value)}
+              aria-label={language === 'MM' ? 'ဂရမ်ချိန် ရွေးချယ်ရန်' : 'Select Gram Weight'}
+              className="h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#121212] text-xs font-bold text-gray-800 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500/40 cursor-pointer"
+            >
+              <option value="ALL">
+                {language === 'MM' ? 'ဂရမ်ချိန် အားလုံး' : 'All Gram Weights'}
+              </option>
+              {thaiGramDropdownOptions.map((g) => (
+                <option key={g.key} value={g.key}>
+                  {g.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Grouped Stock Ledger Table */}

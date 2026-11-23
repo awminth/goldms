@@ -44,6 +44,8 @@ import {
   CalendarDays,
   Scale,
   Download,
+  Gem,
+  Layers,
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { api } from '../services/api';
@@ -1142,38 +1144,61 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return matchesCategory && matchesPurity && matchesDate;
   });
 
-  /** Identical barcodes collapse to one row with qty (both Thai & Myanmar restocks) */
-  type InventoryListRow = InventoryItem & { listQty: number };
-  const inventoryListRows = useMemo((): InventoryListRow[] => {
-    const myanmarByBarcode = new Map<string, InventoryItem[]>();
-    const thaiByBarcode = new Map<string, InventoryItem[]>();
+  const [inventoryGoldTab, setInventoryGoldTab] = useState<'MYANMAR' | 'THAI'>('MYANMAR');
 
+  /** Myanmar stays 1 row = 1 unit (no +Qty); Thai identical barcodes collapse to one row with +Qty */
+  type InventoryListRow = InventoryItem & { listQty: number };
+
+  const myanmarListRows = useMemo((): InventoryListRow[] => {
+    const rows: InventoryListRow[] = [];
+    for (const item of filteredItems) {
+      if (item.status !== 'IN_STOCK') continue;
+      const isThai = isThaiGoldClass(item.purity, item.item_type);
+      if (isThai) continue;
+      rows.push({
+        ...item,
+        listQty: 1,
+        status: 'IN_STOCK',
+      });
+    }
+    return rows;
+  }, [filteredItems, isThaiGoldClass]);
+
+  const thaiListRows = useMemo((): InventoryListRow[] => {
+    const thaiByBarcode = new Map<string, InventoryItem[]>();
     for (const item of filteredItems) {
       const isThai = isThaiGoldClass(item.purity, item.item_type);
+      if (!isThai) continue;
       const key = String(item.barcode || '').trim().toLowerCase() || `id:${item.id}`;
-      const targetMap = isThai ? thaiByBarcode : myanmarByBarcode;
-      const list = targetMap.get(key) || [];
+      const list = thaiByBarcode.get(key) || [];
       list.push(item);
-      targetMap.set(key, list);
+      thaiByBarcode.set(key, list);
     }
 
-    const buildRows = (map: Map<string, InventoryItem[]>): InventoryListRow[] => {
-      const rows: InventoryListRow[] = [];
-      for (const units of map.values()) {
-        const inStock = units.filter((u) => u.status === 'IN_STOCK');
-        if (inStock.length === 0) continue;
-        const sample = inStock[0];
-        rows.push({
-          ...sample,
-          listQty: inStock.length,
-          status: 'IN_STOCK',
-        });
-      }
-      return rows;
-    };
-
-    return [...buildRows(thaiByBarcode), ...buildRows(myanmarByBarcode)];
+    const rows: InventoryListRow[] = [];
+    for (const units of thaiByBarcode.values()) {
+      const inStock = units.filter((u) => u.status === 'IN_STOCK');
+      if (inStock.length === 0) continue;
+      const sample = inStock[0];
+      rows.push({
+        ...sample,
+        listQty: inStock.length,
+        status: 'IN_STOCK',
+      });
+    }
+    return rows;
   }, [filteredItems, isThaiGoldClass]);
+
+  const thaiTotalUnits = useMemo(
+    () => thaiListRows.reduce((sum, r) => sum + (r.listQty || 0), 0),
+    [thaiListRows]
+  );
+
+  const inventoryListRows = useMemo(
+    (): InventoryListRow[] =>
+      inventoryGoldTab === 'MYANMAR' ? myanmarListRows : thaiListRows,
+    [inventoryGoldTab, myanmarListRows, thaiListRows]
+  );
 
   const [addQtyItem, setAddQtyItem] = useState<InventoryListRow | null>(null);
   const [addQtyCount, setAddQtyCount] = useState<number>(1);
@@ -1216,10 +1241,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const exportInventoryExcel = () => {
+    const tabTitle =
+      inventoryGoldTab === 'MYANMAR'
+        ? getGoldOriginLabel('MYANMAR_GOLD')
+        : getGoldOriginLabel('THAI_GOLD');
     exportToExcel({
-      filename: 'inventory',
-      sheetName: 'Inventory',
-      title: language === 'MM' ? 'ရွှေထည် စာရင်း (Inventory)' : 'Gold Inventory Report',
+      filename: `inventory_${inventoryGoldTab.toLowerCase()}`,
+      sheetName: tabTitle,
+      title:
+        language === 'MM'
+          ? `ရွှေထည် စာရင်း - ${tabTitle} (Inventory)`
+          : `Gold Inventory Report - ${tabTitle}`,
       columns: [
         { header: 'Barcode', value: (i) => i.barcode, width: 16 },
         { header: 'Qty', value: (i) => i.listQty, width: 8 },
@@ -1278,8 +1310,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     });
   };
 
-  const inventoryColumns = useMemo<DataTableColumn<InventoryListRow>[]>(
-    () => [
+  const buildInventoryColumns = (
+    allowAddQty: boolean
+  ): DataTableColumn<InventoryListRow>[] => [
       {
         id: 'barcode',
         header: language === 'MM' ? 'ဘားကုဒ်' : 'Barcode',
@@ -1295,24 +1328,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         slot: 'primary',
         accessor: (i) => i.listQty,
         align: 'center',
-        cell: (item) => (
-          <div
-            className="inline-flex items-center justify-center gap-1.5"
-            onClick={(e) => e.stopPropagation()}
-          >
+        cell: (item) =>
+          allowAddQty ? (
+            <div
+              className="inline-flex items-center justify-center gap-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="font-mono font-extrabold text-[#996515] dark:text-amber-300">
+                {item.listQty}
+              </span>
+              <button
+                type="button"
+                onClick={() => openAddQtyModal(item)}
+                className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition cursor-pointer"
+                title={language === 'MM' ? 'Qty ထပ်တိုးရန်' : 'Add Qty'}
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
             <span className="font-mono font-extrabold text-[#996515] dark:text-amber-300">
               {item.listQty}
             </span>
-            <button
-              type="button"
-              onClick={() => openAddQtyModal(item)}
-              className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition cursor-pointer"
-              title={language === 'MM' ? 'Qty ထပ်တိုးရန်' : 'Add Qty'}
-            >
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
-        ),
+          ),
       },
       {
         id: 'name',
@@ -1553,15 +1591,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         align: 'center',
         cell: (item) => (
           <div className="flex items-center justify-center space-x-1" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              onClick={() => openAddQtyModal(item)}
-              className="px-1.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 text-[10px] font-bold inline-flex items-center gap-0.5 transition cursor-pointer"
-              title={language === 'MM' ? 'အရေအတွက် (Qty) ထပ်တိုးမည်' : 'Add Quantity'}
-            >
-              <Plus className="w-3 h-3" />
-              <span>Qty</span>
-            </button>
+            {allowAddQty && (
+              <button
+                type="button"
+                onClick={() => openAddQtyModal(item)}
+                className="px-1.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 text-[10px] font-bold inline-flex items-center gap-0.5 transition cursor-pointer"
+                title={language === 'MM' ? 'အရေအတွက် (Qty) ထပ်တိုးမည်' : 'Add Quantity'}
+              >
+                <Plus className="w-3 h-3" />
+                <span>Qty</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setTagItem(item)}
@@ -1613,8 +1653,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         ),
       },
-    ],
-    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, dialog]
+    ];
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const myanmarInventoryColumns = useMemo<DataTableColumn<InventoryListRow>[]>(
+    () => buildInventoryColumns(false),
+    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, dialog, masterCategories]
+  );
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const thaiInventoryColumns = useMemo<DataTableColumn<InventoryListRow>[]>(
+    () => buildInventoryColumns(true),
+    [language, deleteInventoryItem, kyatToGrams, goldPrices, getLivePriceForPurity, dialog, masterCategories]
   );
 
   if (section === 'summary') {
@@ -1915,6 +1965,60 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
       </div>
 
+      {/* Nav Links: မြန်မာရွှေ | ထိုင်းရွှေ */}
+      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-[#1A1A1A] p-2 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
+        <button
+          type="button"
+          onClick={() => {
+            setInventoryGoldTab('MYANMAR');
+            setSelectedPurity('ALL');
+          }}
+          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            inventoryGoldTab === 'MYANMAR'
+              ? 'bg-gradient-to-r from-[#D4AF37] to-[#C5A059] text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-[#FAF8F2] dark:hover:bg-[#222222] hover:text-[#996515]'
+          }`}
+        >
+          <Gem className="w-4 h-4 shrink-0" />
+          <span>{getGoldOriginLabel('MYANMAR_GOLD')}</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+              inventoryGoldTab === 'MYANMAR'
+                ? 'bg-black/25 text-white'
+                : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+            }`}
+          >
+            {myanmarListRows.length} {language === 'MM' ? 'ထည်' : 'pcs'}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setInventoryGoldTab('THAI');
+            setSelectedPurity('ALL');
+          }}
+          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            inventoryGoldTab === 'THAI'
+              ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-blue-50/60 dark:hover:bg-[#222222] hover:text-blue-600'
+          }`}
+        >
+          <Layers className="w-4 h-4 shrink-0" />
+          <span>{getGoldOriginLabel('THAI_GOLD')}</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+              inventoryGoldTab === 'THAI'
+                ? 'bg-black/25 text-white'
+                : 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300'
+            }`}
+          >
+            {thaiListRows.length} {language === 'MM' ? 'မျိုး' : 'SKUs'} · {thaiTotalUnits}{' '}
+            {language === 'MM' ? 'ခု' : 'units'}
+          </span>
+        </button>
+      </div>
+
       {/* Filter Row */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         
@@ -1939,7 +2043,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] dark:text-gray-200 text-xs font-medium"
         >
           <option value="ALL">{language === 'MM' ? 'ရွှေရည်အားလုံး' : 'All Purities'}</option>
-          {goldClassCategories.map((c) => (
+          {(inventoryGoldTab === 'THAI' ? thaiPurityOptions : myanmarPurityOptions).map((c) => (
             <option key={c.code} value={c.code}>
               {language === 'MM' ? c.name_mm : c.name_en || c.name_mm}
             </option>
@@ -1976,26 +2080,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <span>{language === 'MM' ? 'Reset' : 'Reset'}</span>
         </button>
 
-        <span className="text-gray-400 dark:text-gray-500 ml-auto">
-          {inventoryListRows.length} {language === 'MM' ? 'မျိုး' : 'SKUs'}
-          {filteredItems.length !== inventoryListRows.length
-            ? ` · ${filteredItems.filter((i) => i.status === 'IN_STOCK').length} ${
+        <span className="text-gray-400 dark:text-gray-500 ml-auto font-mono">
+          {inventoryGoldTab === 'MYANMAR'
+            ? `${myanmarListRows.length} ${language === 'MM' ? 'ထည်' : 'pcs'}`
+            : `${thaiListRows.length} ${language === 'MM' ? 'မျိုး' : 'SKUs'} · ${thaiTotalUnits} ${
                 language === 'MM' ? 'ခု' : 'units'
-              }`
-            : ''}
+              }`}
         </span>
       </div>
 
       <DataTable
-        key={searchResetTick}
+        key={`${inventoryGoldTab}-${searchResetTick}`}
         rows={inventoryListRows}
-        columns={inventoryColumns}
+        columns={
+          inventoryGoldTab === 'MYANMAR' ? myanmarInventoryColumns : thaiInventoryColumns
+        }
         rowKey={(i) => i.id}
         language={language}
         searchable
-        searchPlaceholder={language === 'MM' ? 'ဘားကုဒ် / အမည် ရှာရန်…' : 'Search barcode / name…'}
+        searchPlaceholder={
+          language === 'MM' ? 'ဘားကုဒ် / အမည် ရှာရန်…' : 'Search barcode / name…'
+        }
         getSearchText={(i) => [i.name, i.name_mm, i.barcode, i.category].join(' ')}
-        resetDeps={[selectedCategory, selectedPurity, invDateFrom, invDateTo, searchResetTick]}
+        resetDeps={[
+          inventoryGoldTab,
+          selectedCategory,
+          selectedPurity,
+          invDateFrom,
+          invDateTo,
+          searchResetTick,
+        ]}
         emptyMessage={language === 'MM' ? 'ပစ္စည်းမတွေ့ပါ' : 'No inventory items'}
         maxHeightClass={false}
         rowClassName={(i) => inventoryStatusRowClass(i.status)}
