@@ -2,17 +2,26 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Scanner, useDevices, type IDetectedBarcode, type IScannerError, type IScannerHandle } from '@yudiel/react-qr-scanner';
 import { useGoldShop } from '../context/GoldShopContext';
 import { api } from '../services/api';
-import { InventoryItem, GoldPurity } from '../types/gold';
+import { InventoryItem, GoldPurity, DailyGoldPrice, ShopSettings } from '../types/gold';
 import {
   estimateSellingPrice,
+  calculateGoldValuation,
+  calculateThaiGoldPrice,
+  bahtToMmk,
+  thaiBahtToMmk,
+  resolveBahtMmkRate,
   formatMMK,
   formatBaht,
   formatKPYMyanmar,
   formatKPYEnglish,
   kpyToGrams,
+  kpyToYway,
+  ywayToKpy,
   normalizeBarcode,
   PURITY_LABELS,
   KYAT_TO_GRAMS,
+  KYAT_TO_YWAY,
+  PAE_TO_YWAY,
 } from '../utils/goldCalculations';
 import { InventoryBarcodeTag, getBarcodeTagPageStyle } from './InventoryBarcodeTag';
 import { useReactToPrint } from 'react-to-print';
@@ -40,6 +49,7 @@ import {
   Check,
   ZoomIn,
   ZoomOut,
+  TrendingUp,
 } from 'lucide-react';
 
 interface BarcodeScannerModalProps {
@@ -116,7 +126,16 @@ function scannerErrorText(error: IScannerError): string {
 }
 
 export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavigate }) => {
-  const { inventory, goldPrices, shopSettings, language, refreshData } = useGoldShop();
+  const {
+    inventory,
+    goldPrices,
+    shopSettings,
+    masterCategories,
+    language,
+    refreshData,
+    isThaiGoldClass,
+    getLivePriceForPurity,
+  } = useGoldShop();
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeMode, setActiveMode] = useState<'camera' | 'manual'>('camera');
@@ -127,6 +146,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
   const [scannedItem, setScannedItem] = useState<InventoryItem | null>(null);
   const [showTagPreview, setShowTagPreview] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Fresh server-fetched rates snapshot on every scan (prevents stale prices if another device updated rates)
+  const [livePricesSnapshot, setLivePricesSnapshot] = useState<DailyGoldPrice[] | null>(null);
+  const [liveSettingsSnapshot, setLiveSettingsSnapshot] = useState<ShopSettings | null>(null);
+
+  const effectiveGoldPrices = livePricesSnapshot ?? goldPrices;
+  const effectiveShopSettings = liveSettingsSnapshot ?? shopSettings;
 
   // Scanner state
   const [cameraNonce, setCameraNonce] = useState(0);
@@ -159,12 +185,59 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     ignoreGlobalStyles: true,
   });
 
-  // Calculate live market selling price for item
+  const resolveLiveRateForPurity = useCallback(
+    (purity: string, pricesList: DailyGoldPrice[]): number => {
+      const exact = pricesList.find((p) => p.gold_type === purity)?.price_per_kyat || 0;
+      if (exact > 0) return exact;
+      return getLivePriceForPurity(purity);
+    },
+    [getLivePriceForPurity]
+  );
+
+  // Calculate live market selling price for item (always uses latest synced server rates)
+  const getThaiLivePricing = useCallback(
+    (item: InventoryItem) => {
+      const bahtRate = resolveBahtMmkRate(effectiveShopSettings);
+      const thaiGoldBaht = effectiveShopSettings?.thai_gold_baht || 65000;
+      const grams =
+        Number(item.thai_weight_unit || 0) ||
+        kpyToGrams(
+          {
+            kyat: Number(item.net_weight_kyat || item.weight_kyat || 0),
+            pae: Number(item.net_weight_pae || item.weight_pae || 0),
+            yway: Number(item.net_weight_yway || item.weight_yway || 0),
+          },
+          effectiveShopSettings?.kyat_to_grams || KYAT_TO_GRAMS
+        );
+      const craftFeeBaht = Number(item.craftsmanship_fee_baht || 0);
+      const craftProfitBaht = Number(item.craftsmanship_profit_fee_baht || 0);
+      const craftTotalBaht = craftFeeBaht + craftProfitBaht;
+      const thaiCalc = calculateThaiGoldPrice(grams, thaiGoldBaht, craftTotalBaht);
+      const sellingBaht = thaiCalc.totalPrice;
+      const sellingMmk = Math.round(bahtToMmk(sellingBaht, bahtRate));
+      const craftTotalMmk =
+        craftTotalBaht > 0
+          ? Math.round(bahtToMmk(craftTotalBaht, bahtRate))
+          : Number(item.craftsmanship_fee || 0) + Number(item.craftsmanship_profit_fee || 0);
+      const thaiMmkPerKyat = Math.round(thaiBahtToMmk(thaiGoldBaht, bahtRate));
+      return {
+        thaiGoldBaht,
+        bahtRate,
+        thaiMmkPerKyat,
+        sellingBaht,
+        sellingMmk,
+        craftTotalBaht,
+        craftTotalMmk,
+      };
+    },
+    [effectiveShopSettings]
+  );
+
   const getCalculatedPrice = useCallback(
     (item: InventoryItem): number => {
-      const isThai = item.item_type === 'THAI_GOLD' || item.purity === 'THAI_GOLD';
-      if (isThai && item.selling_price_estimated) {
-        return item.selling_price_estimated;
+      const isThai = isThaiGoldClass(item.purity, item.item_type);
+      if (isThai) {
+        return getThaiLivePricing(item).sellingMmk;
       }
 
       const craftTotal =
@@ -172,9 +245,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
       const stoneTotal =
         Number(item.stone_price || 0) + Number(item.stone_profit_price || 0);
       const pure16 =
-        goldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
-      const specificPrice =
-        goldPrices.find((p) => p.gold_type === item.purity)?.price_per_kyat || 0;
+        effectiveGoldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+      const specificPrice = resolveLiveRateForPurity(item.purity, effectiveGoldPrices);
 
       return estimateSellingPrice({
         purity: item.purity,
@@ -191,7 +263,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
         specificSellPrice: specificPrice,
       });
     },
-    [goldPrices]
+    [effectiveGoldPrices, isThaiGoldClass, getThaiLivePricing, resolveLiveRateForPurity]
   );
 
   const handleBarcodeFound = async (rawCode: string) => {
@@ -201,15 +273,24 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     playBeep();
     triggerHaptic();
 
+    // Always pull latest gold prices, shop settings, and inventory from server on every scan
+    // so price updates made on another device are reflected immediately even if scanner was left open.
     let found = findInventoryItem(inventoryRef.current, cleanCode);
-    if (!found && cleanCode.length >= 4) {
-      try {
-        const data = await api.bootstrap();
-        found = findInventoryItem(data.inventory || [], cleanCode);
-        if (found) void refreshData();
-      } catch {
-        // Keep the in-memory result when the network lookup fails.
+    try {
+      const data = await api.bootstrap();
+      if (Array.isArray(data.prices) && data.prices.length > 0) {
+        setLivePricesSnapshot(data.prices);
       }
+      if (data.settings) {
+        setLiveSettingsSnapshot(data.settings);
+      }
+      if (Array.isArray(data.inventory)) {
+        const freshFound = findInventoryItem(data.inventory, cleanCode);
+        if (freshFound) found = freshFound;
+      }
+      void refreshData();
+    } catch {
+      // Fall back to in-memory inventory & rates if offline / network error.
     }
 
     if (found) {
@@ -287,8 +368,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
       setSearchError(null);
       setCameraError(null);
       setTorchOn(false);
+    } else {
+      void refreshData();
     }
-  }, [isOpen]);
+  }, [isOpen, refreshData]);
 
   useEffect(() => {
     if (!showCamera) return;
@@ -400,6 +483,127 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
   const renderKPY = (kyat: number = 0, pae: number = 0, yway: number = 0) => {
     const kpy = { kyat: Number(kyat || 0), pae: Number(pae || 0), yway: Number(yway || 0) };
     return language === 'MM' ? formatKPYMyanmar(kpy) : formatKPYEnglish(kpy);
+  };
+
+  const formatCompactKpy = (kyat: number = 0, pae: number = 0, yway: number = 0): string => {
+    const k = Math.floor(Number(kyat || 0));
+    const p = Math.floor(Number(pae || 0));
+    const yRaw = Number(Number(yway || 0).toFixed(2));
+    const parts: string[] = [];
+    if (k > 0) parts.push(`${k} ${language === 'MM' ? 'ကျပ်' : 'K'}`);
+    if (p > 0 || k > 0) parts.push(`${p} ${language === 'MM' ? 'ပဲ' : 'P'}`);
+    parts.push(`${yRaw} ${language === 'MM' ? 'ရွေး' : 'Y'}`);
+    return parts.join(' ');
+  };
+
+  const formatKyatMoney = (amount: number): string => {
+    const rounded = Math.round(Number(amount) || 0);
+    return `${rounded.toLocaleString('en-US')} ${language === 'MM' ? 'ကျပ်' : 'MMK'}`;
+  };
+
+  const getCategoryLabel = (code?: string | null): string => {
+    const raw = String(code || '').trim();
+    if (!raw) return '—';
+    const found = masterCategories.find(
+      (c) => c.category_group === 'PRODUCT' && c.code.toUpperCase() === raw.toUpperCase()
+    );
+    if (found) return language === 'MM' ? found.name_mm : found.name_en || found.name_mm;
+    const fallbacks: Record<string, { mm: string; en: string }> = {
+      NECKLACE: { mm: 'ဆွဲကြိုး', en: 'Necklace' },
+      RING: { mm: 'လက်စွပ်', en: 'Ring' },
+      BRACELET: { mm: 'လက်ကောက်', en: 'Bracelet' },
+      EARRING: { mm: 'နားကပ်', en: 'Earring' },
+      PENDANT: { mm: 'လော်ကပ်', en: 'Pendant' },
+      BANGLE: { mm: 'ဘယက် / ဟန်းချိန်း', en: 'Bangle' },
+      GOLD_BAR: { mm: 'ရွှေတုံး / ဒင်္ဂါး', en: 'Gold Bar' },
+      ANKLET: { mm: 'ခြေချင်း', en: 'Anklet' },
+    };
+    const fb = fallbacks[raw.toUpperCase()];
+    if (fb) return language === 'MM' ? fb.mm : fb.en;
+    return raw;
+  };
+
+  const getPurityLabel = (purityCode?: string | null): string => {
+    const raw = String(purityCode || '').trim();
+    if (!raw) return '—';
+    const found = masterCategories.find(
+      (c) => c.category_group === 'GOLD_CLASS' && c.code.toUpperCase() === raw.toUpperCase()
+    );
+    if (found) return language === 'MM' ? found.name_mm : found.name_en || found.name_mm;
+    const fb = PURITY_LABELS[raw as keyof typeof PURITY_LABELS];
+    if (fb) return language === 'MM' ? fb.mm : fb.en;
+    return raw;
+  };
+
+  const getMyanmarScannedBreakdown = (item: InventoryItem) => {
+    const kyatToGrams = effectiveShopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
+
+    // Physical gold weight = Gross - Gemstone (before wastage)
+    const grossYway = kpyToYway(item.weight_kyat, item.weight_pae, item.weight_yway);
+    const gemYway = kpyToYway(
+      item.gemstone_weight_kyat || 0,
+      item.gemstone_weight_pae || 0,
+      item.gemstone_weight_yway || 0
+    );
+    const goldOnlyYway = Math.max(0, grossYway - gemYway);
+    const goldOnlyKpy = ywayToKpy(goldOnlyYway);
+    const goldOnlyGrams = kpyToGrams(goldOnlyKpy, kyatToGrams);
+
+    // Wastage (အလျော့တွက်)
+    const wastePae = Number(item.deduction_pae || 0);
+    const wasteYway = Number(item.deduction_yway || 0);
+    const totalWasteYway = wastePae * PAE_TO_YWAY + wasteYway;
+    const wasteParts: string[] = [];
+    if (wastePae > 0) wasteParts.push(`${wastePae} ပဲ`);
+    if (wasteYway > 0 || wastePae === 0) {
+      const yFmt = Number(wasteYway.toFixed(2));
+      wasteParts.push(`${yFmt} Y`);
+    }
+    const wastageLabel = wasteParts.join(' ');
+
+    // Live rate per kyat from server-synced header bar prices
+    const pure16 =
+      effectiveGoldPrices.find((p) => p.gold_type === 'MEELIN')?.price_per_kyat || 5750000;
+    const liveSpecific = resolveLiveRateForPurity(item.purity, effectiveGoldPrices);
+
+    const netKpy = {
+      kyat: Number(item.net_weight_kyat || 0),
+      pae: Number(item.net_weight_pae || 0),
+      yway: Number(item.net_weight_yway || 0),
+    };
+    const netVal = calculateGoldValuation(
+      netKpy,
+      item.purity as GoldPurity,
+      pure16,
+      liveSpecific
+    );
+    const effectiveRate = netVal.effectivePricePerKyat;
+
+    const goldOnlyAmount = Math.round((goldOnlyYway / KYAT_TO_YWAY) * effectiveRate);
+    const wastageAmount =
+      totalWasteYway > 0
+        ? Math.max(0, netVal.goldAmount - goldOnlyAmount)
+        : 0;
+
+    const craftTotal =
+      Number(item.craftsmanship_fee || 0) + Number(item.craftsmanship_profit_fee || 0);
+    const stoneTotal =
+      Number(item.stone_price || 0) + Number(item.stone_profit_price || 0);
+    const totalAmount = goldOnlyAmount + wastageAmount + craftTotal + stoneTotal;
+
+    return {
+      meelinRate: pure16,
+      effectiveRate,
+      goldOnlyKpy,
+      goldOnlyGrams,
+      goldOnlyAmount,
+      wastageLabel,
+      wastageAmount,
+      craftTotal,
+      stoneTotal,
+      totalAmount,
+      hasGemWeight: gemYway > 0,
+    };
   };
 
   return (
@@ -750,200 +954,319 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                   </span>
                 </div>
 
-                {/* Item Main Info Card */}
-                <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-800 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
-                        {scannedItem.name_mm || scannedItem.name}
-                      </h2>
-                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                        {/* Barcode pill with copy */}
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCode(scannedItem.barcode)}
-                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs font-mono font-bold text-gray-700 dark:text-gray-300 hover:border-amber-400"
-                          title="Barcode ကူးယူမည်"
-                        >
-                          <span>{scannedItem.barcode}</span>
-                          {copiedCode ? (
-                            <Check className="w-3 h-3 text-emerald-500" />
-                          ) : (
-                            <Copy className="w-3 h-3 text-gray-400" />
-                          )}
-                        </button>
-
-                        {/* Category */}
-                        <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-semibold">
-                          {scannedItem.category}
-                        </span>
-
-                        {/* Purity */}
-                        <span className="px-2 py-0.5 rounded-md bg-yellow-100 dark:bg-yellow-950/60 text-yellow-800 dark:text-yellow-300 text-xs font-bold">
-                          {PURITY_LABELS[scannedItem.purity]?.mm || scannedItem.purity}
-                        </span>
-
-                        {/* Status */}
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-xs font-bold ${
-                            scannedItem.status === 'IN_STOCK'
-                              ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
-                              : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
-                          }`}
-                        >
-                          {scannedItem.status === 'IN_STOCK' ? 'လက်ကျန်ရှိ (In Stock)' : scannedItem.status}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 💰 Highlighted Price Display */}
-                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-yellow-500/15 border border-amber-300/40 dark:border-amber-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider block">
-                        {language === 'MM' ? 'ယနေ့ခန့်မှန်းရောင်းဈေး (Selling Price)' : 'Estimated Selling Price'}
-                      </span>
-                      <div className="flex items-baseline gap-2 mt-0.5">
-                        <span className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 font-mono tracking-tight">
-                          {formatMMK(getCalculatedPrice(scannedItem))}
-                        </span>
-                      </div>
-                    </div>
-
-                    {scannedItem.craftsmanship_fee_baht ? (
-                      <div className="text-right sm:border-l sm:border-amber-200 dark:sm:border-amber-800 sm:pl-4">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 block">
-                          Thai Baht (฿)
-                        </span>
-                        <span className="text-base font-bold text-amber-700 dark:text-amber-300 font-mono">
-                          {formatBaht(scannedItem.selling_price_baht || 0)}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* ⚖️ Specifications Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  {/* Weight Details */}
-                  <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 space-y-2">
-                    <div className="flex items-center gap-1.5 font-bold text-gray-800 dark:text-gray-200 pb-1 border-b border-gray-200 dark:border-gray-800">
-                      <Scale className="w-3.5 h-3.5 text-amber-500" />
-                      <span>{language === 'MM' ? 'အလေးချိန် အချက်အလက်' : 'Weight Details'}</span>
-                    </div>
-
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                        <span>စုစုပေါင်းအလေးချိန် (Gross):</span>
-                        <span className="font-bold text-gray-900 dark:text-white font-mono">
-                          {renderKPY(
-                            scannedItem.weight_kyat,
-                            scannedItem.weight_pae,
-                            scannedItem.weight_yway
-                          )}{' '}
-                          ({kpyToGrams(
-                            {
-                              kyat: scannedItem.weight_kyat,
-                              pae: scannedItem.weight_pae,
-                              yway: scannedItem.weight_yway,
-                            },
-                            KYAT_TO_GRAMS
-                          ).toFixed(3)}{' '}
-                          g)
-                        </span>
-                      </div>
-
-                      <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                        <span>ရွှေသားအလေးချိန် (Net):</span>
-                        <span className="font-bold text-gray-900 dark:text-white font-mono">
-                          {renderKPY(
-                            scannedItem.net_weight_kyat,
-                            scannedItem.net_weight_pae,
-                            scannedItem.net_weight_yway
-                          )}{' '}
-                          ({kpyToGrams(
-                            {
-                              kyat: scannedItem.net_weight_kyat,
-                              pae: scannedItem.net_weight_pae,
-                              yway: scannedItem.net_weight_yway,
-                            },
-                            KYAT_TO_GRAMS
-                          ).toFixed(3)}{' '}
-                          g)
-                        </span>
-                      </div>
-
-                      {(Number(scannedItem.gemstone_weight_kyat || 0) > 0 ||
-                        Number(scannedItem.gemstone_weight_pae || 0) > 0 ||
-                        Number(scannedItem.gemstone_weight_yway || 0) > 0) && (
-                        <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                          <span>ကျောက်ချိန် (Gem Weight):</span>
-                          <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
-                            {renderKPY(
-                              scannedItem.gemstone_weight_kyat || 0,
-                              scannedItem.gemstone_weight_pae || 0,
-                              scannedItem.gemstone_weight_yway || 0
+                {/* Item Main Info & Breakdown */}
+                {!isThaiGoldClass(scannedItem.purity, scannedItem.item_type) ? (
+                  (() => {
+                    const mm = getMyanmarScannedBreakdown(scannedItem);
+                    const compactGoldKpy = formatCompactKpy(
+                      mm.goldOnlyKpy.kyat,
+                      mm.goldOnlyKpy.pae,
+                      mm.goldOnlyKpy.yway
+                    );
+                    const purityName = getPurityLabel(scannedItem.purity);
+                    const isMeelin =
+                      String(scannedItem.purity || '').toUpperCase() === 'MEELIN';
+                    return (
+                      <div className="space-y-3">
+                        {/* 📈 Top Live Gold Rate Banner (မြန်မာရွှေပေါက်ဈေး from Header Bar) */}
+                        <div className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/15 border border-amber-400/50 dark:border-amber-700/60 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-300">
+                            <TrendingUp className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>
+                              {language === 'MM'
+                                ? 'ယနေ့ မြန်မာရွှေပေါက်ဈေး'
+                                : "Today's Myanmar Gold Rate"}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                            <span className="font-black text-amber-700 dark:text-amber-300">
+                              {language === 'MM' ? 'မီးလင်း:' : 'Meelin:'}{' '}
+                              {formatKyatMoney(mm.meelinRate)}
+                            </span>
+                            {!isMeelin && mm.effectiveRate > 0 && (
+                              <span className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-black/30 border border-amber-300/60 dark:border-amber-700/60 font-bold text-gray-800 dark:text-amber-200 text-[11px]">
+                                {purityName}: {formatKyatMoney(mm.effectiveRate)}
+                              </span>
                             )}
-                          </span>
+                          </div>
                         </div>
-                      )}
 
-                      {scannedItem.thai_weight_unit ? (
-                        <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                          <span>ထိုင်းဂရမ် (Thai Grams):</span>
-                          <span className="font-bold text-amber-600 dark:text-amber-400 font-mono">
-                            {scannedItem.thai_weight_unit} g
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
+                        <div className="p-4 sm:p-5 rounded-2xl bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-800 space-y-4">
+                          {/* Header: ပစ္စည်းအမည် / ရွှေရည် / ပစ္စည်းအမျိုးအစား */}
+                          <div className="flex items-start justify-between gap-3 pb-3 border-b border-gray-200 dark:border-gray-800">
+                            <div className="space-y-1">
+                              <h2 className="text-lg sm:text-xl font-extrabold text-gray-900 dark:text-white leading-snug">
+                                {scannedItem.name_mm || scannedItem.name}
+                              </h2>
+                              <div className="text-sm font-extrabold text-amber-700 dark:text-amber-400">
+                                {purityName}
+                              </div>
+                              <div className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                {getCategoryLabel(scannedItem.category)}
+                              </div>
+                            </div>
 
-                  {/* Wastage & Fees */}
-                  <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 space-y-2">
-                    <div className="flex items-center gap-1.5 font-bold text-gray-800 dark:text-gray-200 pb-1 border-b border-gray-200 dark:border-gray-800">
-                      <Coins className="w-3.5 h-3.5 text-amber-500" />
-                      <span>{language === 'MM' ? 'အလျော့တွက်နှင့် လက်ခ' : 'Wastage & Craft'}</span>
-                    </div>
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleCopyCode(scannedItem.barcode)}
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs font-mono font-bold text-gray-700 dark:text-gray-300 hover:border-amber-400"
+                                title="Barcode ကူးယူမည်"
+                              >
+                                <span>{scannedItem.barcode}</span>
+                                {copiedCode ? (
+                                  <Check className="w-3 h-3 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3 h-3 text-gray-400" />
+                                )}
+                              </button>
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                                  scannedItem.status === 'IN_STOCK'
+                                    ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                                    : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                                }`}
+                              >
+                                {scannedItem.status === 'IN_STOCK'
+                                  ? language === 'MM'
+                                    ? 'လက်ကျန်ရှိ'
+                                    : 'In Stock'
+                                  : scannedItem.status}
+                              </span>
+                            </div>
+                          </div>
 
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                        <span>အလျော့တွက် (Wastage):</span>
-                        <span className="font-bold text-gray-900 dark:text-white font-mono">
-                          {Number(scannedItem.deduction_pae || 0) > 0
-                            ? `${scannedItem.deduction_pae} ပဲ `
-                            : ''}
-                          {Number(scannedItem.deduction_yway || 0)} Y
-                        </span>
-                      </div>
+                          {/* Line-by-line Breakdown: ရွှေချိန် / အလျော့တွက် / လက်ခ */}
+                          <div className="space-y-2.5 text-sm">
+                            {/* ရွှေချိန် */}
+                            <div className="grid grid-cols-[90px_1fr_auto] sm:grid-cols-[110px_1fr_auto] items-baseline gap-2">
+                              <span className="font-bold text-gray-700 dark:text-gray-300">
+                                {language === 'MM' ? 'ရွှေချိန်' : 'Gold Weight'}
+                              </span>
+                              <span className="font-mono font-semibold text-gray-900 dark:text-gray-100 text-xs sm:text-sm">
+                                {mm.goldOnlyGrams.toFixed(3)} ({compactGoldKpy})
+                              </span>
+                              <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
+                                {formatKyatMoney(mm.goldOnlyAmount)}
+                              </span>
+                            </div>
 
-                      <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                        <span>လက်ခ (Craft Fee):</span>
-                        <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                          {formatMMK(
-                            Number(scannedItem.craftsmanship_fee || 0) +
-                              Number(scannedItem.craftsmanship_profit_fee || 0)
-                          )}
-                          {scannedItem.craftsmanship_fee_baht
-                            ? ` (${formatBaht(scannedItem.craftsmanship_fee_baht)})`
-                            : ''}
-                        </span>
-                      </div>
+                            {/* အလျော့တွက် */}
+                            <div className="grid grid-cols-[90px_1fr_auto] sm:grid-cols-[110px_1fr_auto] items-baseline gap-2">
+                              <span className="font-bold text-gray-700 dark:text-gray-300">
+                                {language === 'MM' ? 'အလျော့တွက်' : 'Wastage'}
+                              </span>
+                              <span className="font-mono font-semibold text-gray-900 dark:text-gray-100 text-xs sm:text-sm">
+                                {mm.wastageLabel}
+                              </span>
+                              <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
+                                {formatKyatMoney(mm.wastageAmount)}
+                              </span>
+                            </div>
 
-                      {Number(scannedItem.stone_price || 0) > 0 && (
-                        <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-                          <span>ကျောက်ဖိုး (Stone Price):</span>
-                          <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
-                            {formatMMK(
-                              Number(scannedItem.stone_price || 0) +
-                                Number(scannedItem.stone_profit_price || 0)
+                            {/* လက်ခ */}
+                            <div className="grid grid-cols-[90px_1fr_auto] sm:grid-cols-[110px_1fr_auto] items-baseline gap-2">
+                              <span className="font-bold text-gray-700 dark:text-gray-300">
+                                {language === 'MM' ? 'လက်ခ' : 'Craft Fee'}
+                              </span>
+                              <span className="text-gray-400 dark:text-gray-500 text-xs">—</span>
+                              <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
+                                {formatKyatMoney(mm.craftTotal)}
+                              </span>
+                            </div>
+
+                            {/* ကျောက်ဖိုး (only if > 0) */}
+                            {mm.stoneTotal > 0 && (
+                              <div className="grid grid-cols-[90px_1fr_auto] sm:grid-cols-[110px_1fr_auto] items-baseline gap-2">
+                                <span className="font-bold text-gray-700 dark:text-gray-300">
+                                  {language === 'MM' ? 'ကျောက်ဖိုး' : 'Stone'}
+                                </span>
+                                <span className="font-mono text-xs text-purple-600 dark:text-purple-400">
+                                  {mm.hasGemWeight
+                                    ? formatCompactKpy(
+                                        scannedItem.gemstone_weight_kyat || 0,
+                                        scannedItem.gemstone_weight_pae || 0,
+                                        scannedItem.gemstone_weight_yway || 0
+                                      )
+                                    : '—'}
+                                </span>
+                                <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
+                                  {formatKyatMoney(mm.stoneTotal)}
+                                </span>
+                              </div>
                             )}
-                          </span>
+                          </div>
+
+                          {/* စုစုပေါင်း (Total Weight + Boxed Total Price) */}
+                          <div className="pt-3 border-t-2 border-dashed border-amber-300/70 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm sm:text-base font-extrabold text-gray-900 dark:text-white">
+                                {language === 'MM' ? 'စုစုပေါင်း' : 'Total'}
+                              </span>
+                              <span className="text-xs sm:text-sm font-mono font-bold text-gray-700 dark:text-gray-300">
+                                {compactGoldKpy}
+                              </span>
+                            </div>
+
+                            <div className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500/15 to-yellow-500/15 border-2 border-amber-500 dark:border-amber-400 shadow-xs">
+                              <span className="text-lg sm:text-xl font-black font-mono text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                                {formatKyatMoney(mm.totalAmount)}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  (() => {
+                    const thaiLive = getThaiLivePricing(scannedItem);
+                    return (
+                      <div className="space-y-3">
+                        {/* 📈 Top Live Gold Rate Banner (ထိုင်းရွှေပေါက်ဈေး from Header Bar) */}
+                        <div className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-blue-500/15 via-sky-500/10 to-blue-500/15 border border-blue-400/50 dark:border-blue-700/60 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs font-extrabold text-blue-800 dark:text-blue-300">
+                            <TrendingUp className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                            <span>
+                              {language === 'MM'
+                                ? 'ယနေ့ ထိုင်းရွှေပေါက်ဈေး'
+                                : "Today's Thai Gold Rate"}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                            <span className="font-black text-blue-700 dark:text-blue-300">
+                              {formatBaht(thaiLive.thaiGoldBaht)}
+                            </span>
+                            <span className="text-[11px] text-gray-600 dark:text-gray-300">
+                              (~{formatKyatMoney(thaiLive.thaiMmkPerKyat)})
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-black/30 border border-blue-300/60 dark:border-blue-700/60 font-bold text-gray-800 dark:text-blue-200 text-[11px]">
+                              1฿ = {Number(thaiLive.bahtRate.toFixed(2)).toLocaleString()} MMK
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Thai Gold Layout */}
+                        <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-800 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
+                                {scannedItem.name_mm || scannedItem.name}
+                              </h2>
+                              <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyCode(scannedItem.barcode)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs font-mono font-bold text-gray-700 dark:text-gray-300 hover:border-amber-400"
+                                  title="Barcode ကူးယူမည်"
+                                >
+                                  <span>{scannedItem.barcode}</span>
+                                  {copiedCode ? (
+                                    <Check className="w-3 h-3 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="w-3 h-3 text-gray-400" />
+                                  )}
+                                </button>
+
+                                <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-semibold">
+                                  {getCategoryLabel(scannedItem.category)}
+                                </span>
+
+                                <span className="px-2 py-0.5 rounded-md bg-yellow-100 dark:bg-yellow-950/60 text-yellow-800 dark:text-yellow-300 text-xs font-bold">
+                                  {getPurityLabel(scannedItem.purity)}
+                                </span>
+
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-xs font-bold ${
+                                    scannedItem.status === 'IN_STOCK'
+                                      ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                                      : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                                  }`}
+                                >
+                                  {scannedItem.status === 'IN_STOCK' ? 'လက်ကျန်ရှိ (In Stock)' : scannedItem.status}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 💰 Highlighted Live Price Display */}
+                          <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-yellow-500/15 border border-amber-300/40 dark:border-amber-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider block">
+                                {language === 'MM' ? 'ယနေ့ခန့်မှန်းရောင်းဈေး (Selling Price)' : 'Estimated Selling Price'}
+                              </span>
+                              <div className="flex items-baseline gap-2 mt-0.5">
+                                <span className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+                                  {formatMMK(thaiLive.sellingMmk)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right sm:border-l sm:border-amber-200 dark:sm:border-amber-800 sm:pl-4">
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400 block">
+                                Thai Baht (฿)
+                              </span>
+                              <span className="text-base font-bold text-amber-700 dark:text-amber-300 font-mono">
+                                {formatBaht(thaiLive.sellingBaht)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ⚖️ Specifications Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 space-y-2">
+                            <div className="flex items-center gap-1.5 font-bold text-gray-800 dark:text-gray-200 pb-1 border-b border-gray-200 dark:border-gray-800">
+                              <Scale className="w-3.5 h-3.5 text-amber-500" />
+                              <span>{language === 'MM' ? 'အလေးချိန် အချက်အလက်' : 'Weight Details'}</span>
+                            </div>
+
+                            <div className="space-y-1.5 pt-1">
+                              {scannedItem.thai_weight_unit ? (
+                                <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
+                                  <span>ထိုင်းဂရမ် (Thai Grams):</span>
+                                  <span className="font-bold text-amber-600 dark:text-amber-400 font-mono">
+                                    {scannedItem.thai_weight_unit} g
+                                  </span>
+                                </div>
+                              ) : null}
+
+                              <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
+                                <span>စုစုပေါင်းအလေးချိန် (Gross):</span>
+                                <span className="font-bold text-gray-900 dark:text-white font-mono">
+                                  {renderKPY(
+                                    scannedItem.weight_kyat,
+                                    scannedItem.weight_pae,
+                                    scannedItem.weight_yway
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 space-y-2">
+                            <div className="flex items-center gap-1.5 font-bold text-gray-800 dark:text-gray-200 pb-1 border-b border-gray-200 dark:border-gray-800">
+                              <Coins className="w-3.5 h-3.5 text-amber-500" />
+                              <span>{language === 'MM' ? 'လက်ခ' : 'Craft Fee'}</span>
+                            </div>
+
+                            <div className="space-y-1.5 pt-1">
+                              <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
+                                <span>လက်ခ (Craft Fee):</span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                                  {formatMMK(thaiLive.craftTotalMmk)}
+                                  {thaiLive.craftTotalBaht > 0
+                                    ? ` (${formatBaht(thaiLive.craftTotalBaht)})`
+                                    : ''}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
 
                 {/* 🏷️ Barcode Tag Preview Section (Toggleable) */}
                 {showTagPreview && (
