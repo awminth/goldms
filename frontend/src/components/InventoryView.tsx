@@ -203,20 +203,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const summaryTableRef = useRef<HTMLTableElement>(null);
   const [summaryVLines, setSummaryVLines] = useState<number[]>([]);
 
-  const inventoryItemGrams = (item: InventoryItem): number => {
+  const inventoryItemWeights = (
+    item: InventoryItem
+  ): { grossGrams: number; gemGrams: number } => {
     const isThai = isThaiGoldClass(item.purity, item.item_type);
     const unit = Number(item.thai_weight_unit || 0);
-    if (isThai && unit > 0) return Number(unit.toFixed(3));
-    return Number(
+    if (isThai && unit > 0) {
+      return { grossGrams: Number(unit.toFixed(3)), gemGrams: 0 };
+    }
+    const grossGrams = Number(
       kpyToGrams(
         {
-          kyat: Number(item.net_weight_kyat || 0),
-          pae: Number(item.net_weight_pae || 0),
-          yway: Number(item.net_weight_yway || 0),
+          kyat: Number(item.weight_kyat || 0),
+          pae: Number(item.weight_pae || 0),
+          yway: Number(item.weight_yway || 0),
         },
         kyatToGrams
       ).toFixed(3)
     );
+    const gemGrams = Number(
+      kpyToGrams(
+        {
+          kyat: Number(item.gemstone_weight_kyat || 0),
+          pae: Number(item.gemstone_weight_pae || 0),
+          yway: Number(item.gemstone_weight_yway || 0),
+        },
+        kyatToGrams
+      ).toFixed(3)
+    );
+    return { grossGrams, gemGrams };
   };
 
   /**
@@ -225,6 +240,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
    * - dayIn (အဝင်): stocked in range
    * - dayOut (အထွက်): sold / shop-out / goldsmith send in range
    * - balance: opening + in − out
+   * Tracks both အထည်ချိန် (Gross Weight g) and ကျောက်ချိန် (Gemstone Weight g).
    */
   const inventoryDateSummary = useMemo(() => {
     let from = summaryFrom || todayISO();
@@ -236,20 +252,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
 
     type Stat = {
-      openingGrams: number;
       openingCount: number;
+      openingGrossGrams: number;
+      openingGemGrams: number;
       inCount: number;
-      inGrams: number;
+      inGrossGrams: number;
+      inGemGrams: number;
       outCount: number;
-      outGrams: number;
+      outGrossGrams: number;
+      outGemGrams: number;
     };
     const empty = (): Stat => ({
-      openingGrams: 0,
       openingCount: 0,
+      openingGrossGrams: 0,
+      openingGemGrams: 0,
       inCount: 0,
-      inGrams: 0,
+      inGrossGrams: 0,
+      inGemGrams: 0,
       outCount: 0,
-      outGrams: 0,
+      outGrossGrams: 0,
+      outGemGrams: 0,
     });
 
     const setupClasses = masterCategories
@@ -304,38 +326,59 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       return k;
     };
 
-    const addIn = (rawKey: string, grams: number, before: boolean) => {
+    const addIn = (
+      rawKey: string,
+      grossGrams: number,
+      gemGrams: number,
+      before: boolean
+    ) => {
       const key = ensureKey(rawKey);
-      const g = Number(grams) || 0;
+      const gg = Number(grossGrams) || 0;
+      const mg = Number(gemGrams) || 0;
       if (before) {
-        stats[key].openingGrams += g;
+        stats[key].openingGrossGrams += gg;
+        stats[key].openingGemGrams += mg;
         stats[key].openingCount += 1;
       } else {
         stats[key].inCount += 1;
-        stats[key].inGrams += g;
+        stats[key].inGrossGrams += gg;
+        stats[key].inGemGrams += mg;
       }
     };
 
-    const addOut = (rawKey: string, grams: number, before: boolean) => {
+    const addOut = (
+      rawKey: string,
+      grossGrams: number,
+      gemGrams: number,
+      before: boolean
+    ) => {
       const key = ensureKey(rawKey);
-      const g = Number(grams) || 0;
+      const gg = Number(grossGrams) || 0;
+      const mg = Number(gemGrams) || 0;
       if (before) {
-        stats[key].openingGrams -= g;
+        stats[key].openingGrossGrams -= gg;
+        stats[key].openingGemGrams -= mg;
         stats[key].openingCount -= 1;
       } else {
         stats[key].outCount += 1;
-        stats[key].outGrams += g;
+        stats[key].outGrossGrams += gg;
+        stats[key].outGemGrams += mg;
       }
     };
+
+    const inventoryById = new Map<string, InventoryItem>();
+    for (const item of inventory) {
+      inventoryById.set(item.id, item);
+    }
 
     // Stock-in movements from inventory created_at
     for (const item of inventory) {
       const day = toDayISO(item.created_at);
       if (!day) continue;
       const key = resolveGoldClassKey(item.purity, item.item_type);
-      const grams = inventoryItemGrams(item);
-      if (day < from) addIn(key, grams, true);
-      else if (day >= from && day <= to) addIn(key, grams, false);
+      const { grossGrams, gemGrams } = inventoryItemWeights(item);
+      if (day < from) addIn(key, grossGrams, gemGrams, true);
+      else if (day >= from && day <= to) addIn(key, grossGrams, gemGrams, false);
     }
 
     // Outflows from SALE / SHOP_OUT / EXCHANGE (new sold lines)
@@ -356,16 +399,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         const linkedId = String(line.item_id || '').trim();
         if (!linkedId) continue;
 
-        const key = resolveGoldClassKey(line.purity, line.item_type);
-        const isThai = line.item_type === 'THAI_GOLD' || line.purity === 'THAI_GOLD';
-        const unit = Number(line.thai_weight_unit || 0);
-        const grams =
-          isThai && unit > 0
-            ? Number(unit.toFixed(3))
+        const linkedInv = inventoryById.get(linkedId);
+        const key = resolveGoldClassKey(
+          linkedInv?.purity || line.purity,
+          linkedInv?.item_type || line.item_type
+        );
+        if (linkedInv) {
+          const { grossGrams, gemGrams } = inventoryItemWeights(linkedInv);
+          addOut(key, grossGrams, gemGrams, before);
+        } else {
+          const isThai = isThaiGoldClass(line.purity, line.item_type);
+          const unit = Number(line.thai_weight_unit || 0);
+          const grossGrams =
+            isThai && unit > 0
+              ? Number(unit.toFixed(3))
+              : Number(
+                  kpyToGrams(
+                    line.weight || line.net_weight || { kyat: 0, pae: 0, yway: 0 },
+                    kyatToGrams
+                  ).toFixed(3)
+                );
+          const gemGrams = isThai
+            ? 0
             : Number(
-                kpyToGrams(line.net_weight || { kyat: 0, pae: 0, yway: 0 }, kyatToGrams).toFixed(3)
+                kpyToGrams(
+                  line.gemstone_weight || { kyat: 0, pae: 0, yway: 0 },
+                  kyatToGrams
+                ).toFixed(3)
               );
-        addOut(key, grams, before);
+          addOut(key, grossGrams, gemGrams, before);
+        }
       }
     }
 
@@ -377,13 +440,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const before = day < from;
       const inRange = day >= from && day <= to;
       if (!before && !inRange) continue;
-      const key = resolveGoldClassKey(j.purity || j.source_purity, j.item_type);
-      const grams = Number(Number(j.source_grams || 0).toFixed(3));
-      if (grams <= 0 && j.inventory_item_id) {
-        const inv = inventory.find((i) => i.id === j.inventory_item_id);
-        addOut(key, inv ? inventoryItemGrams(inv) : 0, before);
+      const inv = j.inventory_item_id ? inventoryById.get(j.inventory_item_id) : undefined;
+      const key = resolveGoldClassKey(
+        inv?.purity || j.purity || j.source_purity,
+        inv?.item_type || j.item_type
+      );
+      if (inv) {
+        const { grossGrams, gemGrams } = inventoryItemWeights(inv);
+        addOut(key, grossGrams, gemGrams, before);
       } else {
-        addOut(key, grams, before);
+        const grams = Number(Number(j.source_grams || 0).toFixed(3));
+        addOut(key, grams, 0, before);
       }
     }
 
@@ -395,11 +462,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       .map((key) => {
         const meta = classMeta.get(key)!;
         const s = stats[key] || empty();
-        const openingGrams = Number(Math.max(0, s.openingGrams).toFixed(3));
+        const openingGrossGrams = Number(Math.max(0, s.openingGrossGrams).toFixed(3));
+        const openingGemGrams = Number(Math.max(0, s.openingGemGrams).toFixed(3));
         const openingCount = Math.max(0, s.openingCount);
-        const inGrams = Number(s.inGrams.toFixed(3));
-        const outGrams = Number(s.outGrams.toFixed(3));
-        const balanceGrams = Number(Math.max(0, openingGrams + inGrams - outGrams).toFixed(3));
+        const inGrossGrams = Number(s.inGrossGrams.toFixed(3));
+        const inGemGrams = Number(s.inGemGrams.toFixed(3));
+        const outGrossGrams = Number(s.outGrossGrams.toFixed(3));
+        const outGemGrams = Number(s.outGemGrams.toFixed(3));
+        const balanceGrossGrams = Number(
+          Math.max(0, openingGrossGrams + inGrossGrams - outGrossGrams).toFixed(3)
+        );
+        const balanceGemGrams = Number(
+          Math.max(0, openingGemGrams + inGemGrams - outGemGrams).toFixed(3)
+        );
         const balanceCount = Math.max(0, openingCount + s.inCount - s.outCount);
         return {
           key,
@@ -408,13 +483,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           badgeClass:
             'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 border border-amber-300 dark:border-amber-800',
           openingCount,
-          openingGrams,
+          openingGrossGrams,
+          openingGemGrams,
           inCount: s.inCount,
-          inGrams,
+          inGrossGrams,
+          inGemGrams,
           outCount: s.outCount,
-          outGrams,
+          outGrossGrams,
+          outGemGrams,
           balanceCount,
-          balanceGrams,
+          balanceGrossGrams,
+          balanceGemGrams,
         };
       })
       .filter(
@@ -423,33 +502,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           r.inCount > 0 ||
           r.outCount > 0 ||
           r.balanceCount > 0 ||
-          r.openingGrams > 0 ||
-          r.inGrams > 0 ||
-          r.outGrams > 0 ||
-          r.balanceGrams > 0
+          r.openingGrossGrams > 0 ||
+          r.inGrossGrams > 0 ||
+          r.outGrossGrams > 0 ||
+          r.balanceGrossGrams > 0
       );
 
     const totals = rows.reduce(
       (acc, r) => {
         acc.openingCount += r.openingCount;
-        acc.openingGrams += r.openingGrams;
+        acc.openingGrossGrams += r.openingGrossGrams;
+        acc.openingGemGrams += r.openingGemGrams;
         acc.inCount += r.inCount;
-        acc.inGrams += r.inGrams;
+        acc.inGrossGrams += r.inGrossGrams;
+        acc.inGemGrams += r.inGemGrams;
         acc.outCount += r.outCount;
-        acc.outGrams += r.outGrams;
+        acc.outGrossGrams += r.outGrossGrams;
+        acc.outGemGrams += r.outGemGrams;
         acc.balanceCount += r.balanceCount;
-        acc.balanceGrams += r.balanceGrams;
+        acc.balanceGrossGrams += r.balanceGrossGrams;
+        acc.balanceGemGrams += r.balanceGemGrams;
         return acc;
       },
       {
         openingCount: 0,
-        openingGrams: 0,
+        openingGrossGrams: 0,
+        openingGemGrams: 0,
         inCount: 0,
-        inGrams: 0,
+        inGrossGrams: 0,
+        inGemGrams: 0,
         outCount: 0,
-        outGrams: 0,
+        outGrossGrams: 0,
+        outGemGrams: 0,
         balanceCount: 0,
-        balanceGrams: 0,
+        balanceGrossGrams: 0,
+        balanceGemGrams: 0,
       }
     );
 
@@ -459,13 +546,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       rows,
       totals: {
         openingCount: totals.openingCount,
-        openingGrams: Number(totals.openingGrams.toFixed(3)),
+        openingGrossGrams: Number(totals.openingGrossGrams.toFixed(3)),
+        openingGemGrams: Number(totals.openingGemGrams.toFixed(3)),
         inCount: totals.inCount,
-        inGrams: Number(totals.inGrams.toFixed(3)),
+        inGrossGrams: Number(totals.inGrossGrams.toFixed(3)),
+        inGemGrams: Number(totals.inGemGrams.toFixed(3)),
         outCount: totals.outCount,
-        outGrams: Number(totals.outGrams.toFixed(3)),
+        outGrossGrams: Number(totals.outGrossGrams.toFixed(3)),
+        outGemGrams: Number(totals.outGemGrams.toFixed(3)),
         balanceCount: totals.balanceCount,
-        balanceGrams: Number(totals.balanceGrams.toFixed(3)),
+        balanceGrossGrams: Number(totals.balanceGrossGrams.toFixed(3)),
+        balanceGemGrams: Number(totals.balanceGemGrams.toFixed(3)),
       },
     };
   }, [
@@ -493,8 +584,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
       const cells = Array.from(row.querySelectorAll('th, td'));
       const isFooter = row.parentElement?.tagName === 'TFOOT';
-      // After: type | opening-g | in-g | out-g
-      const rightEdgeIndices = isFooter ? [0, 2, 4, 6] : [1, 3, 5, 7];
+      // After: type | opening-gem | in-gem | out-gem (3 cols per group: Qty, အထည်ချိန်, ကျောက်ချိန်)
+      const rightEdgeIndices = isFooter ? [0, 3, 6, 9] : [1, 4, 7, 10];
       const tableLeft = table.getBoundingClientRect().left;
       setSummaryVLines(
         rightEdgeIndices
@@ -1739,12 +1830,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <div className="font-mono text-amber-800 dark:text-amber-300 font-extrabold">
                 {language === 'MM' ? 'လက်ကျန်' : 'Balance'}:{' '}
                 {inventoryDateSummary.totals.balanceCount}{' '}
-                {language === 'MM' ? 'ခု' : 'pcs'} · {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
+                {language === 'MM' ? 'ခု' : 'pcs'} ·{' '}
+                {language === 'MM' ? 'အထည်' : 'Gross'}{' '}
+                {inventoryDateSummary.totals.balanceGrossGrams.toFixed(3)} g ·{' '}
+                {language === 'MM' ? 'ကျောက်' : 'Gem'}{' '}
+                {inventoryDateSummary.totals.balanceGemGrams.toFixed(3)} g
               </div>
             </div>
 
             <div className="overflow-x-auto">
-              <div className="relative min-w-[720px]">
+              <div className="relative min-w-[1020px]">
                 {/* Full-height continuous vertical lines (through ကာလစုစုပေါင်း) */}
                 {summaryVLines.map((x) => (
                   <div
@@ -1760,56 +1855,70 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 >
                   <thead>
                     <tr className="bg-amber-100/70 dark:bg-amber-950/40 text-amber-900/80 dark:text-amber-200/80 border-b border-amber-200 dark:border-amber-800/40">
-                      <th className="px-3 py-2.5 font-bold w-10" rowSpan={2}>
+                      <th className="px-2.5 py-2.5 font-bold w-10" rowSpan={2}>
                         စဉ်
                       </th>
-                      <th className="px-3 py-2.5 font-bold" rowSpan={2}>
+                      <th className="px-2.5 py-2.5 font-bold" rowSpan={2}>
                         {language === 'MM' ? 'ရွှေအမျိုးအစား' : 'Gold Type'}
                       </th>
-                      <th className="px-3 py-2 font-bold text-center" colSpan={2}>
+                      <th className="px-2.5 py-2 font-bold text-center" colSpan={3}>
                         {language === 'MM' ? 'ဆိုင်ရှိ (မတိုင်မီ)' : 'Opening'}
                       </th>
                       <th
-                        className="px-3 py-2 font-bold text-center text-emerald-700 dark:text-emerald-400"
-                        colSpan={2}
+                        className="px-2.5 py-2 font-bold text-center text-emerald-700 dark:text-emerald-400"
+                        colSpan={3}
                       >
                         {language === 'MM' ? 'အဝင်' : 'In'}
                       </th>
                       <th
-                        className="px-3 py-2 font-bold text-center text-rose-700 dark:text-rose-400"
-                        colSpan={2}
+                        className="px-2.5 py-2 font-bold text-center text-rose-700 dark:text-rose-400"
+                        colSpan={3}
                       >
                         {language === 'MM' ? 'အထွက်' : 'Out'}
                       </th>
                       <th
-                        className="px-3 py-2 font-bold text-center text-amber-800 dark:text-amber-300"
-                        colSpan={2}
+                        className="px-2.5 py-2 font-bold text-center text-amber-800 dark:text-amber-300"
+                        colSpan={3}
                       >
                         {language === 'MM' ? 'လက်ကျန်' : 'Balance'}
                       </th>
                     </tr>
-                    <tr className="bg-amber-100/50 dark:bg-amber-950/30 text-amber-900/70 dark:text-amber-200/70 border-b border-amber-200 dark:border-amber-800/40">
-                      <th className="px-3 py-1.5 font-bold text-right">
+                    <tr className="bg-amber-100/50 dark:bg-amber-950/30 text-amber-900/70 dark:text-amber-200/70 border-b border-amber-200 dark:border-amber-800/40 whitespace-nowrap">
+                      <th className="px-2.5 py-1.5 font-bold text-right">
                         {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
                       </th>
-                      <th className="px-3 py-1.5 font-bold text-right">Gram</th>
-                      <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                      <th className="px-2.5 py-1.5 font-bold text-right">
+                        {language === 'MM' ? 'အထည်ချိန် (g)' : 'Gross (g)'}
+                      </th>
+                      <th className="px-2.5 py-1.5 font-bold text-right text-purple-700 dark:text-purple-400">
+                        {language === 'MM' ? 'ကျောက်ချိန် (g)' : 'Gem (g)'}
+                      </th>
+                      <th className="px-2.5 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
                         {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
                       </th>
-                      <th className="px-3 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
-                        Gram
+                      <th className="px-2.5 py-1.5 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                        {language === 'MM' ? 'အထည်ချိန် (g)' : 'Gross (g)'}
                       </th>
-                      <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                      <th className="px-2.5 py-1.5 font-bold text-right text-purple-700 dark:text-purple-400">
+                        {language === 'MM' ? 'ကျောက်ချိန် (g)' : 'Gem (g)'}
+                      </th>
+                      <th className="px-2.5 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
                         {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
                       </th>
-                      <th className="px-3 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
-                        Gram
+                      <th className="px-2.5 py-1.5 font-bold text-right text-rose-700 dark:text-rose-400">
+                        {language === 'MM' ? 'အထည်ချိန် (g)' : 'Gross (g)'}
                       </th>
-                      <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                      <th className="px-2.5 py-1.5 font-bold text-right text-purple-700 dark:text-purple-400">
+                        {language === 'MM' ? 'ကျောက်ချိန် (g)' : 'Gem (g)'}
+                      </th>
+                      <th className="px-2.5 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
                         {language === 'MM' ? 'အရေအတွက်' : 'Qty'}
                       </th>
-                      <th className="px-3 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
-                        Gram
+                      <th className="px-2.5 py-1.5 font-bold text-right text-amber-800 dark:text-amber-300">
+                        {language === 'MM' ? 'အထည်ချိန် (g)' : 'Gross (g)'}
+                      </th>
+                      <th className="px-2.5 py-1.5 font-bold text-right text-purple-700 dark:text-purple-400">
+                        {language === 'MM' ? 'ကျောက်ချိန် (g)' : 'Gem (g)'}
                       </th>
                     </tr>
                   </thead>
@@ -1817,71 +1926,95 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     {inventoryDateSummary.rows.map((cat, idx) => (
                       <tr
                         key={cat.key}
-                        className="hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition border-b border-amber-100 dark:border-amber-900/30"
+                        className="hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition border-b border-amber-100 dark:border-amber-900/30 whitespace-nowrap"
                       >
-                        <td className="px-3 py-2.5 font-mono text-amber-700/50 dark:text-amber-400/50">
+                        <td className="px-2.5 py-2.5 font-mono text-amber-700/50 dark:text-amber-400/50">
                           {idx + 1}
                         </td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">
+                        <td className="px-2.5 py-2.5 whitespace-nowrap">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${cat.badgeClass}`}>
                             {language === 'MM' ? cat.nameMm : cat.nameEn}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        <td className="px-2.5 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
                           {cat.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
-                          {cat.openingGrams.toFixed(3)} g
+                        <td className="px-2.5 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                          {cat.openingGrossGrams.toFixed(3)} g
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                          {cat.openingGemGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-2.5 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
                           {cat.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                          {cat.inGrams.toFixed(3)} g
+                        <td className="px-2.5 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          {cat.inGrossGrams.toFixed(3)} g
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                          {cat.inGemGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-2.5 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
                           {cat.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
-                          {cat.outGrams.toFixed(3)} g
+                        <td className="px-2.5 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                          {cat.outGrossGrams.toFixed(3)} g
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                        <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                          {cat.outGemGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-2.5 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
                           {cat.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
-                          {cat.balanceGrams.toFixed(3)} g
+                        <td className="px-2.5 py-2.5 text-right font-mono font-extrabold text-amber-800 dark:text-amber-300">
+                          {cat.balanceGrossGrams.toFixed(3)} g
+                        </td>
+                        <td className="px-2.5 py-2.5 text-right font-mono font-extrabold text-purple-700 dark:text-purple-400">
+                          {cat.balanceGemGrams.toFixed(3)} g
                         </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t border-amber-200 dark:border-amber-800/40 font-bold">
-                      <td className="px-3 py-2.5 text-amber-950 dark:text-amber-100" colSpan={2}>
+                    <tr className="bg-amber-100/80 dark:bg-amber-950/50 border-t border-amber-200 dark:border-amber-800/40 font-bold whitespace-nowrap">
+                      <td className="px-2.5 py-2.5 text-amber-950 dark:text-amber-100" colSpan={2}>
                         {language === 'MM' ? 'ကာလ စုစုပေါင်း' : 'Period total'}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                      <td className="px-2.5 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
                         {inventoryDateSummary.totals.openingCount} {language === 'MM' ? 'ခု' : 'pcs'}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
-                        {inventoryDateSummary.totals.openingGrams.toFixed(3)} g
+                      <td className="px-2.5 py-2.5 text-right font-mono text-gray-800 dark:text-gray-100">
+                        {inventoryDateSummary.totals.openingGrossGrams.toFixed(3)} g
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                      <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                        {inventoryDateSummary.totals.openingGemGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-2.5 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
                         {inventoryDateSummary.totals.inCount} {language === 'MM' ? 'ခု' : 'pcs'}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                        {inventoryDateSummary.totals.inGrams.toFixed(3)} g
+                      <td className="px-2.5 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {inventoryDateSummary.totals.inGrossGrams.toFixed(3)} g
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                      <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                        {inventoryDateSummary.totals.inGemGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-2.5 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
                         {inventoryDateSummary.totals.outCount} {language === 'MM' ? 'ခု' : 'pcs'}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
-                        {inventoryDateSummary.totals.outGrams.toFixed(3)} g
+                      <td className="px-2.5 py-2.5 text-right font-mono text-rose-700 dark:text-rose-400">
+                        {inventoryDateSummary.totals.outGrossGrams.toFixed(3)} g
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                      <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                        {inventoryDateSummary.totals.outGemGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-2.5 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
                         {inventoryDateSummary.totals.balanceCount} {language === 'MM' ? 'ခု' : 'pcs'}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
-                        {inventoryDateSummary.totals.balanceGrams.toFixed(3)} g
+                      <td className="px-2.5 py-2.5 text-right font-mono text-amber-800 dark:text-amber-300">
+                        {inventoryDateSummary.totals.balanceGrossGrams.toFixed(3)} g
+                      </td>
+                      <td className="px-2.5 py-2.5 text-right font-mono text-purple-700 dark:text-purple-400">
+                        {inventoryDateSummary.totals.balanceGemGrams.toFixed(3)} g
                       </td>
                     </tr>
                   </tfoot>
