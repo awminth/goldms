@@ -2404,7 +2404,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <div className="flex flex-wrap items-end gap-y-2">
                         <div className="w-[7.5rem]">
                           <label className="text-[11px] text-gray-500 block mb-0.5">Gram</label>
-                          <NumberInput min={0} step={0.001} value={formGemGrams} onChange={applyGemFromGrams} className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]" />
+                          <NumberInput tabIndex={-1} min={0} step={0.001} value={formGemGrams} onChange={applyGemFromGrams} className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border border-[#D4AF37]/50 bg-white dark:bg-[#1A1A1A]" />
                         </div>
                         <div className="hidden sm:block w-8 shrink-0" aria-hidden />
                         <div className="hidden sm:block w-px self-stretch bg-gray-300 dark:bg-gray-600 my-1" />
@@ -2420,7 +2420,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           </div>
                           <div className="w-[4.5rem]">
                             <label className="text-[11px] text-gray-500 block mb-0.5">ရွေး</label>
-                            <NumberInput tabIndex={-1} min={0} step={0.1} value={formGemYway} onChange={(v) => applyGemFromKpy({ kyat: formGemKyat, pae: formGemPae, yway: v })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
+                            <NumberInput min={0} step={0.1} value={formGemYway} onChange={(v) => applyGemFromKpy({ kyat: formGemKyat, pae: formGemPae, yway: v })} className="w-full px-1.5 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1A1A1A]" />
                           </div>
                         </div>
                       </div>

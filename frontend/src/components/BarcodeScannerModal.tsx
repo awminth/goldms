@@ -539,20 +539,33 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
     const kyatToGrams = effectiveShopSettings?.kyat_to_grams || KYAT_TO_GRAMS;
 
     // Physical gold weight = Gross - Gemstone (before wastage)
-    const grossYway = kpyToYway(item.weight_kyat, item.weight_pae, item.weight_yway);
-    const gemYway = kpyToYway(
-      item.gemstone_weight_kyat || 0,
-      item.gemstone_weight_pae || 0,
-      item.gemstone_weight_yway || 0
-    );
+    const grossKpy = {
+      kyat: Number(item.weight_kyat || 0),
+      pae: Number(item.weight_pae || 0),
+      yway: Number(item.weight_yway || 0),
+    };
+    const gemKpy = {
+      kyat: Number(item.gemstone_weight_kyat || 0),
+      pae: Number(item.gemstone_weight_pae || 0),
+      yway: Number(item.gemstone_weight_yway || 0),
+    };
+    const grossYway = kpyToYway(grossKpy.kyat, grossKpy.pae, grossKpy.yway);
+    const gemYway = kpyToYway(gemKpy.kyat, gemKpy.pae, gemKpy.yway);
     const goldOnlyYway = Math.max(0, grossYway - gemYway);
     const goldOnlyKpy = ywayToKpy(goldOnlyYway);
-    const goldOnlyGrams = kpyToGrams(goldOnlyKpy, kyatToGrams);
+    const grossGrams = kpyToGrams(grossKpy, kyatToGrams);
+    const gemGrams = gemYway > 0 ? kpyToGrams(gemKpy, kyatToGrams) : 0;
+    const goldOnlyGrams =
+      gemYway > 0
+        ? Number(Math.max(0, grossGrams - gemGrams).toFixed(3))
+        : kpyToGrams(goldOnlyKpy, kyatToGrams);
 
     // Wastage (အလျော့တွက်)
     const wastePae = Number(item.deduction_pae || 0);
     const wasteYway = Number(item.deduction_yway || 0);
     const totalWasteYway = wastePae * PAE_TO_YWAY + wasteYway;
+    const wastageGrams =
+      totalWasteYway > 0 ? kpyToGrams(ywayToKpy(totalWasteYway), kyatToGrams) : 0;
     const wasteParts: string[] = [];
     if (wastePae > 0) wasteParts.push(`${wastePae} ပဲ`);
     if (wasteYway > 0 || wastePae === 0) {
@@ -591,11 +604,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
       Number(item.stone_price || 0) + Number(item.stone_profit_price || 0);
     const totalAmount = goldOnlyAmount + wastageAmount + craftTotal + stoneTotal;
 
+    const totalWeightKpy = ywayToKpy(goldOnlyYway + totalWasteYway);
+
     return {
       meelinRate: pure16,
       effectiveRate,
       goldOnlyKpy,
+      totalWeightKpy,
+      grossGrams,
+      gemGrams,
       goldOnlyGrams,
+      wastageGrams,
       goldOnlyAmount,
       wastageLabel,
       wastageAmount,
@@ -958,11 +977,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                 {!isThaiGoldClass(scannedItem.purity, scannedItem.item_type) ? (
                   (() => {
                     const mm = getMyanmarScannedBreakdown(scannedItem);
-                    const compactGoldKpy = formatCompactKpy(
-                      mm.goldOnlyKpy.kyat,
-                      mm.goldOnlyKpy.pae,
-                      mm.goldOnlyKpy.yway
-                    );
                     const purityName = getPurityLabel(scannedItem.purity);
                     const isMeelin =
                       String(scannedItem.purity || '').toUpperCase() === 'MEELIN';
@@ -1036,7 +1050,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                             </div>
                           </div>
 
-                          {/* Line-by-line Breakdown: ရွှေချိန် / အလျော့တွက် / လက်ခ */}
+                          {/* Line-by-line Breakdown (Grams only): ရွှေချိန် / အလျော့တွက် / လက်ခ / ကျောက်ဖိုး */}
                           <div className="space-y-2.5 text-sm">
                             {/* ရွှေချိန် */}
                             <div className="grid grid-cols-[90px_1fr_auto] sm:grid-cols-[110px_1fr_auto] items-baseline gap-2">
@@ -1044,7 +1058,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                                 {language === 'MM' ? 'ရွှေချိန်' : 'Gold Weight'}
                               </span>
                               <span className="font-mono font-semibold text-gray-900 dark:text-gray-100 text-xs sm:text-sm">
-                                {mm.goldOnlyGrams.toFixed(3)} ({compactGoldKpy})
+                                {mm.goldOnlyGrams.toFixed(3)} g
                               </span>
                               <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
                                 {formatKyatMoney(mm.goldOnlyAmount)}
@@ -1057,7 +1071,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                                 {language === 'MM' ? 'အလျော့တွက်' : 'Wastage'}
                               </span>
                               <span className="font-mono font-semibold text-gray-900 dark:text-gray-100 text-xs sm:text-sm">
-                                {mm.wastageLabel}
+                                {mm.wastageGrams.toFixed(3)} g
                               </span>
                               <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
                                 {formatKyatMoney(mm.wastageAmount)}
@@ -1075,20 +1089,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                               </span>
                             </div>
 
-                            {/* ကျောက်ဖိုး (only if > 0) */}
-                            {mm.stoneTotal > 0 && (
+                            {/* ကျောက်ဖိုး (only if > 0 or has gem weight) */}
+                            {(mm.stoneTotal > 0 || mm.hasGemWeight) && (
                               <div className="grid grid-cols-[90px_1fr_auto] sm:grid-cols-[110px_1fr_auto] items-baseline gap-2">
                                 <span className="font-bold text-gray-700 dark:text-gray-300">
                                   {language === 'MM' ? 'ကျောက်ဖိုး' : 'Stone'}
                                 </span>
-                                <span className="font-mono text-xs text-purple-600 dark:text-purple-400">
-                                  {mm.hasGemWeight
-                                    ? formatCompactKpy(
-                                        scannedItem.gemstone_weight_kyat || 0,
-                                        scannedItem.gemstone_weight_pae || 0,
-                                        scannedItem.gemstone_weight_yway || 0
-                                      )
-                                    : '—'}
+                                <span className="font-mono font-semibold text-xs sm:text-sm text-purple-600 dark:text-purple-400">
+                                  {mm.hasGemWeight ? `${mm.gemGrams.toFixed(3)} g` : '—'}
                                 </span>
                                 <span className="font-mono font-bold text-gray-900 dark:text-white text-right whitespace-nowrap">
                                   {formatKyatMoney(mm.stoneTotal)}
@@ -1097,14 +1105,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onNavi
                             )}
                           </div>
 
-                          {/* စုစုပေါင်း (Total Weight + Boxed Total Price) */}
+                          {/* စုစုပေါင်း (Gross Weight in grams + Boxed Total Price) */}
                           <div className="pt-3 border-t-2 border-dashed border-amber-300/70 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-3">
                               <span className="text-sm sm:text-base font-extrabold text-gray-900 dark:text-white">
                                 {language === 'MM' ? 'စုစုပေါင်း' : 'Total'}
                               </span>
                               <span className="text-xs sm:text-sm font-mono font-bold text-gray-700 dark:text-gray-300">
-                                {compactGoldKpy}
+                                {mm.grossGrams.toFixed(3)} g
                               </span>
                             </div>
 
